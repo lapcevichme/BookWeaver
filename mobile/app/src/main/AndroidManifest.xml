@@ -34,7 +34,7 @@
         android:theme="@style/Theme.BookWeaver">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".presentation.ui.main.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.BookWeaver">
             <intent-filter>
@@ -45,14 +45,14 @@
 
         <!-- Сервис для показа уведомления о статусе -->
         <service
-            android:name=".service.ConnectionService"
+            android:name=".presentation.service.ConnectionService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
         <!-- Ресивер для кнопки "Отключиться" в уведомлении -->
         <receiver
-            android:name=".service.DisconnectReceiver"
+            android:name=".presentation.service.DisconnectReceiver"
             android:enabled="true"
             android:exported="false" />
 

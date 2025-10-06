@@ -1,9 +1,9 @@
-package com.lapcevichme.bookweaver
+package com.lapcevichme.bookweaver.presentation.service
 
 import android.app.Application
 import android.content.Intent
-import com.lapcevichme.bookweaver.service.ConnectionService
-import com.lapcevichme.network.ServerRepository
+import com.lapcevichme.bookweaver.domain.usecase.connection.ManageConnectionStatusUseCase
+import com.lapcevichme.bookweaver.domain.usecase.connection.ServiceAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,25 +13,24 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class ConnectionManager @Inject constructor(
+class ServiceController @Inject constructor(
     private val application: Application,
-    private val serverRepository: ServerRepository
+    private val manageConnectionStatusUseCase: ManageConnectionStatusUseCase // Инжектируем UseCase
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     init {
-        observeConnectionStatus()
+        observeServiceActions()
     }
 
-    private fun observeConnectionStatus() {
+    private fun observeServiceActions() {
         scope.launch {
-            serverRepository.connectionStatus.collectLatest { status ->
-                if (status.startsWith("Подключено")) {
-                    startService(status)
-                } else if (status == "Получение аудио...") {
-                    updateServiceStatus(status)
-                } else {
-                    stopService()
+            // Просто слушаем команды от UseCase и выполняем их
+            manageConnectionStatusUseCase.getServiceActions().collectLatest { action ->
+                when (action) {
+                    is ServiceAction.Start -> startService(action.status)
+                    is ServiceAction.Update -> updateServiceStatus(action.status)
+                    is ServiceAction.Stop -> stopService()
                 }
             }
         }
@@ -60,4 +59,3 @@ class ConnectionManager @Inject constructor(
         application.startService(intent)
     }
 }
-

@@ -1,25 +1,33 @@
 package com.lapcevichme.network
 
-import android.net.Uri
+import com.lapcevichme.bookweaver.domain.repository.IServerRepository
 import kotlinx.coroutines.flow.StateFlow
+import okio.ByteString
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * The single source of truth for network operations.
- * This is the public API of the :network module.
- * It hides the implementation details of NsdHelper and WebSocketClient.
+ * Финальная, "глупая" версия репозитория.
+ * Предоставляет только базовые функции для работы с сетью.
+ * Ничего не знает о книгах, аудио или бизнес-логике приложения.
  */
 @Singleton
 class ServerRepository @Inject constructor(
     private val nsdHelper: NsdHelper,
     private val webSocketClient: WebSocketClient
-) {
-    val connectionStatus: StateFlow<String> = webSocketClient.connectionStatus
-    val receivedAudio: StateFlow<Uri?> = webSocketClient.audioFileUri
-    val logs: StateFlow<List<String>> = webSocketClient.logs
+) : IServerRepository {
+    // --- ПУБЛИЧНОЕ API БИБЛИОТЕКИ ---
 
-    fun findAndConnectToServer(fingerprint: String) {
+    // Статус соединения
+    override val connectionStatus: StateFlow<String> = webSocketClient.connectionStatus
+    override val logs: StateFlow<List<String>> = webSocketClient.logs
+    override val incomingMessages: StateFlow<String> = webSocketClient.incomingMessages as StateFlow<String>
+    override val incomingBytes: StateFlow<ByteString> = webSocketClient.incomingBytes as StateFlow<ByteString>
+
+    /**
+     * Начать поиск и подключение к серверу.
+     */
+    override fun findAndConnectToServer(fingerprint: String) {
         nsdHelper.discoverServices(
             serviceType = "_bookweaver._tcp.",
             onServiceFound = { serviceInfo ->
@@ -27,22 +35,23 @@ class ServerRepository @Inject constructor(
                 webSocketClient.connect(host, serviceInfo.port, fingerprint)
             },
             onDiscoveryStopped = {
-                if (connectionStatus.value == "Не подключено") {
-                    // Optionally log that discovery stopped without finding anything
-                }
+                // ...
             }
         )
     }
 
-    fun requestAudioFile(fileName: String) {
-        webSocketClient.requestAudioFile(fileName)
+    /**
+     * Отправить универсальное текстовое сообщение на сервер.
+     */
+    override fun sendMessage(message: String) {
+        webSocketClient.sendMessage(message)
     }
 
-    fun clearAudioFileUri() {
-        webSocketClient.clearAudioFileUri()
-    }
-
-    fun disconnect() {
+    /**
+     * Разорвать соединение.
+     */
+    override fun disconnect() {
         webSocketClient.disconnect()
     }
 }
+

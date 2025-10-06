@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.service
+package com.lapcevichme.bookweaver.presentation.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

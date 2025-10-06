@@ -68,7 +68,13 @@ dependencies {
 
     implementation(libs.kotlinx.serialization.json)
 
+    implementation(libs.okhttp)
     // DI
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
+    // Icons
+    implementation("androidx.compose.material:material-icons-core:1.7.8")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+
 }
