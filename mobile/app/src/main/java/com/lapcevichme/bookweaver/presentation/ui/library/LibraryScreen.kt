@@ -34,7 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.lapcevichme.bookweaver.domain.model.UiBook
+import com.lapcevichme.bookweaver.UiBook
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

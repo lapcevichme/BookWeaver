@@ -3,7 +3,7 @@ package com.lapcevichme.bookweaver.presentation.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.lapcevichme.network.ServerRepository
+import com.lapcevichme.bookweaver.data.ServerRepositoryImpl
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,7 +14,7 @@ import javax.inject.Inject
 class DisconnectReceiver : BroadcastReceiver() {
 
     @Inject
-    lateinit var serverRepository: ServerRepository
+    lateinit var serverRepositoryImpl: ServerRepositoryImpl
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
@@ -23,7 +23,7 @@ class DisconnectReceiver : BroadcastReceiver() {
             val pendingResult = goAsync()
             scope.launch {
                 try {
-                    serverRepository.disconnect()
+                    serverRepositoryImpl.disconnect()
                 } finally {
                     pendingResult.finish()
                 }

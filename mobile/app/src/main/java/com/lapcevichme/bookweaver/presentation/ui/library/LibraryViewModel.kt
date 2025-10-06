@@ -3,9 +3,9 @@ package com.lapcevichme.bookweaver.presentation.ui.library
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaver.domain.model.UiBook
-import com.lapcevichme.bookweaver.domain.model.toUiBook
-import com.lapcevichme.bookweaver.domain.usecase.audio.GetAudioUriUseCase
+import com.lapcevichme.bookweaver.UiBook
+import com.lapcevichme.bookweaver.toUiBook
+import com.lapcevichme.bookweaver.domain.usecase.audio.GetAudioSourceUseCase
 import com.lapcevichme.bookweaver.domain.usecase.audio.RequestAudioUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetBooksUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,20 +24,25 @@ data class LibraryUiState(
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     getBooksUseCase: GetBooksUseCase,
-    getAudioUriUseCase: GetAudioUriUseCase,
+    getAudioSourceUseCase: GetAudioSourceUseCase,
     private val requestAudioUseCase: RequestAudioUseCase,
 //    private val clearAudioUseCase: ClearAudioUseCase // Добавим этот use-case
 ) : ViewModel() {
 
     val uiState: StateFlow<LibraryUiState> = combine(
-        getBooksUseCase(), // Вызываем use-кейс как функцию
-        getAudioUriUseCase(), // И этот тоже
-    ) { domainBooks, audioUri ->
+        getBooksUseCase(),
+        getAudioSourceUseCase(),
+    ) { domainBooks, audioUriString -> // 1. Переименуем переменную для ясности
         val uiBooks = domainBooks.map { it.toUiBook() }
+
+        // 2. Вот и наше преобразование! Парсим String в Uri.
+        // Если audioUriString не null, он будет распарсен, иначе останется null.
+        val readyToPlayAudioUri = audioUriString?.let { Uri.parse(it) }
+
         LibraryUiState(
             isLoading = uiBooks.isEmpty(),
             books = uiBooks,
-            readyToPlayAudioUri = audioUri
+            readyToPlayAudioUri = readyToPlayAudioUri // 3. Теперь типы совпадают (Uri? = Uri?)
         )
     }.stateIn(
         scope = viewModelScope,

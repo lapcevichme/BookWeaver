@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "BookWeaver"
 include(":app")
-include(":network")
+include(":domain")
+include(":data")
