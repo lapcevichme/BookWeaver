@@ -1,0 +1,39 @@
+# 1. IDE / СБОРКА / ГРАДИЕНТ
+.idea
+*.iml
+.kotlin
+.gradle
+**/build/
+/target/
+/dist/
+/out/
+
+# 2. ЛОКАЛЬНЫЕ И СИСТЕМНЫЕ ФАЙЛЫ
+.DS_Store
+local.properties
+xcuserdata
+captures
+*.log
+/logs/
+/temp/
+
+# 3. ФАЙЛЫ СЕКРЕТОВ И КОНФИГУРАЦИИ
+# Ключи и сертификаты
+keystore.bks
+keystore_encrypted.dat
+
+# Конфигурация
+server.properties
+
+# 4. МЕДИА И БОЛЬШИЕ ФАЙЛЫ
+shared_music/
+
+# 5. KOTLIN NATIVE / XCODE (для KMP-проектов)
+.externalNativeBuild
+.cxx
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+**/xcshareddata/WorkspaceSettings.xcsettings
