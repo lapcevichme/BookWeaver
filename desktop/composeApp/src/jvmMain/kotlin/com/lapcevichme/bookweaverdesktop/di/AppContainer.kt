@@ -4,6 +4,7 @@ import com.lapcevichme.bookweaverdesktop.backend.ApiClient
 import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
 import com.lapcevichme.bookweaverdesktop.config.ConfigManager
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
+import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -15,6 +16,8 @@ import kotlinx.serialization.json.Json
  * Создает и хранит синглтоны наших сервисов.
  */
 class AppContainer {
+    private val settingsManager = SettingsManager()
+    private val appSettings = settingsManager.loadSettings()
 
     // --- WebSocket Server ---
     val serverManager = ServerManager
@@ -33,8 +36,8 @@ class AppContainer {
 
     val apiClient = ApiClient(httpClient)
 
-    val backendProcessManager = BackendProcessManager()
+    val backendProcessManager = BackendProcessManager(settings = appSettings)
 
-    val configManager = ConfigManager()
+    val configManager = ConfigManager(settings = appSettings)
 }
 

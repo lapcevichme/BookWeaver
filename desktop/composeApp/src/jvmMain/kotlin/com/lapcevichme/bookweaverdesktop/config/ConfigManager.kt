@@ -1,5 +1,6 @@
 package com.lapcevichme.bookweaverdesktop.config
 
+import com.lapcevichme.bookweaverdesktop.model.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -8,10 +9,8 @@ import java.io.File
  * Сервис для управления файлами конфигурации бэкенда.
  * Позволяет асинхронно читать и записывать содержимое файла config.py.
  */
-class ConfigManager {
-    // TODO : динамически делать это как-то
-    private val configFilePath = "/home/lapcevichme/PycharmProjects/BookWeaver/config.py"
-    private val configFile = File(configFilePath)
+class ConfigManager(settings: AppSettings) {
+    private val configFile = File(settings.configPath)
 
     /**
      * Асинхронно читает весь контент файла config.py.
@@ -19,7 +18,7 @@ class ConfigManager {
      */
     suspend fun loadConfigContent(): String = withContext(Dispatchers.IO) {
         if (!configFile.exists()) {
-            return@withContext "❌ Файл конфигурации не найден по пути: $configFilePath"
+            return@withContext "❌ Файл конфигурации не найден по пути: ${configFile.absolutePath}"
         }
         try {
             configFile.readText(Charsets.UTF_8)
@@ -35,14 +34,15 @@ class ConfigManager {
      */
     suspend fun saveConfigContent(content: String): Boolean = withContext(Dispatchers.IO) {
         if (!configFile.exists()) {
-            println("ERROR: Config file not found at $configFilePath")
+            println("ERROR: Config file not found at ${configFile.absolutePath}")
             return@withContext false
         }
         try {
             configFile.writeText(content, Charsets.UTF_8)
             true
         } catch (e: Exception) {
-            println("ERROR: Failed to write config file: ${e.message}")
+            println("ERROR saving config file: ${e.message}")
+            e.printStackTrace()
             false
         }
     }

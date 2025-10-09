@@ -1,14 +1,14 @@
 package com.lapcevichme.bookweaverdesktop.backend
 
+import com.lapcevichme.bookweaverdesktop.model.AppSettings
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
-import java.nio.file.Paths
 
-class BackendProcessManager {
+class BackendProcessManager(private val settings: AppSettings) {
 
     sealed class State {
         object STOPPED : State()
@@ -36,68 +36,63 @@ class BackendProcessManager {
         addLog("Attempting to start Python backend server...")
 
         try {
-            val pythonExecutable = "/home/lapcevichme/PycharmProjects/parsers/.venv/bin/python"
-
-            // ПУТЬ к корневой папке вашего Python-проекта (где лежит api_server.py)
-            val workingDirectoryPath = "/home/lapcevichme/PycharmProjects/BookWeaver"
+            // Используем пути из настроек вместо хардкода
+            val pythonExecutable = settings.pythonExecutablePath
+            val workingDirectoryPath = settings.backendWorkingDirectory
             val apiServerFile = "api_server.py"
 
-            val workingDirectory = File(workingDirectoryPath)
-            val fullScriptPath = Paths.get(workingDirectoryPath, apiServerFile).toString()
-
-            // Проверка на существование файлов перед запуском
-            if (!File(pythonExecutable).exists()) {
-                val errorMsg = "Python executable not found at: $pythonExecutable"
-                addLog("❌ $errorMsg")
-                _state.value = State.FAILED(errorMsg)
-                return
-            }
-            if (!workingDirectory.isDirectory) {
-                val errorMsg = "Working directory not found: $workingDirectoryPath"
-                addLog("❌ $errorMsg")
+            if (pythonExecutable.isBlank() || workingDirectoryPath.isBlank() || "path/to" in pythonExecutable) {
+                val errorMsg = "Python executable or working directory is not configured. Please check settings.properties."
+                addLog("❌ ERROR: $errorMsg")
                 _state.value = State.FAILED(errorMsg)
                 return
             }
 
-            addLog("Executing command: $pythonExecutable $fullScriptPath")
-
-            val command = listOf(pythonExecutable, fullScriptPath)
-
-            val processBuilder = ProcessBuilder(command)
-                .directory(workingDirectory)
-                .redirectErrorStream(true)
-
-            // Запуск процесса в потоке IO, без блокировки основного потока
-            val newProcess = withContext(Dispatchers.IO) {
-                processBuilder.start()
+            val workingDir = File(workingDirectoryPath)
+            if (!workingDir.isDirectory) {
+                val errorMsg = "Working directory does not exist or is not a directory: $workingDirectoryPath"
+                addLog("❌ ERROR: $errorMsg")
+                _state.value = State.FAILED(errorMsg)
+                return
             }
-            process = newProcess
 
-            // Запуск чтения логов в отдельной корутине
-            logJob = scope.launch { readLogs() }
+            val processBuilder = ProcessBuilder(
+                pythonExecutable,
+                "-m",
+                "uvicorn",
+                "api_server:app",
+                "--host", "127.0.0.1",
+                "--port", "8000"
+            )
+            processBuilder.directory(workingDir)
+            processBuilder.redirectErrorStream(true)
 
-            // Ожидание и проверка статуса запуска (без блокировки)
+            process = processBuilder.start()
+            addLog("--- Python process started (PID: ${process?.pid()}) ---")
+
+            logJob = scope.launch {
+                readLogs()
+            }
+
+            // TODO: Заменить на надежную проверку health-check эндпоинта
             delay(5000)
             if (process?.isAlive == true) {
                 _state.value = State.RUNNING
-                addLog("✅ Backend server is likely running.")
+                addLog("✅ Backend server is presumed to be RUNNING.")
             } else {
                 val exitCode = process?.exitValue()
-                val errorMsg = "Failed to start backend. Check logs for details. Exit code: $exitCode"
+                val errorMsg = "Failed to start backend. Process terminated unexpectedly with exit code: $exitCode"
                 addLog("❌ $errorMsg")
                 _state.value = State.FAILED(errorMsg)
-                // Отмена чтения логов, если процесс завершился ошибкой
                 logJob?.cancel()
             }
-
         } catch (e: Exception) {
             val errorMsg = "Exception during backend start: ${e.message}"
-            addLog("❌ $errorMsg")
-            _state.value = State.FAILED(errorMsg)
+            addLog("❌ CRITICAL: $errorMsg")
             e.printStackTrace()
+            _state.value = State.FAILED(errorMsg)
         }
     }
-
     suspend fun stop() {
         logJob?.cancelAndJoin() // Ждем завершения чтения логов
         process?.let {
