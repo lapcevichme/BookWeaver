@@ -10,7 +10,7 @@ plugins {
 
 kotlin {
     jvm()
-    
+
     sourceSets {
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -26,10 +26,13 @@ kotlin {
 
             // Ktor для WebSocket-сервера (подключаем всю группу)
             implementation(libs.bundles.ktor)
-            // Заменяем строки на ссылки из каталога
             implementation(libs.ktor.server.contentNegotiation.jvm)
             implementation(libs.ktor.serialization.kotlinxJson.jvm)
             implementation(libs.ktor.server.netty.jvm)
+            implementation(libs.ktor.client.contentNegotiation)
+            implementation(libs.ktor.client.kotlinxJson)
+            implementation("io.ktor:ktor-client-cio:3.3.0")
+
 
             // JmDNS для mDNS (Zeroconf)
             implementation(libs.jmdns)

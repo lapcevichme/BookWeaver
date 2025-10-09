@@ -27,6 +27,10 @@ ktor-server-contentNegotiation-jvm = { module = "io.ktor:ktor-server-content-neg
 ktor-serialization-kotlinxJson-jvm = { module = "io.ktor:ktor-serialization-kotlinx-json-jvm", version.ref = "ktor" }
 ktor-server-netty-jvm = { module = "io.ktor:ktor-server-netty-jvm", version.ref = "ktor" }
 
+# --- Ktor Client ---
+ktor-client-contentNegotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-kotlinxJson = { module = "io.ktor:ktor-client-json", version.ref = "ktor" }
+
 # --- JmDNS ---
 jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 
