@@ -1,6 +1,6 @@
 package com.lapcevichme.bookweaverdesktop.config
 
-import com.lapcevichme.bookweaverdesktop.model.AppSettings
+import com.lapcevichme.bookweaverdesktop.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File

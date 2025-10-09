@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.model
+package com.lapcevichme.bookweaverdesktop.settings
 
 import java.nio.file.Paths
 

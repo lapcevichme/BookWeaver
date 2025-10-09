@@ -1,6 +1,7 @@
 package com.lapcevichme.bookweaverdesktop.backend
 
 import com.lapcevichme.bookweaverdesktop.model.ChapterTaskRequest
+import com.lapcevichme.bookweaverdesktop.model.ServerStatusResponse
 import com.lapcevichme.bookweaverdesktop.model.TaskStatusResponse
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -9,24 +10,33 @@ import io.ktor.http.*
 
 class ApiClient(private val httpClient: HttpClient) {
 
-    private val baseUrl = "http://127.0.0.1:8000/api/v1"
+    private val baseApiUrl = "http://127.0.0.1:8000/api/v1"
+    private val healthUrl = "http://127.0.0.1:8000/health"
+
+    /**
+     * Проверяет "здоровье" API сервера, делая запрос к эндпоинту /health.
+     */
+    suspend fun healthCheck(): Result<ServerStatusResponse> {
+        return runCatching {
+            httpClient.get(healthUrl).body<ServerStatusResponse>()
+        }
+    }
 
     suspend fun startTtsSynthesis(request: ChapterTaskRequest): Result<TaskStatusResponse> {
-        // runCatching автоматически ловит любые исключения и оборачивает их в Result.failure
         return runCatching {
-            httpClient.post("$baseUrl/synthesize_tts") {
+            httpClient.post("$baseApiUrl/synthesize_tts") {
                 contentType(ContentType.Application.Json)
                 setBody(request)
             }.body<TaskStatusResponse>()
         }
     }
 
-
     suspend fun getTaskStatus(taskId: String): Result<TaskStatusResponse> {
         return runCatching {
-            httpClient.get("$baseUrl/tasks/$taskId/status").body<TaskStatusResponse>()
+            httpClient.get("$baseApiUrl/tasks/$taskId/status").body<TaskStatusResponse>()
         }
     }
+
 
 
     // TODO: Добавить методы для остальных эндпоинтов по аналогии

@@ -3,6 +3,11 @@ package com.lapcevichme.bookweaverdesktop.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+@Serializable
+data class ServerStatusResponse(
+    val status: String, // "INITIALIZING", "READY", "ERROR"
+    val message: String
+)
 
 @Serializable
 data class ChapterTaskRequest(

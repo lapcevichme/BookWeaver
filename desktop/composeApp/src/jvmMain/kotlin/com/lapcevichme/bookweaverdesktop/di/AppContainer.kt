@@ -33,10 +33,9 @@ class AppContainer {
             })
         }
     }
-
     val apiClient = ApiClient(httpClient)
 
-    val backendProcessManager = BackendProcessManager(settings = appSettings)
+    val backendProcessManager = BackendProcessManager(settings = appSettings, apiClient = apiClient)
 
     val configManager = ConfigManager(settings = appSettings)
 }

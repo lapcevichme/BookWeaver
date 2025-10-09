@@ -1,10 +1,9 @@
 package com.lapcevichme.bookweaverdesktop.settings
 
-import com.lapcevichme.bookweaverdesktop.model.AppSettings
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.util.Properties
+import java.util.*
 
 /**
  * Управляет загрузкой и сохранением настроек приложения из файла `settings.properties`.

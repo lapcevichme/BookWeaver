@@ -140,7 +140,7 @@ fun AiBackendTab(viewModel: MainViewModel) {
                     Text("Запуск...", style = MaterialTheme.typography.caption)
                 }
 
-                BackendProcessManager.State.RUNNING -> {
+                BackendProcessManager.State.RUNNING_HEALTHY -> {
                     Text("✅ Сервер запущен", color = Color(0xFF008000))
                     Button(
                         onClick = { viewModel.stopBackend() },
@@ -156,7 +156,23 @@ fun AiBackendTab(viewModel: MainViewModel) {
                         Text("Попробовать снова")
                     }
                 }
-            }
+
+                BackendProcessManager.State.RUNNING_INITIALIZING -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Text("Инициализация AI моделей...", style = MaterialTheme.typography.caption)
+                        Spacer(Modifier.weight(1f))
+                        Button(
+                            onClick = { viewModel.stopBackend() },
+                            colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.error)
+                        ) {
+                            Text("Отмена")
+                        }
+                    }
+                }            }
             Divider(Modifier.padding(vertical = 24.dp))
 
             Text("Задачи", style = MaterialTheme.typography.h6)
@@ -167,7 +183,7 @@ fun AiBackendTab(viewModel: MainViewModel) {
                     // TODO - норм взаимодествие с бэком, а не хардкод
                     viewModel.startTtsTask("kusuriya-no-hitorigoto-ln-novel", 1, 1)
                 },
-                enabled = backendState == BackendProcessManager.State.RUNNING && taskStatus.status != "processing"
+                enabled = backendState == BackendProcessManager.State.RUNNING_HEALTHY && taskStatus.status != "processing"
             ) {
                 Text("Запустить TTS для Главы 1")
             }

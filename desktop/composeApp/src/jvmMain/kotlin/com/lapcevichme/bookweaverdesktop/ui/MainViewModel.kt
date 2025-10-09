@@ -147,17 +147,11 @@ class MainViewModel(
         }
     }
 
-
     // --- Жизненный цикл ---
 
-    fun onAppClose() {
+    suspend fun onAppClose() {
         serverManager.stop()
-        stopBackend()
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        onAppClose()
+        backendProcessManager.stop()
     }
 }
 
