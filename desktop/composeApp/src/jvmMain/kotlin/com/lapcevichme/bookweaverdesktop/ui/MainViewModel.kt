@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainViewModel(
@@ -104,41 +105,50 @@ class MainViewModel(
     }
 
     fun startTtsTask(bookName: String, volNum: Int, chapNum: Int) {
-        pollingJob?.cancel() // Отменяем предыдущее отслеживание, если оно было
-        _taskStatus.value = TaskStatusResponse.initial()
+        pollingJob?.cancel() // Отменяем предыдущий опрос, если он был
+        _taskStatus.value = TaskStatusResponse.initial().copy(status = "processing", message = "Запуск задачи...")
 
         viewModelScope.launch {
             val request = ChapterTaskRequest(bookName, volNum, chapNum)
-            val initialResponse = apiClient.startTtsSynthesis(request)
 
-            if (initialResponse != null) {
-                _taskStatus.value = initialResponse
-                startPollingStatus(initialResponse.taskId)
-            } else {
-                _taskStatus.value = TaskStatusResponse(
-                    taskId = "error",
-                    status = "failed",
-                    progress = 0.0,
-                    message = "Не удалось запустить задачу."
-                )
-            }
+            // Используем .onSuccess и .onFailure для обработки Result
+            apiClient.startTtsSynthesis(request)
+                .onSuccess { initialResponse ->
+                    _taskStatus.value = initialResponse
+                    startPollingStatus(initialResponse.taskId) // Начинаем опрос только в случае успеха
+                }
+                .onFailure { exception ->
+                    // Если запуск не удался, показываем информативную ошибку
+                    _taskStatus.value = TaskStatusResponse(
+                        taskId = "error",
+                        status = "failed",
+                        progress = 0.0,
+                        message = "Ошибка запуска задачи: ${exception.message}"
+                    )
+                }
         }
     }
 
     private fun startPollingStatus(taskId: String) {
         pollingJob = viewModelScope.launch {
-            while (true) {
-                val status = apiClient.getTaskStatus(taskId)
-                if (status != null) {
-                    _taskStatus.value = status
-                    if (status.status == "complete" || status.status == "failed") {
-                        break // Прекращаем опрос, если задача завершена
-                    }
-                } else {
-                    _taskStatus.value = _taskStatus.value.copy(status = "failed", message = "Потеряна связь с задачей.")
-                    break // Прекращаем, если не удалось получить статус
-                }
+            while (isActive) { // Используем isActive для корректной отмены корутины
                 delay(2000)
+                apiClient.getTaskStatus(taskId)
+                    .onSuccess { status ->
+                        _taskStatus.value = status
+                        // Прекращаем опрос, если задача завершена
+                        if (status.status == "complete" || status.status == "failed") {
+                            break
+                        }
+                    }
+                    .onFailure { exception ->
+                        // Если потеряли связь, обновляем статус и прекращаем опрос
+                        _taskStatus.value = _taskStatus.value.copy(
+                            status = "failed",
+                            message = "Потеряна связь с задачей: ${exception.message}"
+                        )
+                        break
+                    }
             }
         }
     }

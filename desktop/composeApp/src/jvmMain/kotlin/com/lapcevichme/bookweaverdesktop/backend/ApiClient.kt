@@ -11,28 +11,23 @@ class ApiClient(private val httpClient: HttpClient) {
 
     private val baseUrl = "http://127.0.0.1:8000/api/v1"
 
-    suspend fun startTtsSynthesis(request: ChapterTaskRequest): TaskStatusResponse? {
-        return try {
+    suspend fun startTtsSynthesis(request: ChapterTaskRequest): Result<TaskStatusResponse> {
+        // runCatching автоматически ловит любые исключения и оборачивает их в Result.failure
+        return runCatching {
             httpClient.post("$baseUrl/synthesize_tts") {
                 contentType(ContentType.Application.Json)
                 setBody(request)
             }.body<TaskStatusResponse>()
-        } catch (e: Exception) {
-            println("Error starting TTS synthesis: ${e.message}")
-            e.printStackTrace()
-            null
         }
     }
 
-    suspend fun getTaskStatus(taskId: String): TaskStatusResponse? {
-        return try {
+
+    suspend fun getTaskStatus(taskId: String): Result<TaskStatusResponse> {
+        return runCatching {
             httpClient.get("$baseUrl/tasks/$taskId/status").body<TaskStatusResponse>()
-        } catch (e: Exception) {
-            println("Error getting task status: ${e.message}")
-            e.printStackTrace()
-            null
         }
     }
+
 
     // TODO: Добавить методы для остальных эндпоинтов по аналогии
     // suspend fun startVoiceConversion(...)

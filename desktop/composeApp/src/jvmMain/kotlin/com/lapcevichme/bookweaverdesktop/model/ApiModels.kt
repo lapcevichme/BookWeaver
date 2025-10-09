@@ -3,6 +3,7 @@ package com.lapcevichme.bookweaverdesktop.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+
 @Serializable
 data class ChapterTaskRequest(
     @SerialName("book_name")
@@ -15,6 +16,7 @@ data class ChapterTaskRequest(
 
 @Serializable
 data class BookTaskRequest(
+    @SerialName("book_name")
     val bookName: String
 )
 
@@ -22,9 +24,13 @@ typealias TaskStatus = String // "queued", "processing", "complete", "failed"
 
 @Serializable
 data class TaskStatusResponse(
+    @SerialName("task_id")
     val taskId: String,
+    @SerialName("status")
     val status: TaskStatus,
+    @SerialName("progress")
     val progress: Double,
+    @SerialName("message")
     val message: String
 ) {
     companion object {
