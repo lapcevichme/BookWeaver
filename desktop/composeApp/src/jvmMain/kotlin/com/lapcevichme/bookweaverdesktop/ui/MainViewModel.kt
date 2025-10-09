@@ -24,48 +24,25 @@ class MainViewModel(
     private val configManager: ConfigManager
 ) : ViewModel() {
 
-    // Состояние WebSocket-сервера для мобильного приложения
+    // --- Состояния ---
     val webSocketServerState: StateFlow<ServerState> = serverManager.serverState
-
-    // Состояние Python-процесса
     val backendState: StateFlow<BackendProcessManager.State> = backendProcessManager.state
     val backendLogs: StateFlow<List<String>> = backendProcessManager.logs
 
-    // Состояние текущей запущенной AI-задачи
     private val _taskStatus = MutableStateFlow(TaskStatusResponse.initial())
     val taskStatus: StateFlow<TaskStatusResponse> = _taskStatus.asStateFlow()
 
-    // Состояние для содержимого конфиг-файла
     private val _configContent = MutableStateFlow("Загрузка конфигурации...")
     val configContent: StateFlow<String> = _configContent.asStateFlow()
 
     private var pollingJob: Job? = null
 
     init {
+        // Загружаем конфиг при инициализации ViewModel
         loadConfig()
     }
 
-    // --- Функции для ConfigManager ---
-
-    fun loadConfig() {
-        viewModelScope.launch {
-            _configContent.value = configManager.loadConfigContent()
-        }
-    }
-
-    fun saveConfig(content: String) {
-        viewModelScope.launch {
-            val success = configManager.saveConfigContent(content)
-            if (success) {
-                // После успешного сохранения, перезагружаем, чтобы убедиться, что все ок
-                _configContent.value = configManager.loadConfigContent()
-                println("INFO: Config saved successfully.")
-            } else {
-                // Если сохранение не удалось, возвращаем сообщение об ошибке
-                _configContent.value = "❌ ОШИБКА СОХРАНЕНИЯ: Проверьте права доступа и путь к файлу."
-            }
-        }
-    }
+    // --- Управление WebSocket-сервером ---
 
     fun startWebSocketServer() {
         if (webSocketServerState.value is ServerState.Disconnected) {
@@ -73,16 +50,13 @@ class MainViewModel(
         }
     }
 
-    /**
-     * Вызывает ServerManager для генерации данных подключения (QR-кода) и
-     * переводит состояние в AwaitingConnection.
-     */
     fun showConnectionInstructions() {
-        // Мы вызываем эту функцию, только если сервер готов, но еще не ожидает подключения
         if (webSocketServerState.value is ServerState.ReadyForConnection) {
             serverManager.showConnectionInstructions()
         }
     }
+
+    // --- Управление Python Backend Process (ВОССТАНОВЛЕНО) ---
 
     fun startBackend() {
         if (backendState.value == BackendProcessManager.State.STOPPED || backendState.value is BackendProcessManager.State.FAILED) {
@@ -98,27 +72,51 @@ class MainViewModel(
         }
     }
 
-    fun onAppClose() {
-        // Эта функция вызывается при закрытии окна
-        serverManager.stop()
-        stopBackend()
+    // --- Управление файлом конфигурации (ВОССТАНОВЛЕНО) ---
+
+    fun loadConfig() {
+        viewModelScope.launch {
+            _configContent.value = configManager.loadConfigContent()
+        }
     }
 
+    fun saveConfig(content: String) {
+        viewModelScope.launch {
+            val success = configManager.saveConfigContent(content)
+            if (success) {
+                _configContent.value = configManager.loadConfigContent()
+                println("INFO: Config saved successfully.")
+            } else {
+                _configContent.value = "❌ ОШИБКА СОХРАНЕНИЯ: Проверьте права доступа и путь к файлу."
+            }
+        }
+    }
+
+    // --- Управление AI-задачами ---
+
+    /**
+     * Публичный метод для запуска задачи синтеза речи.
+     */
     fun startTtsTask(bookName: String, volNum: Int, chapNum: Int) {
-        pollingJob?.cancel() // Отменяем предыдущий опрос, если он был
+        val request = ChapterTaskRequest(bookName, volNum, chapNum)
+        // Делегируем выполнение универсальному лаунчеру
+        launchAndPollTask { apiClient.startTtsSynthesis(request) }
+    }
+
+    /**
+     * Приватный универсальный метод для запуска любой задачи, которая требует опроса.
+     */
+    private fun launchAndPollTask(apiCall: suspend () -> Result<TaskStatusResponse>) {
+        pollingJob?.cancel()
         _taskStatus.value = TaskStatusResponse.initial().copy(status = "processing", message = "Запуск задачи...")
 
         viewModelScope.launch {
-            val request = ChapterTaskRequest(bookName, volNum, chapNum)
-
-            // Используем .onSuccess и .onFailure для обработки Result
-            apiClient.startTtsSynthesis(request)
+            apiCall()
                 .onSuccess { initialResponse ->
                     _taskStatus.value = initialResponse
-                    startPollingStatus(initialResponse.taskId) // Начинаем опрос только в случае успеха
+                    startPollingStatus(initialResponse.taskId)
                 }
                 .onFailure { exception ->
-                    // Если запуск не удался, показываем информативную ошибку
                     _taskStatus.value = TaskStatusResponse(
                         taskId = "error",
                         status = "failed",
@@ -131,18 +129,14 @@ class MainViewModel(
 
     private fun startPollingStatus(taskId: String) {
         pollingJob = viewModelScope.launch {
-            while (isActive) { // Используем isActive для корректной отмены корутины
+            while (isActive) {
                 delay(2000)
                 apiClient.getTaskStatus(taskId)
                     .onSuccess { status ->
                         _taskStatus.value = status
-                        // Прекращаем опрос, если задача завершена
-                        if (status.status == "complete" || status.status == "failed") {
-                            break
-                        }
+                        if (status.status == "complete" || status.status == "failed") break
                     }
                     .onFailure { exception ->
-                        // Если потеряли связь, обновляем статус и прекращаем опрос
                         _taskStatus.value = _taskStatus.value.copy(
                             status = "failed",
                             message = "Потеряна связь с задачей: ${exception.message}"
@@ -153,8 +147,17 @@ class MainViewModel(
         }
     }
 
+
+    // --- Жизненный цикл ---
+
+    fun onAppClose() {
+        serverManager.stop()
+        stopBackend()
+    }
+
     override fun onCleared() {
         super.onCleared()
         onAppClose()
     }
 }
+
