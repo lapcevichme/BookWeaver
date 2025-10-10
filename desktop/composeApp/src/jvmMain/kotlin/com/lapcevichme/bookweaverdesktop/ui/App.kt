@@ -3,6 +3,7 @@ package com.lapcevichme.bookweaverdesktop.ui
 import androidx.compose.desktop.ui.tooling.preview.Preview
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,23 +31,31 @@ private const val QR_SIZE = 256
 @Preview
 fun App(viewModel: MainViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
-    // вкладка "Конфигурация"
     val tabs = listOf("Подключение", "AI Backend", "Конфигурация")
+    val scaffoldState = rememberScaffoldState()
 
-    Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    text = { Text(title) },
-                    selected = selectedTab == index,
-                    onClick = { selectedTab = index }
-                )
-            }
+    LaunchedEffect(Unit) {
+        viewModel.uiMessages.collect { message ->
+            scaffoldState.snackbarHostState.showSnackbar(message)
         }
-        when (selectedTab) {
-            0 -> MobileConnectionTab(viewModel)
-            1 -> AiBackendTab(viewModel)
-            2 -> ConfigEditorTab(viewModel)
+    }
+
+    Scaffold(scaffoldState = scaffoldState) {
+        Column(Modifier.fillMaxSize()) {
+            TabRow(selectedTabIndex = selectedTab) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        text = { Text(title) },
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index }
+                    )
+                }
+            }
+            when (selectedTab) {
+                0 -> MobileConnectionTab(viewModel)
+                1 -> AiBackendTab(viewModel)
+                2 -> ConfigEditorTab(viewModel)
+            }
         }
     }
 }
@@ -106,12 +115,21 @@ fun AiBackendTab(viewModel: MainViewModel) {
     val backendState by viewModel.backendState.collectAsState()
     val backendLogs by viewModel.backendLogs.collectAsState()
     val taskStatus by viewModel.taskStatus.collectAsState()
-    val scrollState = rememberLazyListState()
+    val projects by viewModel.projects.collectAsState()
+    var selectedProject by remember { mutableStateOf<String?>(null) }
 
-    // Автоматическая прокрутка логов вниз
+    val logScrollState = rememberLazyListState()
+
     LaunchedEffect(backendLogs.size) {
         if (backendLogs.isNotEmpty()) {
-            scrollState.animateScrollToItem(backendLogs.lastIndex)
+            logScrollState.animateScrollToItem(backendLogs.lastIndex)
+        }
+    }
+
+    // Load projects when the backend becomes ready
+    LaunchedEffect(backendState) {
+        if (backendState == BackendProcessManager.State.RUNNING_HEALTHY) {
+            viewModel.loadProjects()
         }
     }
 
@@ -120,7 +138,7 @@ fun AiBackendTab(viewModel: MainViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(300.dp)
+                .width(400.dp)
                 .background(MaterialTheme.colors.surface)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -129,63 +147,59 @@ fun AiBackendTab(viewModel: MainViewModel) {
             Spacer(Modifier.height(16.dp))
 
             when (backendState) {
-                BackendProcessManager.State.STOPPED -> {
-                    Button(onClick = { viewModel.startBackend() }) {
-                        Text("Запустить AI Backend")
-                    }
-                }
-
+                BackendProcessManager.State.STOPPED -> Button(onClick = { viewModel.startBackend() }) { Text("Запустить AI Backend") }
                 BackendProcessManager.State.STARTING -> {
                     CircularProgressIndicator()
                     Text("Запуск...", style = MaterialTheme.typography.caption)
                 }
-
                 BackendProcessManager.State.RUNNING_HEALTHY -> {
                     Text("✅ Сервер запущен", color = Color(0xFF008000))
-                    Button(
-                        onClick = { viewModel.stopBackend() },
-                        colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.error)
-                    ) {
+                    Button(onClick = { viewModel.stopBackend() }, colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.error)) {
                         Text("Остановить AI Backend")
                     }
                 }
-
                 is BackendProcessManager.State.FAILED -> {
                     Text("❌ Ошибка запуска", color = MaterialTheme.colors.error)
-                    Button(onClick = { viewModel.startBackend() }) {
-                        Text("Попробовать снова")
-                    }
+                    Button(onClick = { viewModel.startBackend() }) { Text("Попробовать снова") }
                 }
-
                 BackendProcessManager.State.RUNNING_INITIALIZING -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         Text("Инициализация AI моделей...", style = MaterialTheme.typography.caption)
                         Spacer(Modifier.weight(1f))
-                        Button(
-                            onClick = { viewModel.stopBackend() },
-                            colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.error)
-                        ) {
+                        Button(onClick = { viewModel.stopBackend() }, colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.error)) {
                             Text("Отмена")
                         }
                     }
-                }            }
+                }
+            }
+            Divider(Modifier.padding(vertical = 24.dp))
+
+            // Section for Projects
+            ProjectManagementSection(
+                projects = projects,
+                selectedProject = selectedProject,
+                onProjectSelected = { selectedProject = it },
+                onImportClick = { viewModel.importNewBook() },
+                onRefreshClick = { viewModel.loadProjects() },
+                isEnabled = backendState == BackendProcessManager.State.RUNNING_HEALTHY
+            )
+
+
             Divider(Modifier.padding(vertical = 24.dp))
 
             Text("Задачи", style = MaterialTheme.typography.h6)
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = {
-                    // Используем заглушку для первой главы
-                    // TODO - норм взаимодествие с бэком, а не хардкод
-                    viewModel.startTtsTask("kusuriya-no-hitorigoto-ln-novel", 1, 1)
+                    selectedProject?.let { book ->
+                        // For simplicity, we still use chapter 1, vol 1
+                        viewModel.startTtsTask(book, 1, 1)
+                    }
                 },
-                enabled = backendState == BackendProcessManager.State.RUNNING_HEALTHY && taskStatus.status != "processing"
+                enabled = selectedProject != null && backendState == BackendProcessManager.State.RUNNING_HEALTHY && taskStatus.status != "processing"
             ) {
-                Text("Запустить TTS для Главы 1")
+                Text("Запустить TTS для проекта")
             }
             Spacer(Modifier.height(16.dp))
 
@@ -220,7 +234,7 @@ fun AiBackendTab(viewModel: MainViewModel) {
             Spacer(Modifier.height(8.dp))
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                state = scrollState
+                state = logScrollState
             ) {
                 items(backendLogs) { logLine ->
                     Text(
@@ -240,21 +254,75 @@ fun AiBackendTab(viewModel: MainViewModel) {
 }
 
 @Composable
+fun ProjectManagementSection(
+    projects: List<String>,
+    selectedProject: String?,
+    onProjectSelected: (String) -> Unit,
+    onImportClick: () -> Unit,
+    onRefreshClick: () -> Unit,
+    isEnabled: Boolean
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Проекты", style = MaterialTheme.typography.h6)
+        Spacer(Modifier.height(16.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onImportClick, enabled = isEnabled) {
+                Text("Импорт книги")
+            }
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = onRefreshClick, enabled = isEnabled) {
+                Text("Обновить список")
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        Box {
+            OutlinedTextField(
+                value = selectedProject ?: "Выберите проект",
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth().clickable(enabled = isEnabled) { expanded = true },
+                label = { Text("Выбранный проект") }
+            )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.fillMaxWidth(0.8f)
+            ) {
+                if (projects.isEmpty()) {
+                    DropdownMenuItem(onClick = { expanded = false }) {
+                        Text("Нет доступных проектов")
+                    }
+                } else {
+                    projects.forEach { project ->
+                        DropdownMenuItem(onClick = {
+                            onProjectSelected(project)
+                            expanded = false
+                        }) {
+                            Text(project)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
 fun ConfigEditorTab(viewModel: MainViewModel) {
     val configContent by viewModel.configContent.collectAsState()
     var editorText by remember { mutableStateOf(configContent) }
 
-    // Обновляем локальный текст, когда VM завершила загрузку
     LaunchedEffect(configContent) {
         editorText = configContent
     }
 
     Column(Modifier.fillMaxSize()) {
-        Text(
-            "Редактирование config.py",
-            style = MaterialTheme.typography.h5,
-            modifier = Modifier.padding(16.dp)
-        )
+        Text("Редактирование config.py", style = MaterialTheme.typography.h5, modifier = Modifier.padding(16.dp))
         Text(
             "Внимание: Изменение этого файла требует перезапуска AI Backend!",
             color = MaterialTheme.colors.secondary,
@@ -268,7 +336,7 @@ fun ConfigEditorTab(viewModel: MainViewModel) {
         ) {
             Button(
                 onClick = { viewModel.saveConfig(editorText) },
-                enabled = editorText.isNotBlank() && "❌" !in configContent // Блокируем, если есть ошибка загрузки
+                enabled = editorText.isNotBlank() && "❌" !in configContent
             ) {
                 Text("Сохранить изменения")
             }
@@ -278,7 +346,6 @@ fun ConfigEditorTab(viewModel: MainViewModel) {
         }
         Spacer(Modifier.height(8.dp))
 
-        // Text Area для редактирования
         SelectionContainer(Modifier.fillMaxSize()) {
             OutlinedTextField(
                 value = editorText,
@@ -287,7 +354,6 @@ fun ConfigEditorTab(viewModel: MainViewModel) {
                 textStyle = LocalTextStyle.current.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 14.sp,
-                    // Выделяем текст красным, если при загрузке была ошибка
                     color = if ("❌" in configContent) Color.Red else Color.White
                 ),
                 label = { Text("Содержимое config.py (Python)") },

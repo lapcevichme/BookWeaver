@@ -16,7 +16,8 @@ fun main() = application {
         serverManager = appContainer.serverManager,
         backendProcessManager = appContainer.backendProcessManager,
         apiClient = appContainer.apiClient,
-        configManager = appContainer.configManager
+        configManager = appContainer.configManager,
+        bookManager = appContainer.bookManager
     )
 
     // Регистрируем хук завершения работы

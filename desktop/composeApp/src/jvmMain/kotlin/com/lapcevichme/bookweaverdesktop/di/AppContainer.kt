@@ -2,6 +2,7 @@ package com.lapcevichme.bookweaverdesktop.di
 
 import com.lapcevichme.bookweaverdesktop.backend.ApiClient
 import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
+import com.lapcevichme.bookweaverdesktop.backend.BookManager
 import com.lapcevichme.bookweaverdesktop.config.ConfigManager
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
 import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
@@ -38,5 +39,8 @@ class AppContainer {
     val backendProcessManager = BackendProcessManager(settings = appSettings, apiClient = apiClient)
 
     val configManager = ConfigManager(settings = appSettings)
+
+    val bookManager = BookManager(apiClient = apiClient, settings = appSettings)
+
 }
 
