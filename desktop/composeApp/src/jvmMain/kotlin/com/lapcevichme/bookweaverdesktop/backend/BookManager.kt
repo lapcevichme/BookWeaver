@@ -1,6 +1,6 @@
 package com.lapcevichme.bookweaverdesktop.backend
 
-import com.lapcevichme.bookweaverdesktop.settings.AppSettings
+import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import io.ktor.client.statement.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.swing.Swing
@@ -14,7 +14,7 @@ import javax.swing.filechooser.FileNameExtensionFilter
  */
 class BookManager(
     private val apiClient: ApiClient,
-    private val settings: AppSettings
+    private val settingsManager: SettingsManager
 ) {
 
     /**
@@ -29,17 +29,14 @@ class BookManager(
      * @return The selected File, or null if the dialog was cancelled.
      */
     suspend fun selectBookFile(): File? = withContext(Dispatchers.Swing) {
+        // val settings = settingsManager.loadSettings()
         val chooser = JFileChooser().apply {
             dialogTitle = "Выберите файл книги (.txt, .epub)"
             fileFilter = FileNameExtensionFilter("Book Files (.txt, .epub)", "txt", "epub")
             isAcceptAllFileFilterUsed = false
-            // You can set the last used directory here from settings for better UX
-            // currentDirectory = File(settings.lastBookDirectory)
         }
         val result = chooser.showOpenDialog(null)
         if (result == JFileChooser.APPROVE_OPTION) {
-            // Save the directory for next time
-            // settings.lastBookDirectory = chooser.currentDirectory.absolutePath
             chooser.selectedFile
         } else {
             null

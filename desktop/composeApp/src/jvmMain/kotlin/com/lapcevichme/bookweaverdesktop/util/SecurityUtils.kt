@@ -1,6 +1,5 @@
 package com.lapcevichme.bookweaverdesktop.util
 
-import com.lapcevichme.bookweaverdesktop.server.ServerManager
 import mu.KotlinLogging
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.Extension
@@ -46,13 +45,12 @@ object SecurityUtils {
      * @return Triple<KeyStore, fingerprint, password> — пароль (CharArray) нужно использовать в Ktor и затем очистить.
      */
     @OptIn(ExperimentalEncodingApi::class)
-    fun setupCertificate(): Triple<KeyStore, String, CharArray> {
-        val keyStoreFile = File(ServerManager.KEYSTORE_FILE)
+    fun setupCertificate(keyStoreFileName: String): Triple<KeyStore, String, CharArray> {
+        val keyStoreFile = File(keyStoreFileName)
         val encryptedPasswordFile = File(ENCRYPTED_PASSWORD_FILE)
         val keyStore = KeyStore.getInstance("BKS", "BC")
 
         val (keystorePassword, isNew) = if (keyStoreFile.exists() && encryptedPasswordFile.exists()) {
-            // Загружаем зашифрованный пароль, дешифруем, используем для keystore
             logger.info { "Loading existing keystore with decrypted password." }
             try {
                 val encryptedData = encryptedPasswordFile.readBytes()
@@ -64,13 +62,11 @@ object SecurityUtils {
                 Pair(passwordChars, false)
             } catch (e: Exception) {
                 logger.warn { "Failed to decrypt password: ${e.message}. Regenerating..." }
-                // Fallback: regenerate
-                generateNewKeystoreAndPassword(keyStore)
+                generateNewKeystoreAndPassword(keyStore, keyStoreFileName)
             }
         } else {
-            // Генерируем новый пароль, шифруем, сохраняем
             logger.info { "No existing keystore or encrypted password found. Generating new ones..." }
-            generateNewKeystoreAndPassword(keyStore)
+            generateNewKeystoreAndPassword(keyStore, keyStoreFileName)
         }
 
         val cert = keyStore.getCertificate(KEY_ALIAS) as X509Certificate
@@ -81,12 +77,11 @@ object SecurityUtils {
         return Triple(keyStore, fingerprint, keystorePassword)
     }
 
-    private fun generateNewKeystoreAndPassword(keyStore: KeyStore): Pair<CharArray, Boolean> {
+    private fun generateNewKeystoreAndPassword(keyStore: KeyStore, keyStoreFileName: String): Pair<CharArray, Boolean> {
         val passwordStr = generateSecurePassword()
         val passwordChars = passwordStr.toCharArray()
         val encryptedData = encryptPassword(passwordChars)
-        val encryptedPasswordFile = File(ENCRYPTED_PASSWORD_FILE)
-        encryptedPasswordFile.writeBytes(encryptedData)
+        File(ENCRYPTED_PASSWORD_FILE).writeBytes(encryptedData)
 
         val keyPairGenerator = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
         val keyPair = keyPairGenerator.generateKeyPair()
@@ -95,8 +90,7 @@ object SecurityUtils {
         keyStore.load(null, passwordChars)
         keyStore.setKeyEntry(KEY_ALIAS, keyPair.private, passwordChars, arrayOf(cert))
 
-        val keyStoreFile = File(ServerManager.KEYSTORE_FILE)
-        keyStoreFile.outputStream().use {
+        File(keyStoreFileName).outputStream().use {
             keyStore.store(it, passwordChars)
         }
         logger.info { "New keystore and encrypted password saved." }
@@ -110,21 +104,15 @@ object SecurityUtils {
         return Base64.encode(passwordBytes)
     }
 
-    /**
-     * Derive master key из machine fingerprint (hostname + primary MAC).
-     */
     private fun deriveMasterKey(): SecretKey {
         val fingerprint = getMachineFingerprint()
-        val salt = "bookweaver_salt".toByteArray()  // Фиксированный salt для PBKDF2
+        val salt = "bookweaver_salt".toByteArray()
         val keySpec: KeySpec = PBEKeySpec(fingerprint.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_SIZE)
         val keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
         val keyBytes = keyFactory.generateSecret(keySpec).encoded
         return SecretKeySpec(keyBytes, "AES")
     }
 
-    /**
-     * Получает machine fingerprint: hostname + MAC primary interface.
-     */
     private fun getMachineFingerprint(): String {
         val hostname = try {
             InetAddress.getLocalHost().hostName
@@ -140,9 +128,6 @@ object SecurityUtils {
         return "$hostname-$primaryMac"
     }
 
-    /**
-     * Шифрует пароль (CharArray) с AES-GCM.
-     */
     private fun encryptPassword(password: CharArray): ByteArray {
         val masterKey = deriveMasterKey()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -152,13 +137,9 @@ object SecurityUtils {
         val gcmSpec = GCMParameterSpec(GCM_TAG_SIZE, iv)
         cipher.init(Cipher.ENCRYPT_MODE, masterKey, gcmSpec)
         val encryptedBytes = cipher.doFinal(password.concatToString().toByteArray(Charsets.UTF_8))
-        // Конкатенируем IV + encrypted data
         return ByteBuffer.allocate(iv.size + encryptedBytes.size).put(iv).put(encryptedBytes).array()
     }
 
-    /**
-     * Дешифрует пароль из encrypted data.
-     */
     private fun decryptPassword(encryptedData: ByteArray): String {
         val masterKey = deriveMasterKey()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

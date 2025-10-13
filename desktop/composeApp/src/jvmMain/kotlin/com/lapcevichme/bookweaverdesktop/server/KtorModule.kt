@@ -1,5 +1,6 @@
 package com.lapcevichme.bookweaverdesktop.server
 
+import com.lapcevichme.bookweaverdesktop.backend.BookManager
 import com.lapcevichme.bookweaverdesktop.model.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -13,9 +14,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.modules.SerializersModule
-import kotlinx.serialization.modules.polymorphic
-import kotlinx.serialization.modules.subclass
 import mu.KotlinLogging
 import java.io.File
 import java.io.IOException
@@ -28,25 +26,9 @@ import kotlin.time.Duration.Companion.seconds
 private val logger = KotlinLogging.logger {}
 private const val BUFFER_SIZE = 8192
 
-val ApplicationJson = kotlinx.serialization.json.Json {
-    serializersModule = SerializersModule {
-        polymorphic(WsMessage::class) {
-            subclass(WsRequestBookList::class)
-            subclass(WsBookList::class)
-            subclass(WsRequestAudio::class)
-            subclass(WsAudioStreamEnd::class)
-            subclass(WsAudioStreamError::class)
-            subclass(WsError::class)
-        }
-    }
-    classDiscriminator = "type"
-    ignoreUnknownKeys = true
-}
-
-
-fun Application.configureKtorApp() {
+fun Application.configureKtorApp(serverManager: ServerManager, bookManager: BookManager) {
     install(ContentNegotiation) {
-        json(ApplicationJson)
+        json(serverManager.json)
     }
     install(WebSockets) {
         pingPeriod = 15.seconds
@@ -60,19 +42,19 @@ fun Application.configureKtorApp() {
         }
         webSocket("/") {
             val remoteHost = call.request.origin.remoteHost
-            if (!ServerManager.peerSession.compareAndSet(null, this)) {
+            if (!serverManager.peerSession.compareAndSet(null, this)) {
                 logger.warn { "Attempted second connection from $remoteHost. Rejected." }
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Session is already active."))
                 return@webSocket
             }
-            ServerManager.onPeerConnected(this, remoteHost)
+            serverManager.onPeerConnected(this, remoteHost)
             logger.info { "✅ Device connected: $remoteHost" }
             try {
                 for (frame in incoming) {
                     if (frame is Frame.Text) {
                         val text = frame.readText()
                         try {
-                            val message = ApplicationJson.decodeFromString<WsMessage>(text)
+                            val message = serverManager.json.decodeFromString<WsMessage>(text)
                             when (message) {
                                 is WsRequestAudio -> {
                                     launch(Dispatchers.IO) { handleAudioRequest(this@webSocket, message.filePath) }
@@ -80,10 +62,12 @@ fun Application.configureKtorApp() {
 
                                 is WsRequestBookList -> {
                                     logger.info { "Received request for book list from $remoteHost" }
-                                    // TODO:логику для отправки списка книг
-                                    // val books = listOf(Book("The Hobbit", "J.R.R. Tolkien", "hobbit.epub"))
-                                    // val response = WsBookList(books)
-                                    // sendSerialized(response)
+
+                                    val result = bookManager.getProjectList()
+                                    val response = WsBookList(
+                                        books = result.getOrNull()?.map { Book(it, "", "") } ?: emptyList()
+                                    )
+                                    sendSerialized(serverManager.json, response)
                                 }
 
                                 else -> {
@@ -91,7 +75,6 @@ fun Application.configureKtorApp() {
                                 }
                             }
                         } catch (e: Exception) {
-                            // НЕ ЗАКРЫВАЕМ СОЕДИНЕНИЕ!
                             logger.error(e) { "WebSocket error from $remoteHost: Failed to parse message: $text" }
                         }
                     }
@@ -101,8 +84,8 @@ fun Application.configureKtorApp() {
             } catch (e: Exception) {
                 logger.error(e) { "WebSocket error from $remoteHost" }
             } finally {
-                ServerManager.peerSession.compareAndSet(this, null)
-                ServerManager.onPeerDisconnected()
+                serverManager.peerSession.compareAndSet(this, null)
+                serverManager.onPeerDisconnected()
                 logger.info { "Device $remoteHost disconnected." }
             }
         }
@@ -116,12 +99,13 @@ private suspend fun handleAudioRequest(session: WebSocketSession, requestedPath:
         normalizedPath = Paths.get(requestedPath).normalize()
     } catch (e: InvalidPathException) {
         logger.error { "Invalid path requested: '$requestedPath': ${e.message}" }
-        session.sendSerialized(WsAudioStreamError("Invalid file name: contains invalid characters."))
+        // TODO: Переделать отправку ошибок на новый лад, если нужно
+        // session.sendSerialized(WsAudioStreamError("Invalid file name: contains invalid characters."))
         return
     }
     if (normalizedPath.nameCount > 1 || normalizedPath.toString().contains("..")) {
         logger.warn { "❌ Error: Invalid path requested: '$requestedPath'. Contains separators or '..'." }
-        session.sendSerialized(WsAudioStreamError("Invalid file name: path must not contain separators or '..'."))
+        // session.sendSerialized(WsAudioStreamError("Invalid file name: path must not contain separators or '..'."))
         return
     }
     try {
@@ -132,7 +116,7 @@ private suspend fun handleAudioRequest(session: WebSocketSession, requestedPath:
             )
         ) {
             logger.warn { "❌ Error: File not found or access denied: '$requestedPath'" }
-            session.sendSerialized(WsAudioStreamError("File not found or access denied: $requestedPath"))
+            // session.sendSerialized(WsAudioStreamError("File not found or access denied: $requestedPath"))
             return
         }
         val buffer = ByteArray(BUFFER_SIZE)
@@ -143,15 +127,16 @@ private suspend fun handleAudioRequest(session: WebSocketSession, requestedPath:
                 session.send(Frame.Binary(true, buffer.copyOf(bytesRead)))
             }
         }
-        session.sendSerialized(WsAudioStreamEnd)
+        // session.sendSerialized(WsAudioStreamEnd)
     } catch (e: IOException) {
         logger.error { "❌ Error: Failed to read file '$requestedPath': ${e.message}" }
-        session.sendSerialized(WsAudioStreamError("File read error: ${e.message}"))
+        // session.sendSerialized(WsAudioStreamError("File read error: ${e.message}"))
     }
 }
 
-private suspend fun WebSocketSession.sendSerialized(message: WsMessage) {
+private suspend fun WebSocketSession.sendSerialized(json: kotlinx.serialization.json.Json, message: WsMessage) {
     if (!isActive) return
-    val jsonString = ApplicationJson.encodeToString(WsMessage.serializer(), message)
+    val jsonString = json.encodeToString(WsMessage.serializer(), message)
     send(Frame.Text(jsonString))
 }
+

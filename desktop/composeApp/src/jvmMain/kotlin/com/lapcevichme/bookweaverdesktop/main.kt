@@ -1,52 +1,39 @@
 package com.lapcevichme.bookweaverdesktop
 
-import androidx.compose.material.MaterialTheme
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import com.lapcevichme.bookweaverdesktop.di.AppContainer
-import com.lapcevichme.bookweaverdesktop.ui.App
+import com.lapcevichme.bookweaverdesktop.di.initKoin
+import com.lapcevichme.bookweaverdesktop.navigation.BookWeaverNavHost
 import com.lapcevichme.bookweaverdesktop.ui.MainViewModel
 import kotlinx.coroutines.runBlocking
+import org.koin.compose.KoinApplication
+import org.koin.compose.koinInject
 
 fun main() = application {
+    // KoinApplication - это обертка, которая инициализирует Koin
+    // и предоставляет DI-контейнер всему приложению.
+    KoinApplication(application = {
+        initKoin()
+    }) {
+        // Получаем MainViewModel из Koin. Он будет жить в течение всего приложения.
+        val viewModel = koinInject<MainViewModel>()
 
-    val appContainer = AppContainer()
-    val viewModel = MainViewModel(
-        serverManager = appContainer.serverManager,
-        backendProcessManager = appContainer.backendProcessManager,
-        apiClient = appContainer.apiClient,
-        configManager = appContainer.configManager,
-        bookManager = appContainer.bookManager
-    )
-
-    // Регистрируем хук завершения работы
-    // Этот код выполнится, когда приложение будет закрываться,
-    // гарантируя корректную остановку всех сервисов.
-    Runtime.getRuntime().addShutdownHook(Thread {
-        println("Shutdown hook triggered. Stopping services...")
-        // Используем runBlocking здесь, потому что мы в обычном потоке,
-        // а нам нужно вызвать suspend-функцию и дождаться ее.
-        runBlocking {
-            viewModel.onAppClose()
-        }
-        println("Services stopped. Exiting.")
-    })
+        // Хук для корректного завершения работы приложения.
+        // Он гарантирует, что все фоновые процессы (Python, WebSocket) будут остановлены.
+        Runtime.getRuntime().addShutdownHook(Thread {
+            println("Shutdown hook triggered. Stopping services...")
+            runBlocking {
+                viewModel.onAppClose()
+            }
+            println("Services stopped. Exiting.")
+        })
 
 
-    // Запускаем WebSocket-сервер при старте приложения
-    LaunchedEffect(Unit) {
-        viewModel.startWebSocketServer()
-    }
-
-    Window(
-        onCloseRequest = {
-            exitApplication()
-        },
-        title = "BookWeaver Desktop"
-    ) {
-        MaterialTheme {
-            App(viewModel)
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = "BookWeaver"
+        ) {
+            BookWeaverNavHost()
         }
     }
 }

@@ -33,7 +33,12 @@ kotlin {
             implementation(libs.ktor.client.kotlinxJson)
             implementation("io.ktor:ktor-client-cio:3.3.0")
 
+            implementation("io.insert-koin:koin-core:4.1.0")
+            implementation("io.insert-koin:koin-compose:4.1.0")
 
+            implementation("org.jetbrains.androidx.navigation:navigation-compose:2.9.0")
+
+            implementation(compose.materialIconsExtended)
             // JmDNS для mDNS (Zeroconf)
             implementation(libs.jmdns)
 

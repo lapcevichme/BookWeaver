@@ -1,7 +1,7 @@
 package com.lapcevichme.bookweaverdesktop.server
 
-import com.lapcevichme.bookweaverdesktop.model.ConnectionInfo
-import com.lapcevichme.bookweaverdesktop.model.ServerState
+import com.lapcevichme.bookweaverdesktop.backend.BookManager
+import com.lapcevichme.bookweaverdesktop.model.*
 import com.lapcevichme.bookweaverdesktop.util.NetworkUtils
 import com.lapcevichme.bookweaverdesktop.util.SecurityUtils
 import io.ktor.server.engine.*
@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.polymorphic
+import kotlinx.serialization.modules.subclass
 import mu.KotlinLogging
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
@@ -20,12 +23,12 @@ import javax.jmdns.ServiceInfo
 
 private val logger = KotlinLogging.logger {}
 
-object ServerManager {
-    private const val PORT = 8765
-    internal const val KEYSTORE_FILE = "keystore.bks"
-    private const val SERVICE_TYPE = "_bookweaver._tcp.local."
-    private const val SERVICE_NAME = "BookWeaver Desktop Server"
-    private const val KEY_ALIAS = "bookweaver"
+class ServerManager(private val bookManager: BookManager) {
+    private val PORT = 8765
+    internal val KEYSTORE_FILE = "keystore.bks"
+    private val SERVICE_TYPE = "_bookweaver._tcp.local."
+    private val SERVICE_NAME = "BookWeaver Desktop Server"
+    private val KEY_ALIAS = "bookweaver"
 
     private val _serverState = MutableStateFlow<ServerState>(ServerState.Disconnected)
     val serverState = _serverState.asStateFlow()
@@ -35,12 +38,27 @@ object ServerManager {
     private var fingerprint: String = ""
 
     internal val peerSession = AtomicReference<WebSocketSession?>()
-    internal val json = Json { isLenient = true; ignoreUnknownKeys = true; classDiscriminator = "type" }
+
+    // Создаем Json здесь, чтобы он был доступен во всем серверном слое
+    internal val json = Json {
+        serializersModule = SerializersModule {
+            polymorphic(WsMessage::class) {
+                subclass(WsRequestBookList::class)
+                subclass(WsBookList::class)
+                subclass(WsRequestAudio::class)
+                subclass(WsAudioStreamEnd::class)
+                subclass(WsAudioStreamError::class)
+                subclass(WsError::class)
+            }
+        }
+        classDiscriminator = "type"
+        ignoreUnknownKeys = true
+    }
+
 
     fun start() {
         try {
-            // Получаем keystore, fingerprint И пароль (CharArray)
-            val (keyStore, calculatedFingerprint, keystorePassword) = SecurityUtils.setupCertificate()
+            val (keyStore, calculatedFingerprint, keystorePassword) = SecurityUtils.setupCertificate(KEYSTORE_FILE)
             fingerprint = calculatedFingerprint
 
             ktorServer = embeddedServer(
@@ -57,12 +75,11 @@ object ServerManager {
                     }
                 },
                 module = {
-                    configureKtorApp()
+                    // ИЗМЕНЕНИЕ: Передаем зависимости в модуль Ktor
+                    configureKtorApp(this@ServerManager, bookManager)
                 }
             )
             ktorServer!!.start(wait = false)
-
-            // Очищаем пароль из памяти для безопасности
             keystorePassword.fill('\u0000')
 
             setupJmDNS()
@@ -105,8 +122,6 @@ object ServerManager {
     }
 
     fun onPeerDisconnected() {
-        // Если устройство отключается, возвращаемся в состояние готовности,
-        // позволяя показать QR-код для нового спаривания, если потребуется.
         _serverState.value = ServerState.ReadyForConnection
     }
 
@@ -127,7 +142,7 @@ object ServerManager {
     }
 
     init {
-        // Устанавливаем провайдер BouncyCastle для криптографии.
         Security.addProvider(BouncyCastleProvider())
     }
 }
+

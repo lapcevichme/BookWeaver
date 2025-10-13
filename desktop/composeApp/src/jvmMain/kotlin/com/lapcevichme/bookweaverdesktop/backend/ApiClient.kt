@@ -8,6 +8,7 @@ import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.*
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.io.File
 
@@ -18,9 +19,13 @@ class ApiClient(private val httpClient: HttpClient) {
 
     // --- Health Check & Task Status ---
 
-    suspend fun healthCheck(): Result<ServerStatusResponse> {
+    /**
+     * ИСПРАВЛЕНИЕ: Используем корректную модель ServerStatus из ApiModels.kt,
+     * которая соответствует схеме OpenAPI.
+     */
+    suspend fun healthCheck(): Result<ServerStatus> {
         return runCatching {
-            httpClient.get(healthUrl).body<ServerStatusResponse>()
+            httpClient.get(healthUrl).body<ServerStatus>()
         }
     }
 
@@ -32,18 +37,12 @@ class ApiClient(private val httpClient: HttpClient) {
 
     // --- Project & File Endpoints ---
 
-    /**
-     * Получает список всех проектов (книг).
-     */
     suspend fun getProjects(): Result<List<String>> {
         return runCatching {
             httpClient.get("$baseApiUrl/projects").body<List<String>>()
         }
     }
 
-    /**
-     * Получает детальную информацию о проекте, включая статус всех глав.
-     */
     suspend fun getProjectDetails(bookName: String): Result<ProjectDetailsResponse> {
         return runCatching {
             httpClient.get("$baseApiUrl/projects/$bookName").body<ProjectDetailsResponse>()
@@ -51,35 +50,51 @@ class ApiClient(private val httpClient: HttpClient) {
     }
 
     /**
-     * Получает артефакт уровня книги (например, manifest.json).
+     * ИСПРАВЛЕНИЕ: Ожидаем JsonElement вместо JsonObject, так как ответ
+     * может быть и объектом, и массивом.
+     * ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
      */
-    suspend fun getBookArtifact(bookName: String, artifact: BookArtifactName): Result<JsonObject> {
+    suspend fun getBookArtifact(bookName: String, artifact: BookArtifactName): Result<JsonElement> {
         return runCatching {
-            httpClient.get("$baseApiUrl/projects/$bookName/artifacts/${artifact.fileName}").body<JsonObject>()
+            val artifactPath = artifact.name.lowercase()
+            httpClient.get("$baseApiUrl/projects/$bookName/artifacts/$artifactPath").body<JsonElement>()
         }
     }
 
     /**
-     * Получает артефакт уровня главы (например, scenario.json).
+     * ИСПРАВЛЕНИЕ: Ожидаем JsonElement вместо JsonObject.
+     * ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
      */
     suspend fun getChapterArtifact(
         bookName: String,
         volumeNum: Int,
         chapterNum: Int,
         artifact: ChapterArtifactName
-    ): Result<JsonObject> {
+    ): Result<JsonElement> {
         return runCatching {
-            val url = "$baseApiUrl/projects/$bookName/chapters/$volumeNum/$chapterNum/artifacts/${artifact.fileName}"
-            httpClient.get(url).body<JsonObject>()
+            val artifactPath = artifact.name.lowercase()
+            val url = "$baseApiUrl/projects/$bookName/chapters/$volumeNum/$chapterNum/artifacts/$artifactPath"
+            httpClient.get(url).body<JsonElement>()
+        }
+    }
+
+    suspend fun updateBookArtifact(
+        bookName: String,
+        artifact: BookArtifactName,
+        content: JsonObject
+    ): Result<HttpResponse> {
+        return runCatching {
+            val artifactPath = artifact.name.lowercase()
+            httpClient.post("$baseApiUrl/projects/$bookName/artifacts/$artifactPath") {
+                contentType(ContentType.Application.Json)
+                setBody(content)
+            }
         }
     }
 
 
     // --- AI Task Endpoints ---
 
-    /**
-     * Запускает анализ персонажей для всей книги.
-     */
     suspend fun startCharacterAnalysis(request: BookTaskRequest): Result<TaskStatusResponse> {
         return runCatching {
             httpClient.post("$baseApiUrl/analyze_characters") {
@@ -89,9 +104,6 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-    /**
-     * Запускает генерацию пересказов для всей книги.
-     */
     suspend fun startSummaryGeneration(request: BookTaskRequest): Result<TaskStatusResponse> {
         return runCatching {
             httpClient.post("$baseApiUrl/generate_summaries") {
@@ -101,9 +113,6 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-    /**
-     * Запускает генерацию сценария для одной главы.
-     */
     suspend fun startScenarioGeneration(request: ChapterTaskRequest): Result<TaskStatusResponse> {
         return runCatching {
             httpClient.post("$baseApiUrl/generate_scenario") {
@@ -113,9 +122,6 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-    /**
-     * Запускает синтез речи и субтитров для одной главы.
-     */
     suspend fun startTtsSynthesis(request: ChapterTaskRequest): Result<TaskStatusResponse> {
         return runCatching {
             httpClient.post("$baseApiUrl/synthesize_tts") {
@@ -125,9 +131,6 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-    /**
-     * Запускает применение эмоциональной окраски для одной главы.
-     */
     suspend fun startVoiceConversion(request: ChapterTaskRequest): Result<TaskStatusResponse> {
         return runCatching {
             httpClient.post("$baseApiUrl/apply_voice_conversion") {
@@ -137,10 +140,6 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-
-    /**
-     * Imports a new book from a file (.txt, .epub) by sending it to the backend for conversion.
-     */
     suspend fun importBook(file: File): Result<HttpResponse> {
         return runCatching {
             httpClient.post("$baseApiUrl/projects/import") {

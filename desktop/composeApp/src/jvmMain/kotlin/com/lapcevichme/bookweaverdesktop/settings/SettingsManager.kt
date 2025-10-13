@@ -45,6 +45,20 @@ class SettingsManager {
     }
 
     /**
+     * НОВОЕ: Сохраняет объект AppSettings в файл settings.properties.
+     */
+    fun saveSettings(settings: AppSettings) {
+        val newProperties = Properties()
+        newProperties.setProperty(PYTHON_EXEC_PATH_KEY, settings.pythonExecutablePath)
+        newProperties.setProperty(BACKEND_DIR_PATH_KEY, settings.backendWorkingDirectory)
+
+        FileOutputStream(settingsFile).use { output ->
+            newProperties.store(output, "BookWeaver Application Settings")
+        }
+        println("Settings saved to: ${settingsFile.absolutePath}")
+    }
+
+    /**
      * Создает файл `settings.properties` с инструкциями и пустыми значениями.
      */
     private fun createDefaultSettings() {
