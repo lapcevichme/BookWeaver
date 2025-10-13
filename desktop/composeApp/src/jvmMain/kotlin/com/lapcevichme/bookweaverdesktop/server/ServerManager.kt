@@ -1,7 +1,9 @@
 package com.lapcevichme.bookweaverdesktop.server
 
 import com.lapcevichme.bookweaverdesktop.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.model.*
+import com.lapcevichme.bookweaverdesktop.model.ConnectionInfo
+import com.lapcevichme.bookweaverdesktop.model.WsServerState
+import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import com.lapcevichme.bookweaverdesktop.util.NetworkUtils
 import com.lapcevichme.bookweaverdesktop.util.SecurityUtils
 import io.ktor.server.engine.*
@@ -11,9 +13,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.modules.SerializersModule
-import kotlinx.serialization.modules.polymorphic
-import kotlinx.serialization.modules.subclass
 import mu.KotlinLogging
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
@@ -23,12 +22,18 @@ import javax.jmdns.ServiceInfo
 
 private val logger = KotlinLogging.logger {}
 
-class ServerManager(private val bookManager: BookManager) {
+class ServerManager(
+    private val bookManager: BookManager,
+    val json: Json,
+    private val settingsManager: SettingsManager
+) {
     private val PORT = 8765
-    internal val KEYSTORE_FILE = "keystore.bks"
     private val SERVICE_TYPE = "_bookweaver._tcp.local."
     private val SERVICE_NAME = "BookWeaver Desktop Server"
     private val KEY_ALIAS = "bookweaver"
+    // ИСПРАВЛЕНО: Возвращаем константу для имени файла
+    private val KEYSTORE_FILE = "keystore.bks"
+
 
     private val _wsServerState = MutableStateFlow<WsServerState>(WsServerState.Disconnected)
     val serverState = _wsServerState.asStateFlow()
@@ -39,27 +44,11 @@ class ServerManager(private val bookManager: BookManager) {
 
     internal val peerSession = AtomicReference<WebSocketSession?>()
 
-    // Создаем Json здесь, чтобы он был доступен во всем серверном слое
-    internal val json = Json {
-        serializersModule = SerializersModule {
-            polymorphic(WsMessage::class) {
-                subclass(WsRequestBookList::class)
-                subclass(WsBookList::class)
-                subclass(WsRequestAudio::class)
-                subclass(WsAudioStreamEnd::class)
-                subclass(WsAudioStreamError::class)
-                subclass(WsError::class)
-            }
-        }
-        classDiscriminator = "type"
-        ignoreUnknownKeys = true
-    }
-
-
     fun start() {
         try {
-            val (keyStore, calculatedFingerprint, keystorePassword) = SecurityUtils.setupCertificate(KEYSTORE_FILE)
-            fingerprint = calculatedFingerprint
+            // ИСПРАВЛЕНО: Вызываем метод с параметром, как в старой версии SecurityUtils
+            val (keyStore, certFingerprint, keystorePassword) = SecurityUtils.setupCertificate(KEYSTORE_FILE)
+            fingerprint = certFingerprint
 
             ktorServer = embeddedServer(
                 Netty,
@@ -75,12 +64,11 @@ class ServerManager(private val bookManager: BookManager) {
                     }
                 },
                 module = {
-                    // ИЗМЕНЕНИЕ: Передаем зависимости в модуль Ktor
-                    configureKtorApp(this@ServerManager, bookManager)
+                    configureKtorApp(this@ServerManager, bookManager, settingsManager)
                 }
             )
             ktorServer!!.start(wait = false)
-            keystorePassword.fill('\u0000')
+            keystorePassword.fill('\u0000') // Очищаем пароль из памяти
 
             setupJmDNS()
             _wsServerState.value = WsServerState.ReadyForConnection

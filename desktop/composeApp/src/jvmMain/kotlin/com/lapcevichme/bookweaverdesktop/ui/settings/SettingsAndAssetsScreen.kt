@@ -39,6 +39,7 @@ fun SettingsAndAssetsScreen(
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Настройки", "Бэкенд", "Подключение", "Конфигурация AI", "Библиотека голосов", "Словарь")
+    val uiState by settingsViewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
@@ -59,33 +60,35 @@ fun SettingsAndAssetsScreen(
                         text = { Text(title) },
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        enabled = index < 4
+                        enabled = index < 4 // Пока активны только первые 4 вкладки
                     )
                 }
             }
-            when (selectedTab) {
-                0 -> SettingsTab(settingsViewModel)
-                1 -> BackendTab(mainViewModel)
-                2 -> ConnectionTab(mainViewModel)
-                3 -> ConfigTab(settingsViewModel) // Новая вкладка
-                4 -> PlaceholderTab("Управление моделями голосов", "Здесь вы сможете добавлять, удалять и настраивать референсы голосов для Voice Conversion.")
-                5 -> PlaceholderTab("Словарь произношений", "Здесь вы сможете управлять словарем для корректной озвучки специфичных терминов и имен.")
+            Box(Modifier.fillMaxSize().padding(16.dp)) {
+                when (selectedTab) {
+                    0 -> SettingsTab(uiState, settingsViewModel::saveSettings)
+                    1 -> BackendTab(mainViewModel)
+                    2 -> ConnectionTab(mainViewModel)
+                    3 -> ConfigTab(uiState, settingsViewModel::saveConfig, settingsViewModel::loadData)
+                    4 -> PlaceholderTab("Управление моделями голосов", "Здесь вы сможете добавлять, удалять и настраивать референсы голосов для Voice Conversion.")
+                    5 -> PlaceholderTab("Словарь произношений", "Здесь вы сможете управлять словарем для корректной озвучки специфичных терминов и имен.")
+                }
             }
         }
     }
 }
 
-// Вкладка с основными настройками (пути)
 @Composable
-private fun SettingsTab(viewModel: SettingsAndAssetsViewModel) {
-    val settingsState by viewModel.uiState.collectAsState()
-
-    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-        when(val state = settingsState) {
+private fun SettingsTab(
+    state: SettingsUiState,
+    onSave: (AppSettings) -> Unit
+) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        when(state) {
             is SettingsUiState.Loading -> CircularProgressIndicator()
-            is SettingsUiState.Error -> Text("Ошибка: ${state.message}")
-            is SettingsUiState.Success -> {
-                SettingsForm(settings = state.settings, onSave = viewModel::saveSettings)
+            is SettingsUiState.Error -> Text("Критическая ошибка: ${state.message}", color = MaterialTheme.colorScheme.error)
+            is SettingsUiState.Loaded -> {
+                SettingsForm(settings = state.settings, onSave = onSave)
             }
         }
     }
@@ -126,7 +129,6 @@ private fun SettingsForm(
 }
 
 
-// Вкладка управления Python-бэкендом
 @Composable
 private fun BackendTab(viewModel: MainViewModel) {
     val backendState by viewModel.backendState.collectAsState()
@@ -140,7 +142,6 @@ private fun BackendTab(viewModel: MainViewModel) {
     }
 
     Row(Modifier.fillMaxSize()) {
-        // Левая панель - управление
         Column(
             modifier = Modifier
                 .fillMaxHeight()
@@ -152,27 +153,26 @@ private fun BackendTab(viewModel: MainViewModel) {
         ) {
             Text("Управление Бэкендом", style = MaterialTheme.typography.titleMedium)
 
-            when (backendState) {
-                BackendProcessManager.State.STOPPED -> Button(onClick = { viewModel.startBackend() }) { Text("Запустить") }
-                BackendProcessManager.State.STARTING -> CircularProgressIndicator()
-                BackendProcessManager.State.RUNNING_HEALTHY -> {
+            when (val state = backendState) {
+                is BackendProcessManager.State.STOPPED -> Button(onClick = { viewModel.startBackend() }) { Text("Запустить") }
+                is BackendProcessManager.State.STARTING -> CircularProgressIndicator()
+                is BackendProcessManager.State.RUNNING_HEALTHY -> {
                     Text("✅ Сервер запущен", color = Color(0xFF008000))
                     Button(onClick = { viewModel.stopBackend() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                         Text("Остановить")
                     }
                 }
                 is BackendProcessManager.State.FAILED -> {
-                    Text("❌ Ошибка запуска", color = MaterialTheme.colorScheme.error)
+                    Text("❌ Ошибка: ${state.reason}", color = MaterialTheme.colorScheme.error)
                     Button(onClick = { viewModel.startBackend() }) { Text("Попробовать снова") }
                 }
-                BackendProcessManager.State.RUNNING_INITIALIZING -> {
+                is BackendProcessManager.State.RUNNING_INITIALIZING -> {
                     CircularProgressIndicator()
                     Text("Инициализация AI...")
                 }
             }
         }
 
-        // Правая панель - логи
         Column(
             modifier = Modifier
                 .fillMaxHeight()
@@ -200,7 +200,6 @@ private fun BackendTab(viewModel: MainViewModel) {
     }
 }
 
-// Вкладка для подключения мобильного клиента
 @Composable
 private fun ConnectionTab(viewModel: MainViewModel) {
     val serverState by viewModel.webSocketServerState.collectAsState()
@@ -244,54 +243,61 @@ private fun ConnectionTab(viewModel: MainViewModel) {
     }
 }
 
-// Редактор конфигурации
 @Composable
-private fun ConfigTab(viewModel: SettingsAndAssetsViewModel) {
-    val uiState by viewModel.uiState.collectAsState()
-
-    when (val state = uiState) {
-        is SettingsUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        is SettingsUiState.Error -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(state.message) }
-        is SettingsUiState.Success -> {
-            var editorText by remember(state.configContent) { mutableStateOf(state.configContent) }
-
-            Column(Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Редактирование config.py", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "Внимание: Изменение этого файла требует перезапуска AI Backend!",
-                    color = MaterialTheme.colorScheme.secondary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Spacer(Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.saveConfig(editorText) },
-                        enabled = editorText.isNotBlank() && "❌" !in state.configContent
-                    ) {
-                        Text("Сохранить изменения")
-                    }
-                    Button(onClick = { viewModel.loadData() }) {
-                        Text("Обновить")
-                    }
+private fun ConfigTab(
+    state: SettingsUiState,
+    onSave: (String) -> Unit,
+    onReload: () -> Unit
+) {
+    when (state) {
+        is SettingsUiState.Loading -> CircularProgressIndicator()
+        is SettingsUiState.Error -> Text("Критическая ошибка: ${state.message}", color = MaterialTheme.colorScheme.error)
+        is SettingsUiState.Loaded -> {
+            if (state.configError != null) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Ошибка загрузки config.py:", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium)
+                    Text(state.configError, color = MaterialTheme.colorScheme.error)
+                    Text("Пожалуйста, укажите корректный путь к директории бэкенда на вкладке 'Настройки' и попробуйте снова.", style = MaterialTheme.typography.bodySmall)
                 }
-                Spacer(Modifier.height(16.dp))
-
-                SelectionContainer(Modifier.fillMaxSize()) {
-                    OutlinedTextField(
-                        value = editorText,
-                        onValueChange = { editorText = it },
-                        modifier = Modifier.fillMaxSize(),
-                        textStyle = LocalTextStyle.current.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
-                            color = if ("❌" in state.configContent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                        ),
-                        label = { Text("Содержимое config.py") }
+            } else if (state.configContent != null) {
+                var editorText by remember(state.configContent) { mutableStateOf(state.configContent) }
+                Column(Modifier.fillMaxSize().padding(16.dp)) {
+                    Text("Редактирование config.py", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "Внимание: Изменение этого файла требует перезапуска AI Backend!",
+                        color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.bodySmall
                     )
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { onSave(editorText) },
+                            enabled = editorText != state.configContent
+                        ) {
+                            Text("Сохранить изменения")
+                        }
+                        Button(onClick = onReload) {
+                            Text("Обновить")
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    SelectionContainer(Modifier.fillMaxSize()) {
+                        OutlinedTextField(
+                            value = editorText,
+                            onValueChange = { editorText = it },
+                            modifier = Modifier.fillMaxSize(),
+                            textStyle = LocalTextStyle.current.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            label = { Text("Содержимое config.py") }
+                        )
+                    }
                 }
             }
         }
@@ -332,3 +338,4 @@ private fun generateQrCodeBitmap(text: String): ImageBitmap {
     }
     return bufferedImage.toComposeImageBitmap()
 }
+

@@ -6,6 +6,7 @@ import com.lapcevichme.bookweaverdesktop.model.WsBookList
 import com.lapcevichme.bookweaverdesktop.model.WsMessage
 import com.lapcevichme.bookweaverdesktop.model.WsRequestAudio
 import com.lapcevichme.bookweaverdesktop.model.WsRequestBookList
+import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.contentnegotiation.*
@@ -21,15 +22,17 @@ import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import java.io.File
 import java.io.IOException
-import java.nio.file.InvalidPathException
-import java.nio.file.Path
-import java.nio.file.Paths
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 private const val BUFFER_SIZE = 8192
 
-fun Application.configureKtorApp(serverManager: ServerManager, bookManager: BookManager) {
+fun Application.configureKtorApp(
+    serverManager: ServerManager,
+    bookManager: BookManager,
+    // ИЗМЕНЕНО: Принимаем SettingsManager
+    settingsManager: SettingsManager
+) {
     install(ContentNegotiation) {
         json(serverManager.json)
     }
@@ -60,7 +63,8 @@ fun Application.configureKtorApp(serverManager: ServerManager, bookManager: Book
                             val message = serverManager.json.decodeFromString<WsMessage>(text)
                             when (message) {
                                 is WsRequestAudio -> {
-                                    launch(Dispatchers.IO) { handleAudioRequest(this@webSocket, message.filePath) }
+                                    // ИЗМЕНЕНО: Передаем settingsManager в обработчик
+                                    launch(Dispatchers.IO) { handleAudioRequest(this@webSocket, message.filePath, settingsManager) }
                                 }
 
                                 is WsRequestBookList -> {
@@ -95,22 +99,39 @@ fun Application.configureKtorApp(serverManager: ServerManager, bookManager: Book
     }
 }
 
-private suspend fun handleAudioRequest(session: WebSocketSession, requestedPath: String) {
-    // ВАЖНО: Убедитесь, что директория для файлов существует и безопасна.
-    // В реальном приложении путь нужно брать из настроек.
-    val baseDir = File(System.getProperty("user.home"), "BookWeaver/shared").apply { mkdirs() }
+private suspend fun handleAudioRequest(
+    session: WebSocketSession,
+    requestedPath: String,
+    // ИЗМЕНЕНО: Принимаем SettingsManager
+    settingsManager: SettingsManager
+) {
+    // ИЗМЕНЕНО: Загружаем настройки, чтобы найти правильную директорию.
+    val settingsResult = settingsManager.loadSettings()
+    val baseDir = settingsResult.fold(
+        onSuccess = {
+            // Предполагаем, что все проекты бэкенд хранит в папке 'projects' внутри своей рабочей директории
+            File(it.backendWorkingDirectory, "projects")
+        },
+        onFailure = {
+            logger.error(it) { "Could not load settings to determine audio file path." }
+            // TODO: Отправить клиенту сообщение об ошибке
+            return
+        }
+    )
+    baseDir.mkdirs()
+
     val requestedFile = File(baseDir, requestedPath).canonicalFile
 
     // ПРОВЕРКА БЕЗОПАСНОСТИ: Убеждаемся, что запрашиваемый файл находится внутри разрешенной директории.
     if (!requestedFile.startsWith(baseDir)) {
         logger.warn { "Path Traversal attempt blocked for path: $requestedPath" }
-        // В идеале, отправить клиенту сообщение об ошибке.
+        // TODO: В идеале, отправить клиенту сообщение об ошибке.
         return
     }
 
     if (!requestedFile.exists() || !requestedFile.isFile) {
         logger.warn { "File not found: ${requestedFile.path}" }
-        // Отправить клиенту сообщение, что файл не найден.
+        // TODO: Отправить клиенту сообщение, что файл не найден.
         return
     }
 
@@ -123,10 +144,10 @@ private suspend fun handleAudioRequest(session: WebSocketSession, requestedPath:
                 session.send(Frame.Binary(true, buffer.copyOf(bytesRead)))
             }
         }
-        // session.sendSerialized(WsAudioStreamEnd) // Сообщить клиенту, что передача завершена
+        // TODO: session.sendSerialized(WsAudioStreamEnd) // Сообщить клиенту, что передача завершена
     } catch (e: IOException) {
         logger.error(e) { "Error reading file '$requestedPath'" }
-        // session.sendSerialized(WsAudioStreamError("File read error: ${e.message}"))
+        // TODO: session.sendSerialized(WsAudioStreamError("File read error: ${e.message}"))
     }
 }
 
@@ -136,3 +157,4 @@ private suspend fun WebSocketSession.sendSerialized(json: kotlinx.serialization.
     val jsonString = json.encodeToString(WsMessage.serializer(), message)
     send(Frame.Text(jsonString))
 }
+

@@ -9,54 +9,61 @@ class ConfigManager(
     private val settingsManager: SettingsManager
 ) {
     /**
-     * ИЗМЕНЕНО: Возвращает Result<File> для корректной обработки ошибок
-     * при загрузке настроек из SettingsManager.
+     * Внутренняя функция для получения и валидации пути к файлу конфигурации.
      */
-    private suspend fun getConfigFile(): Result<File> {
-        return settingsManager.loadSettings().map { settings ->
-            File(settings.backendWorkingDirectory, "config.py")
-        }
-    }
-
-    suspend fun loadConfigContent(): Result<String> = withContext(Dispatchers.IO) {
-        // .fold - это безопасный способ развернуть Result
-        getConfigFile().fold(
-            onSuccess = { configFile ->
-                runCatching {
-                    // Проверка безопасности: убеждаемся, что файл находится внутри рабочей директории
-                    val settings = settingsManager.loadSettings().getOrThrow()
-                    val workingDir = File(settings.backendWorkingDirectory).canonicalFile
-                    if (!configFile.canonicalFile.startsWith(workingDir)) {
-                        throw SecurityException("Attempted to access file outside of the working directory.")
-                    }
-
-                    if (!configFile.exists()) {
-                        "Файл конфигурации не найден: ${configFile.absolutePath}"
-                    } else {
-                        configFile.readText()
-                    }
+    private suspend fun getConfigFile(): Result<File> = withContext(Dispatchers.IO) {
+        settingsManager.loadSettings().fold(
+            onSuccess = { settings ->
+                val backendPath = settings.backendWorkingDirectory
+                if (backendPath.isBlank()) {
+                    return@fold Result.failure(Exception("Путь к рабочей директории бэкенда не указан в настройках."))
                 }
+
+                val baseDir = File(backendPath)
+                if (!baseDir.isDirectory) {
+                    return@fold Result.failure(Exception("Указанная директория бэкенда не существует или не является папкой: ${baseDir.absolutePath}"))
+                }
+
+                Result.success(File(baseDir, "config.py"))
             },
-            onFailure = { error ->
-                Result.failure(error)
+            onFailure = {
+                // Пробрасываем ошибку загрузки настроек
+                Result.failure(it)
             }
         )
     }
 
-    suspend fun saveConfigContent(content: String): Result<Unit> = withContext(Dispatchers.IO) {
+    /**
+     * Асинхронно читает содержимое файла config.py.
+     * @return Result, содержащий либо содержимое файла, либо ошибку.
+     */
+    suspend fun loadConfigContent(): Result<String> = withContext(Dispatchers.IO) {
         getConfigFile().fold(
-            onSuccess = { configFile ->
-                runCatching {
-                    val settings = settingsManager.loadSettings().getOrThrow()
-                    val workingDir = File(settings.backendWorkingDirectory).canonicalFile
-                    if (!configFile.canonicalFile.startsWith(workingDir)) {
-                        throw SecurityException("Attempted to access file outside of the working directory.")
-                    }
-                    configFile.writeText(content)
+            onSuccess = { file ->
+                if (!file.exists()) {
+                    Result.failure(Exception("Файл 'config.py' не найден по пути: ${file.absolutePath}"))
+                } else {
+                    runCatching { file.readText() }
                 }
             },
-            onFailure = { error ->
-                Result.failure(error)
+            onFailure = {
+                Result.failure(it)
+            }
+        )
+    }
+
+    /**
+     * Асинхронно сохраняет новое содержимое в файл config.py.
+     * @param content Новое содержимое файла.
+     * @return Result с Unit в случае успеха или ошибкой.
+     */
+    suspend fun saveConfigContent(content: String): Result<Unit> = withContext(Dispatchers.IO) {
+        getConfigFile().fold(
+            onSuccess = { file ->
+                runCatching { file.writeText(content) }
+            },
+            onFailure = {
+                Result.failure(it)
             }
         )
     }

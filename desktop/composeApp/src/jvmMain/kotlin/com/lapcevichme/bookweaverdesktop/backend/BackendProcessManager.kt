@@ -5,6 +5,7 @@ import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.io.IOException
 import mu.KotlinLogging
 import java.io.BufferedReader
 import java.io.File
@@ -45,14 +46,16 @@ class BackendProcessManager(
         _logs.value = emptyList()
         addLog("--- Starting Python backend process ---")
 
-        // ИСПРАВЛЕНО: Безопасно получаем настройки или выходим с ошибкой
-        val settings = settingsManager.loadSettings().getOrElse { error ->
-            val errorMsg = "Failed to load settings: ${error.message}"
+        val settingsResult = settingsManager.loadSettings()
+
+        settingsResult.onFailure {
+            val errorMsg = "Failed to load settings: ${it.message}"
             addLog("❌ $errorMsg")
             _state.value = State.FAILED(errorMsg)
             return
         }
 
+        val settings = settingsResult.getOrThrow()
         val pythonExecutable = settings.pythonExecutablePath
         val workingDir = File(settings.backendWorkingDirectory)
 
@@ -64,7 +67,7 @@ class BackendProcessManager(
         }
 
         val processBuilder = ProcessBuilder(
-            pythonExecutable, "main.py", "run-server"
+            pythonExecutable, "api_server.py", "run-server"
         ).directory(workingDir).redirectErrorStream(false)
 
         try {
@@ -86,15 +89,37 @@ class BackendProcessManager(
     }
 
     suspend fun stop() {
+        if (state.value is State.STOPPED) return
+
         addLog("--- Stopping Python backend process ---")
-        processJobs?.cancel()
-        process?.let {
-            it.destroyForcibly()
-            it.waitFor(5, TimeUnit.SECONDS)
+        processJobs?.cancel() // Отменяем все дочерние корутины (логи, health check)
+
+        process?.let { proc ->
+            addLog("Attempting to stop process with PID: ${proc.pid()}...")
+            withContext(Dispatchers.IO) {
+                // 1. Попытка штатного завершения (SIGTERM)
+                proc.destroy()
+                val gracefullyExited = proc.waitFor(5, TimeUnit.SECONDS)
+
+                if (gracefullyExited) {
+                    addLog("✅ Process terminated gracefully with exit code: ${proc.exitValue()}.")
+                } else {
+                    // 2. Если не вышло, принудительное завершение (SIGKILL)
+                    addLog("Graceful shutdown timed out. Forcing termination...")
+                    proc.destroyForcibly()
+                    val forciblyExited = proc.waitFor(5, TimeUnit.SECONDS)
+                    if (forciblyExited) {
+                        addLog("✅ Process terminated forcibly.")
+                    } else {
+                        addLog("❌ Failed to terminate process even with force.")
+                    }
+                }
+            }
         }
+
         process = null
         _state.value = State.STOPPED
-        addLog("--- Process stopped ---")
+        addLog("--- Process stop sequence complete ---")
     }
 
     private suspend fun runHealthCheck() {
@@ -134,16 +159,31 @@ class BackendProcessManager(
         if (inputStream == null) return
         val reader = BufferedReader(InputStreamReader(inputStream))
         withContext(Dispatchers.IO) {
-            reader.useLines { lines ->
-                lines.forEach { line ->
-                    if (isActive) addLog("$prefix $line")
+            try {
+                reader.useLines { lines ->
+                    lines.forEach { line ->
+                        // Проверка на isActive здесь все еще полезна,
+                        // чтобы не делать лишней работы, если отмена уже пришла
+                        if (isActive) {
+                            addLog("$prefix $line")
+                        } else {
+                            // Если корутину отменили, выходим из цикла
+                            return@useLines
+                        }
+                    }
                 }
+            } catch (e: IOException) {
+                // Это исключение ОЖИДАЕМО при закрытии потока во время остановки процесса.
+                // Его можно безопасно проигнорировать или залогировать на уровне DEBUG.
+                logger.debug { "Stream for '$prefix' closed as expected during shutdown." }
             }
         }
     }
 
+
     private suspend fun waitForProcessExit() {
         val exitCode = process?.waitFor()
+        // Если процесс завершился, а мы все еще думаем, что он работает, значит что-то пошло не так
         if (_state.value is State.RUNNING_HEALTHY || _state.value is State.RUNNING_INITIALIZING) {
             val errorMsg = "Process terminated unexpectedly with exit code: $exitCode"
             addLog("--- ❌ $errorMsg ---")
@@ -157,3 +197,4 @@ class BackendProcessManager(
         }
     }
 }
+

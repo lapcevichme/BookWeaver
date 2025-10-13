@@ -6,7 +6,7 @@ import com.lapcevichme.bookweaverdesktop.backend.BookManager
 import com.lapcevichme.bookweaverdesktop.config.ConfigManager
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
 import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
-import com.lapcevichme.bookweaverdesktop.ui.*
+import com.lapcevichme.bookweaverdesktop.ui.MainViewModel
 import com.lapcevichme.bookweaverdesktop.ui.dashboard.DashboardViewModel
 import com.lapcevichme.bookweaverdesktop.ui.editor.ScenarioEditorViewModel
 import com.lapcevichme.bookweaverdesktop.ui.settings.SettingsAndAssetsViewModel
@@ -28,6 +28,7 @@ val appModule = module {
             prettyPrint = true
             isLenient = true
             ignoreUnknownKeys = true
+            classDiscriminator = "type"
         }
     }
     single {
@@ -42,7 +43,8 @@ val appModule = module {
     singleOf(::ConfigManager)
     singleOf(::BookManager)
     singleOf(::BackendProcessManager)
-    singleOf(::ServerManager)
+    // ИЗМЕНЕНО: ServerManager теперь тоже зависит от SettingsManager
+    single { ServerManager(get(), get(), get()) }
 
 
     // --- VIEW MODELS ---
