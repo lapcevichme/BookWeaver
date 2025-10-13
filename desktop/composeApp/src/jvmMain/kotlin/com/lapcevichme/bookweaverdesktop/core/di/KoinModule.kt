@@ -53,11 +53,9 @@ val appModule = module {
     singleOf(::SettingsManager)
     single { CoroutineScope(Dispatchers.Default + SupervisorJob()) }
     singleOf(::BackendProcessManager)
-    // ИЗМЕНЕНО: Используем singleOf, Koin сам подставит ProjectRepository, Json и SettingsManager
     singleOf(::ServerManager)
 
     // --- Repository Layer ---
-    // ИСПРАВЛЕНО: ProjectRepositoryImpl принимает только один параметр (ApiClient)
     single<ProjectRepository> { ProjectRepositoryImpl(get(), get()) }
     single<TaskRepository> { TaskRepositoryImpl(get()) }
     single<ConfigRepository> { ConfigRepositoryImpl(get()) }
@@ -81,13 +79,25 @@ val appModule = module {
     factoryOf(::StopBackendUseCase)
     factoryOf(::GetConfigContentUseCase)
     factoryOf(::SaveConfigContentUseCase)
+    factoryOf(::StartCharacterAnalysisUseCase)
+    factoryOf(::StartSummaryGenerationUseCase)
+    factoryOf(::StartVoiceConversionUseCase)
 
 
     // --- UI Layer (View Models) ---
     factory { MainViewModel(get(), get()) }
     factory { DashboardViewModel(get(), get()) }
     factory { (bookName: String) ->
-        WorkspaceViewModel(bookName, get(), get(), get(), get(), get(), get(), get())
+        WorkspaceViewModel(
+            bookName = bookName,
+            getProjectDetailsUseCase = get(),
+            startScenarioGenerationUseCase = get(),
+            startTtsSynthesisUseCase = get(),
+            startCharacterAnalysisUseCase = get(),
+            startSummaryGenerationUseCase = get(),
+            startVoiceConversionUseCase = get(),
+            getTaskStatusUseCase = get()
+        )
     }
     factory { (bookName: String, volume: Int, chapter: Int) ->
         ScenarioEditorViewModel(bookName, volume, chapter, get(), get())
@@ -103,4 +113,3 @@ fun initKoin(appDeclaration: KoinAppDeclaration = {}) =
         appDeclaration()
         modules(appModule)
     }
-

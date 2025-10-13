@@ -22,10 +22,15 @@ import com.lapcevichme.bookweaverdesktop.domain.model.TaskStatus as DomainTaskSt
 
 fun String.toDomainProject(): DomainProject = DomainProject(name = this)
 
-fun DataProjectDetails.toDomainProjectDetails(): DomainProjectDetails = DomainProjectDetails(
-    name = this.bookName,
-    chapters = this.chapters.map { it.toDomainChapter() }
-)
+fun DataProjectDetails.toDomainProjectDetails(): DomainProjectDetails {
+    return DomainProjectDetails(
+        name = this.bookName,
+        chapters = this.chapters.map { it.toDomainChapter() },
+        hasCharacterAnalysis = this.hasCharacterAnalysis,
+        hasSummaries = this.hasSummaries
+    )
+}
+
 
 fun DataChapterStatus.toDomainChapter(): DomainChapter = DomainChapter(
     volumeNumber = this.volumeNum,
@@ -73,8 +78,20 @@ fun DataTaskStatusEnum.toDomainTaskStatus(): DomainTaskStatus = when (this) {
 
 fun BackendProcessManager.State.toDomainStatus(): BackendServerStatus = when (this) {
     is BackendProcessManager.State.STOPPED -> BackendServerStatus(BackendServerState.READY, "Сервер остановлен")
-    is BackendProcessManager.State.STARTING -> BackendServerStatus(BackendServerState.INITIALIZING, "Запуск процесса...")
-    is BackendProcessManager.State.RUNNING_INITIALIZING -> BackendServerStatus(BackendServerState.INITIALIZING, "Инициализация API...")
-    is BackendProcessManager.State.RUNNING_HEALTHY -> BackendServerStatus(BackendServerState.READY, "Сервер готов к работе")
+    is BackendProcessManager.State.STARTING -> BackendServerStatus(
+        BackendServerState.INITIALIZING,
+        "Запуск процесса..."
+    )
+
+    is BackendProcessManager.State.RUNNING_INITIALIZING -> BackendServerStatus(
+        BackendServerState.INITIALIZING,
+        "Инициализация API..."
+    )
+
+    is BackendProcessManager.State.RUNNING_HEALTHY -> BackendServerStatus(
+        BackendServerState.READY,
+        "Сервер готов к работе"
+    )
+
     is BackendProcessManager.State.FAILED -> BackendServerStatus(BackendServerState.ERROR, this.reason)
 }

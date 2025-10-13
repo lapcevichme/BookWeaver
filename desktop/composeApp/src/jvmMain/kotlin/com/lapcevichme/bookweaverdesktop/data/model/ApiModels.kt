@@ -70,7 +70,10 @@ data class ChapterTaskRequest(
 @Serializable
 data class ProjectDetails(
     @SerialName("book_name") val bookName: String,
-    @SerialName("chapters") val chapters: List<ChapterStatus>
+    @SerialName("chapters") val chapters: List<ChapterStatus>,
+    @SerialName("has_character_analysis") val hasCharacterAnalysis: Boolean = false,
+    @SerialName("has_summaries") val hasSummaries: Boolean = false
+
 )
 
 @Serializable

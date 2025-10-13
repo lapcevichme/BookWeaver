@@ -2,7 +2,6 @@ package com.lapcevichme.bookweaverdesktop.ui.workspace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.domain.model.BookArtifact
 import com.lapcevichme.bookweaverdesktop.domain.model.Chapter
 import com.lapcevichme.bookweaverdesktop.domain.model.Task
 import com.lapcevichme.bookweaverdesktop.domain.model.TaskStatus
@@ -13,17 +12,16 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 class WorkspaceViewModel(
     private val bookName: String,
     private val getProjectDetailsUseCase: GetProjectDetailsUseCase,
-    private val getBookArtifactUseCase: GetBookArtifactUseCase,
-    private val updateBookArtifactUseCase: UpdateBookArtifactUseCase,
     private val startScenarioGenerationUseCase: StartScenarioGenerationUseCase,
     private val startTtsSynthesisUseCase: StartTtsSynthesisUseCase,
+    private val startCharacterAnalysisUseCase: StartCharacterAnalysisUseCase,
+    private val startSummaryGenerationUseCase: StartSummaryGenerationUseCase,
+    private val startVoiceConversionUseCase: StartVoiceConversionUseCase,
     private val getTaskStatusUseCase: GetTaskStatusUseCase,
-    private val json: Json // Оставляем для pretty-print
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorkspaceUiState(bookName = bookName))
@@ -59,22 +57,52 @@ class WorkspaceViewModel(
         _uiState.update { it.copy(selectedChapter = chapter) }
     }
 
+    // --- Методы запуска задач ---
+
     fun generateScenario(volume: Int, chapter: Int) {
-        runTask(volume, chapter, TaskType.SCENARIO) { startScenarioGenerationUseCase(bookName, volume, chapter) }
+        runChapterTask(volume, chapter, TaskType.SCENARIO) { startScenarioGenerationUseCase(bookName, volume, chapter) }
     }
 
     fun synthesizeAudio(volume: Int, chapter: Int) {
-        runTask(volume, chapter, TaskType.AUDIO) { startTtsSynthesisUseCase(bookName, volume, chapter) }
+        runChapterTask(volume, chapter, TaskType.AUDIO) { startTtsSynthesisUseCase(bookName, volume, chapter) }
     }
 
-    private fun runTask(volume: Int, chapter: Int, taskType: TaskType, apiCall: suspend () -> Result<Task>) {
+    fun applyVoiceConversion(volume: Int, chapter: Int) {
+        runChapterTask(volume, chapter, TaskType.VOICE_CONVERSION) { startVoiceConversionUseCase(bookName, volume, chapter) }
+    }
+
+    fun analyzeCharacters() {
+        runBookTask(TaskType.CHARACTER_ANALYSIS) { startCharacterAnalysisUseCase(bookName) }
+    }
+
+    fun generateSummaries() {
+        runBookTask(TaskType.SUMMARY_GENERATION) { startSummaryGenerationUseCase(bookName) }
+    }
+
+    // --- Приватная логика управления задачами ---
+
+    private fun runChapterTask(volume: Int, chapter: Int, taskType: TaskType, apiCall: suspend () -> Result<Task>) {
+        runTask(apiCall) { initialTask ->
+            ActiveTaskDetails(taskType, initialTask, volume, chapter)
+        }
+    }
+
+    private fun runBookTask(taskType: TaskType, apiCall: suspend () -> Result<Task>) {
+        runTask(apiCall) { initialTask ->
+            ActiveTaskDetails(taskType, initialTask)
+        }
+    }
+
+    private fun runTask(
+        apiCall: suspend () -> Result<Task>,
+        taskDetailsBuilder: (Task) -> ActiveTaskDetails
+    ) {
         pollingJob?.cancel()
         viewModelScope.launch {
             _uiState.update { it.copy(activeTask = null) }
             apiCall()
                 .onSuccess { initialTask ->
-                    // ИСПРАВЛЕНО: Создаем обертку ActiveTaskDetails
-                    val taskDetails = ActiveTaskDetails(volume, chapter, taskType, initialTask)
+                    val taskDetails = taskDetailsBuilder(initialTask)
                     _uiState.update { it.copy(activeTask = taskDetails) }
                     startPollingStatus(initialTask.id)
                 }
@@ -92,7 +120,6 @@ class WorkspaceViewModel(
                 delay(2000)
                 getTaskStatusUseCase(taskId)
                     .onSuccess { updatedTask ->
-                        // ИСПРАВЛЕНО: Обновляем задачу внутри ActiveTaskDetails
                         _uiState.update { currentState ->
                             val updatedDetails = currentState.activeTask?.copy(task = updatedTask)
                             currentState.copy(activeTask = updatedDetails)
@@ -108,7 +135,6 @@ class WorkspaceViewModel(
                         break
                     }
             }
-            // ИСПРАВЛЕНО: Достаем задачу из ActiveTaskDetails
             val finishedTask = _uiState.value.activeTask?.task
             if (finishedTask?.status == TaskStatus.COMPLETE) {
                 _userMessages.emit("✅ Задача успешно завершена!")
@@ -120,45 +146,9 @@ class WorkspaceViewModel(
         }
     }
 
-    fun loadManifest() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(assets = it.assets.copy(isManifestLoading = true)) }
-            getBookArtifactUseCase(bookName, BookArtifact.MANIFEST)
-                .onSuccess { rawJson ->
-                    val prettyJson = json.encodeToString(JsonElement.serializer(), json.parseToJsonElement(rawJson))
-                    _uiState.update { it.copy(assets = it.assets.copy(isManifestLoading = false, manifestContent = prettyJson)) }
-                }
-                .onFailure { error ->
-                    _uiState.update { it.copy(assets = it.assets.copy(isManifestLoading = false, manifestContent = "Ошибка загрузки: ${error.message}")) }
-                }
-        }
-    }
-
-    fun saveManifest(content: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = true)) }
-            val validationResult = runCatching { json.parseToJsonElement(content) }
-            if (validationResult.isFailure) {
-                _userMessages.emit("❌ Ошибка: Введенный текст не является корректным JSON.")
-                _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false)) }
-                return@launch
-            }
-
-            updateBookArtifactUseCase(bookName, BookArtifact.MANIFEST, content)
-                .onSuccess {
-                    _userMessages.emit("✅ Манифест успешно сохранен!")
-                    _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false, manifestContent = content)) }
-                }
-                .onFailure { error ->
-                    _userMessages.emit("❌ Ошибка сохранения: ${error.message}")
-                    _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false)) }
-                }
-        }
-    }
 
     override fun onCleared() {
         super.onCleared()
         pollingJob?.cancel()
     }
 }
-

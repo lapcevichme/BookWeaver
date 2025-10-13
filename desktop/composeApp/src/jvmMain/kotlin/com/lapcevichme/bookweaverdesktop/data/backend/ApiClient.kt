@@ -51,7 +51,6 @@ class ApiClient(private val httpClient: HttpClient) {
 
     suspend fun getBookArtifact(bookName: String, artifact: BookArtifact): Result<JsonElement> {
         return runCatching {
-            // ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
             val artifactPath = artifact.name.lowercase()
             httpClient.get("$baseApiUrl/projects/$bookName/artifacts/$artifactPath").body<JsonElement>()
         }
@@ -64,7 +63,6 @@ class ApiClient(private val httpClient: HttpClient) {
         artifact: ChapterArtifact
     ): Result<JsonElement> {
         return runCatching {
-            // ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
             val artifactPath = artifact.name.lowercase()
             val url = "$baseApiUrl/projects/$bookName/chapters/$volumeNum/$chapterNum/artifacts/$artifactPath"
             httpClient.get(url).body<JsonElement>()
@@ -94,7 +92,7 @@ class ApiClient(private val httpClient: HttpClient) {
     ): Result<HttpResponse> {
         return runCatching {
             val artifactPath = artifactName.name.lowercase()
-            httpClient.post("$baseApiUrl/projects/$bookName/volumes/$volumeNum/chapters/$chapterNum/artifacts/$artifactPath") {
+            httpClient.post("$baseApiUrl/projects/$bookName/chapters/$volumeNum/$chapterNum/artifacts/$artifactPath") {
                 contentType(ContentType.Application.Json)
                 setBody(content)
             }

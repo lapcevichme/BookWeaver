@@ -13,10 +13,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 data class ManifestEditorUiState(
-    val manifestContent: String? = null,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
+    val manifestContent: String = "",
     val isModified: Boolean = false,
+    val isJsonValid: Boolean = true,
     val errorMessage: String? = null
 )
 
@@ -24,7 +25,7 @@ class ManifestEditorViewModel(
     private val bookName: String,
     private val getBookArtifactUseCase: GetBookArtifactUseCase,
     private val updateBookArtifactUseCase: UpdateBookArtifactUseCase,
-    private val json: Json // Оставляем для pretty-print
+    private val json: Json
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ManifestEditorUiState())
@@ -41,43 +42,52 @@ class ManifestEditorViewModel(
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             getBookArtifactUseCase(bookName, BookArtifact.MANIFEST)
                 .onSuccess { rawJsonString ->
-                    // Форматируем JSON для красивого отображения
                     val jsonElement = json.parseToJsonElement(rawJsonString)
                     val prettyJson = json.encodeToString(JsonElement.serializer(), jsonElement)
                     originalContent = prettyJson
                     _uiState.update {
-                        it.copy(isLoading = false, manifestContent = prettyJson, isModified = false)
+                        it.copy(
+                            isLoading = false,
+                            manifestContent = prettyJson,
+                            isModified = false,
+                            isJsonValid = true
+                        )
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(isLoading = false, errorMessage = "Ошибка: ${error.message}") }
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "Ошибка загрузки: ${error.message}") }
                 }
         }
     }
 
-    fun saveManifest(newContent: String) {
+    fun onContentChange(newContent: String) {
+        val isValid = runCatching { json.parseToJsonElement(newContent) }.isSuccess
+        _uiState.update {
+            it.copy(
+                manifestContent = newContent,
+                isModified = newContent != originalContent,
+                isJsonValid = isValid
+            )
+        }
+    }
+
+    fun saveManifest() {
         viewModelScope.launch {
+            val contentToSave = uiState.value.manifestContent
+            if (!uiState.value.isJsonValid) return@launch
+
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
-            // Проверяем, что JSON валиден перед отправкой
-            val validationResult = runCatching { json.parseToJsonElement(newContent) }
 
-            if (validationResult.isFailure) {
-                _uiState.update { it.copy(isSaving = false, errorMessage = "Некорректный JSON: ${validationResult.exceptionOrNull()?.message}") }
-                return@launch
-            }
-
-            updateBookArtifactUseCase(bookName, BookArtifact.MANIFEST, newContent)
+            updateBookArtifactUseCase(bookName, BookArtifact.MANIFEST, contentToSave)
                 .onSuccess {
-                    originalContent = newContent
-                    _uiState.update { it.copy(isSaving = false, isModified = false) }
+                    originalContent = contentToSave
+                    _uiState.update {
+                        it.copy(isSaving = false, isModified = false)
+                    }
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(isSaving = false, errorMessage = "Ошибка сохранения: ${error.message}") }
                 }
         }
-    }
-
-    fun markAsModified(currentContent: String) {
-        _uiState.update { it.copy(isModified = currentContent != originalContent) }
     }
 }

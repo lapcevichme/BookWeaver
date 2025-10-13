@@ -21,7 +21,6 @@ fun ManifestEditorScreen(
     viewModel: ManifestEditorViewModel = koinInject { parametersOf(bookName) }
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var manifestText by remember(uiState.manifestContent) { mutableStateOf(uiState.manifestContent) }
 
     Scaffold(
         topBar = {
@@ -34,8 +33,8 @@ fun ManifestEditorScreen(
                 },
                 actions = {
                     Button(
-                        onClick = { manifestText?.let { viewModel.saveManifest(it) } },
-                        enabled = uiState.isModified && !uiState.isSaving
+                        onClick = { viewModel.saveManifest() },
+                        enabled = uiState.isModified && !uiState.isSaving && uiState.isJsonValid
                     ) {
                         if (uiState.isSaving) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
@@ -49,24 +48,42 @@ fun ManifestEditorScreen(
             )
         }
     ) { paddingValues ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(paddingValues),
-            contentAlignment = Alignment.Center
+        // ИЗМЕНЕНО: Используем Column для размещения поля ввода и текста ошибки
+        Column(
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
         ) {
             when {
-                uiState.isLoading -> CircularProgressIndicator()
-                uiState.errorMessage != null -> Text("Ошибка: ${uiState.errorMessage}")
-                manifestText != null -> {
+                uiState.isLoading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                // ИЗМЕНЕНО: Ошибка загрузки отображается отдельно
+                uiState.errorMessage != null && uiState.manifestContent.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Ошибка загрузки: ${uiState.errorMessage}")
+                    }
+                }
+                // Основное состояние - редактор
+                else -> {
                     OutlinedTextField(
-                        value = manifestText!!,
-                        onValueChange = {
-                            manifestText = it
-                            viewModel.markAsModified(it)
-                        },
-                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        value = uiState.manifestContent,
+                        onValueChange = { viewModel.onContentChange(it) },
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                         textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
-                        label = { Text("manifest.json") }
+                        label = { Text("manifest.json") },
+                        // ИЗМЕНЕНО: Поле становится "ошибочным", если JSON невалиден
+                        isError = !uiState.isJsonValid
                     )
+                    // ИЗМЕНЕНО: Сообщение об ошибке валидации появляется под полем
+                    if (!uiState.isJsonValid) {
+                        Text(
+                            text = "Ошибка: Введенный текст не является корректным JSON.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                        )
+                    }
                 }
             }
         }

@@ -14,7 +14,9 @@ data class Project(
  */
 data class ProjectDetails(
     val name: String,
-    val chapters: List<Chapter>
+    val chapters: List<Chapter>,
+    val hasCharacterAnalysis: Boolean,
+    val hasSummaries: Boolean
 )
 
 /**

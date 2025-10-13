@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.lapcevichme.bookweaverdesktop.ui.editor.manifest.ManifestEditorScreen
 import com.lapcevichme.bookweaverdesktop.ui.settings.SettingsAndAssetsScreen
 import com.lapcevichme.bookweaverdesktop.ui.dashboard.ProjectDashboardScreen
 import com.lapcevichme.bookweaverdesktop.ui.editor.scenario.ScenarioEditorScreen
@@ -27,6 +28,10 @@ sealed interface BookWeaverRoute {
     @Serializable
     data class ScenarioEditor(val bookName: String, val volume: Int, val chapter: Int) : BookWeaverRoute
 
+    // НОВЫЙ МАРШРУТ
+    @Serializable
+    data class ManifestEditor(val bookName: String) : BookWeaverRoute
+
     @Serializable
     data object SettingsAndAssets : BookWeaverRoute
 }
@@ -34,14 +39,13 @@ sealed interface BookWeaverRoute {
 
 /**
  * Главный контейнер навигации NavHost для приложения BookWeaver.
- * ИЗМЕНЕНО: Теперь принимает `window` как параметр для явной передачи зависимостей.
  */
 @Composable
 fun BookWeaverNavHost(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
     startDestination: BookWeaverRoute = BookWeaverRoute.ProjectDashboard,
-    window: ComposeWindow // Явно передаем окно
+    window: ComposeWindow
 ) {
     NavHost(
         navController = navController,
@@ -52,7 +56,7 @@ fun BookWeaverNavHost(
             ProjectDashboardScreen(
                 onProjectClick = { bookName -> navController.navigate(BookWeaverRoute.ProjectWorkspace(bookName)) },
                 onSettingsClick = { navController.navigate(BookWeaverRoute.SettingsAndAssets) },
-                window = window // Передаем окно дальше
+                window = window
             )
         }
 
@@ -62,6 +66,10 @@ fun BookWeaverNavHost(
                 bookName = route.bookName,
                 onChapterClick = { volume, chapter ->
                     navController.navigate(BookWeaverRoute.ScenarioEditor(route.bookName, volume, chapter))
+                },
+                // ИЗМЕНЕНО: Добавляем обработчик для перехода к редактору манифеста
+                onEditManifestClick = { bookName ->
+                    navController.navigate(BookWeaverRoute.ManifestEditor(bookName))
                 },
                 onBackClick = { navController.popBackStack() }
             )
@@ -73,6 +81,15 @@ fun BookWeaverNavHost(
                 bookName = route.bookName,
                 volume = route.volume,
                 chapter = route.chapter,
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        // НОВЫЙ ЭКРАН В ГРАФЕ
+        composable<BookWeaverRoute.ManifestEditor> { backStackEntry ->
+            val route: BookWeaverRoute.ManifestEditor = backStackEntry.toRoute()
+            ManifestEditorScreen(
+                bookName = route.bookName,
                 onBackClick = { navController.popBackStack() }
             )
         }

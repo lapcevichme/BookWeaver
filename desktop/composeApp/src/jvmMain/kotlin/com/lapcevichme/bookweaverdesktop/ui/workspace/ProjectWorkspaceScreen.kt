@@ -9,19 +9,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.lapcevichme.bookweaverdesktop.domain.model.Chapter
+import com.lapcevichme.bookweaverdesktop.domain.model.ProjectDetails
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -31,6 +32,7 @@ import org.koin.core.parameter.parametersOf
 fun ProjectWorkspaceScreen(
     bookName: String,
     onChapterClick: (volume: Int, chapter: Int) -> Unit,
+    onEditManifestClick: (bookName: String) -> Unit,
     onBackClick: () -> Unit,
     viewModel: WorkspaceViewModel = koinInject { parametersOf(bookName) }
 ) {
@@ -82,17 +84,18 @@ fun ProjectWorkspaceScreen(
                         VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         PipelinePanel(
                             modifier = Modifier.weight(2f).fillMaxHeight().padding(16.dp),
-                            selectedChapter = uiState.selectedChapter,
-                            activeTask = uiState.activeTask,
+                            uiState = uiState,
                             onGenerateScenario = { vol, chap -> viewModel.generateScenario(vol, chap) },
                             onSynthesizeAudio = { vol, chap -> viewModel.synthesizeAudio(vol, chap) },
+                            onApplyVoiceConversion = { vol, chap -> viewModel.applyVoiceConversion(vol, chap) },
+                            onAnalyzeCharacters = { viewModel.analyzeCharacters() },
+                            onGenerateSummaries = { viewModel.generateSummaries() },
                             onEditScenario = { vol, chap -> onChapterClick(vol, chap) }
                         )
                         VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         AssetsPanel(
                             modifier = Modifier.weight(1.5f).fillMaxHeight().padding(16.dp),
-                            assetsState = uiState.assets,
-                            viewModel = viewModel
+                            onEditManifestClick = { onEditManifestClick(bookName) }
                         )
                     }
                 }
@@ -143,70 +146,156 @@ private fun ChapterNavigationPanel(
     }
 }
 
+
 @Composable
 private fun PipelinePanel(
     modifier: Modifier = Modifier,
-    selectedChapter: Chapter?,
-    activeTask: ActiveTaskDetails?,
+    uiState: WorkspaceUiState,
     onGenerateScenario: (Int, Int) -> Unit,
     onSynthesizeAudio: (Int, Int) -> Unit,
+    onApplyVoiceConversion: (Int, Int) -> Unit,
+    onAnalyzeCharacters: () -> Unit,
+    onGenerateSummaries: () -> Unit,
     onEditScenario: (Int, Int) -> Unit
 ) {
+    val activeTask = uiState.activeTask
+    val selectedChapter = uiState.selectedChapter
+    val projectDetails = uiState.projectDetails!!
+
+    // ИСПРАВЛЕНО: Простая и понятная проверка, запущена ли какая-либо задача
+    val isAnyTaskRunning = activeTask != null
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        Text("Общие задачи для книги", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+
+        BookwidePipelineStep(
+            title = "1. Анализ персонажей",
+            isDone = projectDetails.hasCharacterAnalysis,
+            // ИСПРАВЛЕНО: Передаем задачу, только если она относится к этому шагу
+            taskDetails = activeTask.takeIf { it?.taskType == TaskType.CHARACTER_ANALYSIS },
+            stepType = TaskType.CHARACTER_ANALYSIS,
+            onClick = onAnalyzeCharacters,
+            // ИСПРАВЛЕНО: Кнопка активна, только если никакая другая задача не выполняется
+            enabled = !isAnyTaskRunning
+        )
+
+        BookwidePipelineStep(
+            title = "2. Генерация пересказов",
+            isDone = projectDetails.hasSummaries,
+            taskDetails = activeTask.takeIf { it?.taskType == TaskType.SUMMARY_GENERATION },
+            stepType = TaskType.SUMMARY_GENERATION,
+            onClick = onGenerateSummaries,
+            enabled = !isAnyTaskRunning
+        )
+
+        Divider(modifier = Modifier.padding(vertical = 24.dp))
+
         if (selectedChapter == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Выберите главу слева", style = MaterialTheme.typography.titleLarge)
             }
         } else {
-            val isTaskForThisChapter = activeTask?.let {
-                it.volumeNumber == selectedChapter.volumeNumber && it.chapterNumber == selectedChapter.chapterNumber
-            } ?: false
-            val currentTask = if (isTaskForThisChapter) activeTask else null
+            // ИСПРАВЛЕНО: Передаем задачу, только если она относится к выбранной главе
+            val currentChapterTask = activeTask.takeIf {
+                it?.volumeNumber == selectedChapter.volumeNumber && it.chapterNumber == selectedChapter.chapterNumber
+            }
 
             Text(
                 "Том ${selectedChapter.volumeNumber}, Глава ${selectedChapter.chapterNumber}",
                 style = MaterialTheme.typography.headlineSmall
             )
-
             Spacer(Modifier.height(16.dp))
 
             PipelineStep(
-                title = "1. Генерация сценария",
+                title = "3. Генерация сценария",
                 isDone = selectedChapter.hasScenario,
-                taskDetails = currentTask,
+                taskDetails = currentChapterTask,
                 stepType = TaskType.SCENARIO,
                 onClick = { onGenerateScenario(selectedChapter.volumeNumber, selectedChapter.chapterNumber) },
                 onEditClick = { onEditScenario(selectedChapter.volumeNumber, selectedChapter.chapterNumber) },
-                isEditable = selectedChapter.hasScenario
+                isEditable = selectedChapter.hasScenario,
+                enabled = !isAnyTaskRunning // Также блокируем кнопки глав, если запущена общая задача
             )
 
             PipelineStep(
-                title = "2. Синтез аудио",
+                title = "4. Синтез аудио (TTS)",
                 isDone = selectedChapter.hasAudio,
-                taskDetails = currentTask,
+                taskDetails = currentChapterTask,
                 stepType = TaskType.AUDIO,
-                enabled = selectedChapter.hasScenario,
+                enabled = selectedChapter.hasScenario && !isAnyTaskRunning,
                 onClick = { onSynthesizeAudio(selectedChapter.volumeNumber, selectedChapter.chapterNumber) }
             )
 
-            Spacer(Modifier.weight(1f))
+            PipelineStep(
+                title = "5. Эмоциональная окраска (VC)",
+                isDone = false, // TODO: Add hasVoiceConversion flag to model
+                taskDetails = currentChapterTask,
+                stepType = TaskType.VOICE_CONVERSION,
+                enabled = selectedChapter.hasAudio && !isAnyTaskRunning,
+                onClick = { onApplyVoiceConversion(selectedChapter.volumeNumber, selectedChapter.chapterNumber) }
+            )
+        }
+    }
+}
 
-            Button(
-                onClick = { /* TODO: Implement full pipeline trigger */ },
-                enabled = activeTask == null,
-                modifier = Modifier.fillMaxWidth(0.8f)
+@Composable
+fun BookwidePipelineStep(
+    title: String,
+    isDone: Boolean,
+    taskDetails: ActiveTaskDetails?,
+    stepType: TaskType,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val isProcessingThisStep = taskDetails?.taskType == stepType
+    val progressAnimation by animateFloatAsState(
+        targetValue = if (isProcessingThisStep) taskDetails!!.task.progress.toFloat() else 0f
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDone) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            else MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Запустить полный цикл")
-                Spacer(Modifier.width(8.dp))
-                Text("Запустить полный цикл для главы")
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onClick,
+                    // ИСПРАВЛЕНО: Используем переданный `enabled`
+                    enabled = enabled && !isDone
+                ) {
+                    Text(if (isDone) "Готово" else "Запустить")
+                }
+            }
+            if (isProcessingThisStep) {
+                Spacer(Modifier.height(12.dp))
+                Column {
+                    LinearProgressIndicator(progress = { progressAnimation }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "${taskDetails!!.task.message} (${(taskDetails.task.progress * 100).toInt()}%)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
 }
+
 
 @Composable
 fun PipelineStep(
@@ -221,7 +310,7 @@ fun PipelineStep(
 ) {
     val isProcessingThisStep = taskDetails?.taskType == stepType
     val progressAnimation by animateFloatAsState(
-        targetValue = if (isProcessingThisStep) taskDetails.task.progress.toFloat() else 0f
+        targetValue = if (isProcessingThisStep) taskDetails!!.task.progress.toFloat() else 0f
     )
 
     Card(
@@ -243,7 +332,7 @@ fun PipelineStep(
                 if (isEditable) {
                     OutlinedButton(
                         onClick = onEditClick,
-                        enabled = !isProcessingThisStep
+                        enabled = enabled // Редактировать можно всегда, если не запущена другая задача
                     ) {
                         Text("Редактор")
                     }
@@ -251,7 +340,7 @@ fun PipelineStep(
                 }
                 Button(
                     onClick = onClick,
-                    enabled = enabled && !isProcessingThisStep && !isDone
+                    enabled = enabled && !isDone
                 ) {
                     Text(if (isDone) "Готово" else "Запустить")
                 }
@@ -265,7 +354,7 @@ fun PipelineStep(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "${taskDetails.task.message} (${(taskDetails.task.progress * 100).toInt()}%)",
+                        text = "${taskDetails!!.task.message} (${(taskDetails.task.progress * 100).toInt()}%)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -275,12 +364,10 @@ fun PipelineStep(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AssetsPanel(
     modifier: Modifier = Modifier,
-    assetsState: AssetsState,
-    viewModel: WorkspaceViewModel
+    onEditManifestClick: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Персонажи", "Настройки")
@@ -298,71 +385,28 @@ private fun AssetsPanel(
         Box(modifier = Modifier.fillMaxSize().padding(top = 16.dp)) {
             when (selectedTab) {
                 0 -> {
-                    // Заглушка для персонажей
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Здесь будет управление персонажами.", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
 
                 1 -> {
-                    // НОВЫЙ КОМПОНЕНТ: Редактор Манифеста
-                    ManifestEditorTab(
-                        content = assetsState.manifestContent,
-                        isLoading = assetsState.isManifestLoading,
-                        isSaving = assetsState.isManifestSaving,
-                        onLoad = { viewModel.loadManifest() },
-                        onSave = { newContent -> viewModel.saveManifest(newContent) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-
-// КОМПОНЕНТ для вкладки "Настройки" (Редактор Манифеста)
-@Composable
-private fun ManifestEditorTab(
-    content: String?,
-    isLoading: Boolean,
-    isSaving: Boolean,
-    onLoad: () -> Unit,
-    onSave: (String) -> Unit
-) {
-    // Загружаем манифест при первом показе
-    LaunchedEffect(Unit) {
-        if (content == null) {
-            onLoad()
-        }
-    }
-
-    var text by remember(content) { mutableStateOf(content ?: "") }
-
-    Column(Modifier.fillMaxSize()) {
-        if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                label = { Text("manifest.json") },
-                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
-            )
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = { onSave(text) },
-                enabled = !isSaving && text != content,
-                modifier = Modifier.align(Alignment.End)
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Save, contentDescription = "Сохранить")
-                    Spacer(Modifier.width(8.dp))
-                    Text("Сохранить")
+                    Column(
+                        Modifier.fillMaxSize().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)
+                    ) {
+                        Text(
+                            "Манифест проекта (manifest.json) содержит основные настройки и метаданные книги.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(onClick = onEditManifestClick) {
+                            Icon(Icons.Default.Edit, contentDescription = "Редактировать")
+                            Spacer(Modifier.width(8.dp))
+                            Text("Открыть редактор манифеста")
+                        }
+                    }
                 }
             }
         }
@@ -383,3 +427,4 @@ fun RowScope.VerticalDivider(
             .background(color = color)
     )
 }
+
