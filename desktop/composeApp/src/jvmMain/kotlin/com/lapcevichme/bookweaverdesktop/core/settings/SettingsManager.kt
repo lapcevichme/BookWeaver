@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.settings
+package com.lapcevichme.bookweaverdesktop.core.settings
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

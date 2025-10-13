@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.settings
+package com.lapcevichme.bookweaverdesktop.core.settings
 
 import kotlinx.serialization.Serializable
 

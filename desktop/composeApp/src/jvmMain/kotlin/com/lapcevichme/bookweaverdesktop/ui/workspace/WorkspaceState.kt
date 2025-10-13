@@ -1,7 +1,7 @@
 package com.lapcevichme.bookweaverdesktop.ui.workspace
 
-import com.lapcevichme.bookweaverdesktop.model.ChapterStatus
-import com.lapcevichme.bookweaverdesktop.model.ProjectDetails
+import com.lapcevichme.bookweaverdesktop.data.model.ChapterStatus
+import com.lapcevichme.bookweaverdesktop.data.model.ProjectDetails
 
 /**
  * Перечисление для идентификации типа фоновой задачи.

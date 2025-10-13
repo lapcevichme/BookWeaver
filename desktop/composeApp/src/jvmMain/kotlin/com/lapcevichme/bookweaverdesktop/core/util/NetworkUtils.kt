@@ -1,6 +1,7 @@
-package com.lapcevichme.bookweaverdesktop.util
+package com.lapcevichme.bookweaverdesktop.core.util
 
 import mu.KotlinLogging
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.SocketException
@@ -17,7 +18,7 @@ object NetworkUtils {
         return try {
             NetworkInterface.getNetworkInterfaces().asSequence()
                 .flatMap { it.inetAddresses.asSequence() }
-                .filter { !it.isLoopbackAddress && it is java.net.Inet4Address }
+                .filter { !it.isLoopbackAddress && it is Inet4Address }
                 .toList()
         } catch (e: SocketException) {
             logger.error(e) { "Could not retrieve network interfaces." }

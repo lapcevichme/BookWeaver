@@ -1,6 +1,6 @@
-package com.lapcevichme.bookweaverdesktop.config
+package com.lapcevichme.bookweaverdesktop.data.config
 
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File

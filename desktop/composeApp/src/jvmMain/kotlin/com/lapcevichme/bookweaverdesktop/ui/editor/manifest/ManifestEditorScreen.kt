@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.ui.editor
+package com.lapcevichme.bookweaverdesktop.ui.editor.manifest
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons

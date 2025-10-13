@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.ui.editor
+package com.lapcevichme.bookweaverdesktop.ui.editor.scenario
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn

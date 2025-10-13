@@ -1,11 +1,11 @@
 package com.lapcevichme.bookweaverdesktop.server
 
-import com.lapcevichme.bookweaverdesktop.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.model.ConnectionInfo
-import com.lapcevichme.bookweaverdesktop.model.WsServerState
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
-import com.lapcevichme.bookweaverdesktop.util.NetworkUtils
-import com.lapcevichme.bookweaverdesktop.util.SecurityUtils
+import com.lapcevichme.bookweaverdesktop.data.backend.BookManager
+import com.lapcevichme.bookweaverdesktop.data.model.ConnectionInfo
+import com.lapcevichme.bookweaverdesktop.data.model.WsServerState
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.core.util.NetworkUtils
+import com.lapcevichme.bookweaverdesktop.core.util.SecurityUtils
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.websocket.*

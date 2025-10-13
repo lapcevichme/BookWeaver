@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.navigation
+package com.lapcevichme.bookweaverdesktop.core.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -10,7 +10,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.lapcevichme.bookweaverdesktop.ui.settings.SettingsAndAssetsScreen
 import com.lapcevichme.bookweaverdesktop.ui.dashboard.ProjectDashboardScreen
-import com.lapcevichme.bookweaverdesktop.ui.editor.ScenarioEditorScreen
+import com.lapcevichme.bookweaverdesktop.ui.editor.scenario.ScenarioEditorScreen
 import com.lapcevichme.bookweaverdesktop.ui.workspace.ProjectWorkspaceScreen
 import kotlinx.serialization.Serializable
 

@@ -2,9 +2,9 @@ package com.lapcevichme.bookweaverdesktop.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.config.ConfigManager
-import com.lapcevichme.bookweaverdesktop.settings.AppSettings
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.data.config.ConfigManager
+import com.lapcevichme.bookweaverdesktop.core.settings.AppSettings
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update

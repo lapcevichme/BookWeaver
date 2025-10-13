@@ -21,9 +21,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
-import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
-import com.lapcevichme.bookweaverdesktop.model.WsServerState
-import com.lapcevichme.bookweaverdesktop.settings.AppSettings
+import com.lapcevichme.bookweaverdesktop.data.backend.BackendProcessManager
+import com.lapcevichme.bookweaverdesktop.data.model.WsServerState
+import com.lapcevichme.bookweaverdesktop.core.settings.AppSettings
 import com.lapcevichme.bookweaverdesktop.ui.MainViewModel
 import org.koin.compose.koinInject
 import java.awt.image.BufferedImage

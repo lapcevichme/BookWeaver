@@ -1,12 +1,12 @@
 package com.lapcevichme.bookweaverdesktop.server
 
-import com.lapcevichme.bookweaverdesktop.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.model.Book
-import com.lapcevichme.bookweaverdesktop.model.WsBookList
-import com.lapcevichme.bookweaverdesktop.model.WsMessage
-import com.lapcevichme.bookweaverdesktop.model.WsRequestAudio
-import com.lapcevichme.bookweaverdesktop.model.WsRequestBookList
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.data.backend.BookManager
+import com.lapcevichme.bookweaverdesktop.data.model.Book
+import com.lapcevichme.bookweaverdesktop.data.model.WsBookList
+import com.lapcevichme.bookweaverdesktop.data.model.WsMessage
+import com.lapcevichme.bookweaverdesktop.data.model.WsRequestAudio
+import com.lapcevichme.bookweaverdesktop.data.model.WsRequestBookList
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.contentnegotiation.*

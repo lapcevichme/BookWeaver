@@ -1,12 +1,12 @@
-package com.lapcevichme.bookweaverdesktop.backend
+package com.lapcevichme.bookweaverdesktop.data.backend
 
-import com.lapcevichme.bookweaverdesktop.model.BookArtifact
-import com.lapcevichme.bookweaverdesktop.model.BookTaskRequest
-import com.lapcevichme.bookweaverdesktop.model.ChapterArtifact
-import com.lapcevichme.bookweaverdesktop.model.ChapterTaskRequest
-import com.lapcevichme.bookweaverdesktop.model.ProjectDetails
-import com.lapcevichme.bookweaverdesktop.model.ServerStatus
-import com.lapcevichme.bookweaverdesktop.model.TaskStatus
+import com.lapcevichme.bookweaverdesktop.data.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.data.model.BookTaskRequest
+import com.lapcevichme.bookweaverdesktop.data.model.ChapterArtifact
+import com.lapcevichme.bookweaverdesktop.data.model.ChapterTaskRequest
+import com.lapcevichme.bookweaverdesktop.data.model.ProjectDetails
+import com.lapcevichme.bookweaverdesktop.data.model.ServerStatus
+import com.lapcevichme.bookweaverdesktop.data.model.TaskStatus
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*

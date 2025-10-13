@@ -2,10 +2,9 @@ package com.lapcevichme.bookweaverdesktop.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.model.ChapterStatus
-import io.ktor.client.statement.*
+import com.lapcevichme.bookweaverdesktop.data.backend.ApiClient
+import com.lapcevichme.bookweaverdesktop.data.backend.BookManager
+import com.lapcevichme.bookweaverdesktop.data.model.ChapterStatus
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll

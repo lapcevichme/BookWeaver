@@ -1,14 +1,14 @@
-package com.lapcevichme.bookweaverdesktop.di
+package com.lapcevichme.bookweaverdesktop.core.di
 
-import com.lapcevichme.bookweaverdesktop.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
-import com.lapcevichme.bookweaverdesktop.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.config.ConfigManager
+import com.lapcevichme.bookweaverdesktop.data.backend.ApiClient
+import com.lapcevichme.bookweaverdesktop.data.backend.BackendProcessManager
+import com.lapcevichme.bookweaverdesktop.data.backend.BookManager
+import com.lapcevichme.bookweaverdesktop.data.config.ConfigManager
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import com.lapcevichme.bookweaverdesktop.ui.MainViewModel
 import com.lapcevichme.bookweaverdesktop.ui.dashboard.DashboardViewModel
-import com.lapcevichme.bookweaverdesktop.ui.editor.ScenarioEditorViewModel
+import com.lapcevichme.bookweaverdesktop.ui.editor.scenario.ScenarioEditorViewModel
 import com.lapcevichme.bookweaverdesktop.ui.settings.SettingsAndAssetsViewModel
 import com.lapcevichme.bookweaverdesktop.ui.workspace.WorkspaceViewModel
 import io.ktor.client.*
@@ -16,6 +16,7 @@ import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import org.koin.core.context.startKoin
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.KoinAppDeclaration
 import org.koin.dsl.module
@@ -58,7 +59,7 @@ val appModule = module {
 }
 
 fun initKoin(appDeclaration: KoinAppDeclaration = {}) =
-    org.koin.core.context.startKoin {
+    startKoin {
         appDeclaration()
         modules(appModule)
     }

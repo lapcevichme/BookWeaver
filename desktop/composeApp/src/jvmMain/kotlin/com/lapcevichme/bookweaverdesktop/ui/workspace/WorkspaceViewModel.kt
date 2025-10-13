@@ -2,12 +2,12 @@ package com.lapcevichme.bookweaverdesktop.ui.workspace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.model.BookArtifact
-import com.lapcevichme.bookweaverdesktop.model.ChapterStatus
-import com.lapcevichme.bookweaverdesktop.model.ChapterTaskRequest
-import com.lapcevichme.bookweaverdesktop.model.TaskStatus
-import com.lapcevichme.bookweaverdesktop.model.TaskStatusEnum
+import com.lapcevichme.bookweaverdesktop.data.backend.ApiClient
+import com.lapcevichme.bookweaverdesktop.data.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.data.model.ChapterStatus
+import com.lapcevichme.bookweaverdesktop.data.model.ChapterTaskRequest
+import com.lapcevichme.bookweaverdesktop.data.model.TaskStatus
+import com.lapcevichme.bookweaverdesktop.data.model.TaskStatusEnum
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*

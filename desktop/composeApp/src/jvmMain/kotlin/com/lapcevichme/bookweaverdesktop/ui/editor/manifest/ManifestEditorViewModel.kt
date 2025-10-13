@@ -1,9 +1,9 @@
-package com.lapcevichme.bookweaverdesktop.ui.editor
+package com.lapcevichme.bookweaverdesktop.ui.editor.manifest
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.data.backend.ApiClient
+import com.lapcevichme.bookweaverdesktop.data.model.BookArtifact
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update

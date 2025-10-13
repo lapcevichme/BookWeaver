@@ -2,8 +2,8 @@ package com.lapcevichme.bookweaverdesktop
 
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import com.lapcevichme.bookweaverdesktop.di.initKoin
-import com.lapcevichme.bookweaverdesktop.navigation.BookWeaverNavHost
+import com.lapcevichme.bookweaverdesktop.core.di.initKoin
+import com.lapcevichme.bookweaverdesktop.core.navigation.BookWeaverNavHost
 import com.lapcevichme.bookweaverdesktop.ui.MainViewModel
 import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinApplication

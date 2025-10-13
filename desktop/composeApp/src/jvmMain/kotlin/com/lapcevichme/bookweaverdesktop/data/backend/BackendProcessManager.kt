@@ -1,7 +1,7 @@
-package com.lapcevichme.bookweaverdesktop.backend
+package com.lapcevichme.bookweaverdesktop.data.backend
 
-import com.lapcevichme.bookweaverdesktop.model.ServerState
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.data.model.ServerState
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -9,6 +9,7 @@ import kotlinx.io.IOException
 import mu.KotlinLogging
 import java.io.BufferedReader
 import java.io.File
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
@@ -155,7 +156,7 @@ class BackendProcessManager(
         _state.value = State.FAILED(timeoutMsg)
     }
 
-    private suspend fun readStream(inputStream: java.io.InputStream?, prefix: String) {
+    private suspend fun readStream(inputStream: InputStream?, prefix: String) {
         if (inputStream == null) return
         val reader = BufferedReader(InputStreamReader(inputStream))
         withContext(Dispatchers.IO) {

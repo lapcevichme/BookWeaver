@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.util
+package com.lapcevichme.bookweaverdesktop.core.util
 
 import mu.KotlinLogging
 import org.bouncycastle.asn1.x500.X500Name

@@ -2,8 +2,8 @@ package com.lapcevichme.bookweaverdesktop.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
-import com.lapcevichme.bookweaverdesktop.model.WsServerState
+import com.lapcevichme.bookweaverdesktop.data.backend.BackendProcessManager
+import com.lapcevichme.bookweaverdesktop.data.model.WsServerState
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow

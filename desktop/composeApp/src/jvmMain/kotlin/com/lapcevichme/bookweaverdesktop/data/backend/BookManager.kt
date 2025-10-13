@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.backend
+package com.lapcevichme.bookweaverdesktop.data.backend
 
 import io.ktor.client.statement.HttpResponse
 import java.io.File

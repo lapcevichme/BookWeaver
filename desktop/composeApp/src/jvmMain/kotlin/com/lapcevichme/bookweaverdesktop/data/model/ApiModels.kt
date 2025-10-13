@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.model
+package com.lapcevichme.bookweaverdesktop.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
