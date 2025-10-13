@@ -1,47 +1,36 @@
 package com.lapcevichme.bookweaverdesktop.ui.workspace
 
-import com.lapcevichme.bookweaverdesktop.data.model.ChapterStatus
-import com.lapcevichme.bookweaverdesktop.data.model.ProjectDetails
+import com.lapcevichme.bookweaverdesktop.domain.model.Chapter
+import com.lapcevichme.bookweaverdesktop.domain.model.ProjectDetails
+import com.lapcevichme.bookweaverdesktop.domain.model.Task
 
-/**
- * Перечисление для идентификации типа фоновой задачи.
- */
 enum class TaskType {
     SCENARIO, AUDIO
 }
 
 /**
- * Содержит всю информацию об активной задаче, выполняемой AI бэкендом.
+ * UI-модель для хранения активной задачи и ее контекста (к какой главе она относится).
  */
-data class ProcessingTaskDetails(
-    val volume: Int,
-    val chapter: Int,
-    val taskId: String,
+data class ActiveTaskDetails(
+    val volumeNumber: Int,
+    val chapterNumber: Int,
     val taskType: TaskType,
-    val status: String = "queued",
-    val progress: Float = 0.0f,
-    val stage: String = "",
-    val message: String = "Задача в очереди..."
+    val task: Task
 )
 
-/**
- * Состояние для панели ассетов (манифест, персонажи).
- */
 data class AssetsState(
     val manifestContent: String? = null,
     val isManifestLoading: Boolean = false,
     val isManifestSaving: Boolean = false,
 )
 
-/**
- * Полное состояние UI для экрана рабочего пространства проекта.
- */
 data class WorkspaceUiState(
     val bookName: String,
     val projectDetails: ProjectDetails? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
-    val activeTask: ProcessingTaskDetails? = null,
-    val selectedChapter: ChapterStatus? = null,
+    val activeTask: ActiveTaskDetails? = null, // Заменено с Task?
+    val selectedChapter: Chapter? = null,
     val assets: AssetsState = AssetsState()
 )
+

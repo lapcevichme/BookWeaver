@@ -1,8 +1,8 @@
 package com.lapcevichme.bookweaverdesktop.server
 
-import com.lapcevichme.bookweaverdesktop.data.backend.BookManager
 import com.lapcevichme.bookweaverdesktop.data.model.ConnectionInfo
 import com.lapcevichme.bookweaverdesktop.data.model.WsServerState
+import com.lapcevichme.bookweaverdesktop.domain.repository.ProjectRepository
 import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import com.lapcevichme.bookweaverdesktop.core.util.NetworkUtils
 import com.lapcevichme.bookweaverdesktop.core.util.SecurityUtils
@@ -23,7 +23,7 @@ import javax.jmdns.ServiceInfo
 private val logger = KotlinLogging.logger {}
 
 class ServerManager(
-    private val bookManager: BookManager,
+    private val projectRepository: ProjectRepository,
     val json: Json,
     private val settingsManager: SettingsManager
 ) {
@@ -31,7 +31,6 @@ class ServerManager(
     private val SERVICE_TYPE = "_bookweaver._tcp.local."
     private val SERVICE_NAME = "BookWeaver Desktop Server"
     private val KEY_ALIAS = "bookweaver"
-    // ИСПРАВЛЕНО: Возвращаем константу для имени файла
     private val KEYSTORE_FILE = "keystore.bks"
 
 
@@ -46,7 +45,6 @@ class ServerManager(
 
     fun start() {
         try {
-            // ИСПРАВЛЕНО: Вызываем метод с параметром, как в старой версии SecurityUtils
             val (keyStore, certFingerprint, keystorePassword) = SecurityUtils.setupCertificate(KEYSTORE_FILE)
             fingerprint = certFingerprint
 
@@ -64,11 +62,11 @@ class ServerManager(
                     }
                 },
                 module = {
-                    configureKtorApp(this@ServerManager, bookManager, settingsManager)
+                    configureKtorApp(this@ServerManager, projectRepository, settingsManager)
                 }
             )
             ktorServer!!.start(wait = false)
-            keystorePassword.fill('\u0000') // Очищаем пароль из памяти
+            keystorePassword.fill('\u0000')
 
             setupJmDNS()
             _wsServerState.value = WsServerState.ReadyForConnection
@@ -133,4 +131,3 @@ class ServerManager(
         Security.addProvider(BouncyCastleProvider())
     }
 }
-

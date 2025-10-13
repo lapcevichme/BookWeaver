@@ -21,11 +21,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.lapcevichme.bookweaverdesktop.data.model.ChapterStatus
+import com.lapcevichme.bookweaverdesktop.domain.model.Chapter
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,9 +104,9 @@ fun ProjectWorkspaceScreen(
 @Composable
 private fun ChapterNavigationPanel(
     modifier: Modifier = Modifier,
-    chapters: List<ChapterStatus>,
-    selectedChapter: ChapterStatus?,
-    onChapterSelected: (ChapterStatus) -> Unit
+    chapters: List<Chapter>,
+    selectedChapter: Chapter?,
+    onChapterSelected: (Chapter) -> Unit
 ) {
     LazyColumn(
         modifier = modifier,
@@ -123,14 +122,14 @@ private fun ChapterNavigationPanel(
         }
         items(chapters) { chapter ->
             val isSelected =
-                chapter.volumeNum == selectedChapter?.volumeNum && chapter.chapterNum == selectedChapter.chapterNum
+                chapter.volumeNumber == selectedChapter?.volumeNumber && chapter.chapterNumber == selectedChapter.chapterNumber
             val containerColor = when {
                 isSelected -> MaterialTheme.colorScheme.primaryContainer
                 else -> Color.Transparent
             }
             Box {
                 Text(
-                    text = "Том ${chapter.volumeNum}, Глава ${chapter.chapterNum}",
+                    text = "Том ${chapter.volumeNumber}, Глава ${chapter.chapterNumber}",
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
@@ -147,8 +146,8 @@ private fun ChapterNavigationPanel(
 @Composable
 private fun PipelinePanel(
     modifier: Modifier = Modifier,
-    selectedChapter: ChapterStatus?,
-    activeTask: ProcessingTaskDetails?,
+    selectedChapter: Chapter?,
+    activeTask: ActiveTaskDetails?,
     onGenerateScenario: (Int, Int) -> Unit,
     onSynthesizeAudio: (Int, Int) -> Unit,
     onEditScenario: (Int, Int) -> Unit
@@ -164,12 +163,12 @@ private fun PipelinePanel(
             }
         } else {
             val isTaskForThisChapter = activeTask?.let {
-                it.volume == selectedChapter.volumeNum && it.chapter == selectedChapter.chapterNum
+                it.volumeNumber == selectedChapter.volumeNumber && it.chapterNumber == selectedChapter.chapterNumber
             } ?: false
             val currentTask = if (isTaskForThisChapter) activeTask else null
 
             Text(
-                "Том ${selectedChapter.volumeNum}, Глава ${selectedChapter.chapterNum}",
+                "Том ${selectedChapter.volumeNumber}, Глава ${selectedChapter.chapterNumber}",
                 style = MaterialTheme.typography.headlineSmall
             )
 
@@ -180,8 +179,8 @@ private fun PipelinePanel(
                 isDone = selectedChapter.hasScenario,
                 taskDetails = currentTask,
                 stepType = TaskType.SCENARIO,
-                onClick = { onGenerateScenario(selectedChapter.volumeNum, selectedChapter.chapterNum) },
-                onEditClick = { onEditScenario(selectedChapter.volumeNum, selectedChapter.chapterNum) },
+                onClick = { onGenerateScenario(selectedChapter.volumeNumber, selectedChapter.chapterNumber) },
+                onEditClick = { onEditScenario(selectedChapter.volumeNumber, selectedChapter.chapterNumber) },
                 isEditable = selectedChapter.hasScenario
             )
 
@@ -191,7 +190,7 @@ private fun PipelinePanel(
                 taskDetails = currentTask,
                 stepType = TaskType.AUDIO,
                 enabled = selectedChapter.hasScenario,
-                onClick = { onSynthesizeAudio(selectedChapter.volumeNum, selectedChapter.chapterNum) }
+                onClick = { onSynthesizeAudio(selectedChapter.volumeNumber, selectedChapter.chapterNumber) }
             )
 
             Spacer(Modifier.weight(1f))
@@ -213,7 +212,7 @@ private fun PipelinePanel(
 fun PipelineStep(
     title: String,
     isDone: Boolean,
-    taskDetails: ProcessingTaskDetails?,
+    taskDetails: ActiveTaskDetails?,
     stepType: TaskType,
     enabled: Boolean = true,
     isEditable: Boolean = false,
@@ -222,7 +221,7 @@ fun PipelineStep(
 ) {
     val isProcessingThisStep = taskDetails?.taskType == stepType
     val progressAnimation by animateFloatAsState(
-        targetValue = if (isProcessingThisStep) taskDetails.progress else 0f
+        targetValue = if (isProcessingThisStep) taskDetails.task.progress.toFloat() else 0f
     )
 
     Card(
@@ -266,7 +265,7 @@ fun PipelineStep(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "${taskDetails.message} (${(taskDetails.progress * 100).toInt()}%)",
+                        text = "${taskDetails.task.message} (${(taskDetails.task.progress * 100).toInt()}%)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -384,4 +383,3 @@ fun RowScope.VerticalDivider(
             .background(color = color)
     )
 }
-

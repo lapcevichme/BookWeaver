@@ -2,29 +2,30 @@ package com.lapcevichme.bookweaverdesktop.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.data.config.ConfigManager
 import com.lapcevichme.bookweaverdesktop.core.settings.AppSettings
 import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.domain.usecase.GetConfigContentUseCase
+import com.lapcevichme.bookweaverdesktop.domain.usecase.SaveConfigContentUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// ИЗМЕНЕНИЕ: Новая структура состояний, чтобы разделить ошибки
 sealed interface SettingsUiState {
     data object Loading : SettingsUiState
     data class Loaded(
         val settings: AppSettings,
-        val configContent: String?, // Может быть null, если config.py не загрузился
-        val configError: String?,   // Сообщение об ошибке для config.py
-        val message: String? = null  // Для Snackbar сообщений
+        val configContent: String?,
+        val configError: String?,
+        val message: String? = null
     ) : SettingsUiState
-    data class Error(val message: String) : SettingsUiState // Критическая ошибка (не удалось загрузить settings.json)
+    data class Error(val message: String) : SettingsUiState
 }
 
 class SettingsAndAssetsViewModel(
-    private val settingsManager: SettingsManager,
-    private val configManager: ConfigManager
+    private val settingsManager: SettingsManager, // Оставляем, т.к. AppSettings - это UI-модель
+    private val getConfigContentUseCase: GetConfigContentUseCase,
+    private val saveConfigContentUseCase: SaveConfigContentUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<SettingsUiState>(SettingsUiState.Loading)
@@ -38,11 +39,8 @@ class SettingsAndAssetsViewModel(
         viewModelScope.launch {
             _uiState.value = SettingsUiState.Loading
 
-            // Сначала пытаемся загрузить базовые настройки. Это критично.
             settingsManager.loadSettings().onSuccess { settings ->
-                // Настройки загружены. Теперь пытаемся загрузить config.py.
-                // Ошибка здесь не является критической для вкладки "Настройки".
-                val configResult = configManager.loadConfigContent()
+                val configResult = getConfigContentUseCase()
 
                 _uiState.value = SettingsUiState.Loaded(
                     settings = settings,
@@ -51,7 +49,6 @@ class SettingsAndAssetsViewModel(
                 )
 
             }.onFailure { settingsError ->
-                // Если не удалось загрузить даже settings.json, это критическая ошибка.
                 _uiState.value = SettingsUiState.Error("Критическая ошибка загрузки настроек: ${settingsError.message}")
             }
         }
@@ -61,30 +58,35 @@ class SettingsAndAssetsViewModel(
         viewModelScope.launch {
             settingsManager.saveSettings(newSettings)
                 .onSuccess {
+                    // Перезагружаем все данные, чтобы UI обновился
                     loadData()
                 }
                 .onFailure { error ->
-                    _uiState.update {
-                        if (it is SettingsUiState.Loaded) it.copy(message = "Ошибка сохранения настроек: ${error.message}")
-                        else SettingsUiState.Error("Ошибка сохранения настроек: ${error.message}")
-                    }
+                    updateStateWithMessage("Ошибка сохранения настроек: ${error.message}", error)
                 }
         }
     }
 
     fun saveConfig(content: String) {
         viewModelScope.launch {
-            configManager.saveConfigContent(content)
+            saveConfigContentUseCase(content)
                 .onSuccess {
+                    // Перезагружаем все данные, чтобы UI обновился
                     loadData()
                 }
                 .onFailure { error ->
-                    _uiState.update {
-                        if (it is SettingsUiState.Loaded) it.copy(message = "Ошибка сохранения config.py: ${error.message}")
-                        else SettingsUiState.Error("Ошибка сохранения config.py: ${error.message}")
-                    }
+                    updateStateWithMessage("Ошибка сохранения config.py: ${error.message}", error)
                 }
         }
     }
-}
 
+    private fun updateStateWithMessage(message: String, error: Throwable) {
+        _uiState.update { currentState ->
+            if (currentState is SettingsUiState.Loaded) {
+                currentState.copy(message = message)
+            } else {
+                SettingsUiState.Error("Ошибка: ${error.message}")
+            }
+        }
+    }
+}

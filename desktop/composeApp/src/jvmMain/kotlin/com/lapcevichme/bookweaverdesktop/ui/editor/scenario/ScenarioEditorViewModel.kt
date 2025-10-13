@@ -2,21 +2,16 @@ package com.lapcevichme.bookweaverdesktop.ui.editor.scenario
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.data.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.data.model.ChapterArtifact
-import com.lapcevichme.bookweaverdesktop.data.model.Replica
+import com.lapcevichme.bookweaverdesktop.domain.model.Replica
+import com.lapcevichme.bookweaverdesktop.domain.model.Scenario
+import com.lapcevichme.bookweaverdesktop.domain.usecase.GetChapterScenarioUseCase
+import com.lapcevichme.bookweaverdesktop.domain.usecase.UpdateChapterScenarioUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.encodeToJsonElement
 import java.util.*
 
-/**
- * UI-модель: Обертка над серверной моделью Replica,
- * добавляющая уникальный ID для стабильной работы списков в Compose.
- */
 data class UiReplica(
     val id: String,
     val speaker: String,
@@ -24,7 +19,7 @@ data class UiReplica(
 )
 
 data class ScenarioEditorUiState(
-    val replicas: List<UiReplica> = emptyList(), // Используем новую UI-модель
+    val replicas: List<UiReplica> = emptyList(),
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val errorMessage: String? = null
@@ -34,8 +29,8 @@ class ScenarioEditorViewModel(
     private val bookName: String,
     private val volume: Int,
     private val chapter: Int,
-    private val apiClient: ApiClient,
-    private val json: Json
+    private val getChapterScenarioUseCase: GetChapterScenarioUseCase,
+    private val updateChapterScenarioUseCase: UpdateChapterScenarioUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScenarioEditorUiState())
@@ -48,17 +43,16 @@ class ScenarioEditorViewModel(
     fun loadScenario() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            apiClient.getChapterArtifact(bookName, volume, chapter, ChapterArtifact.SCENARIO)
-                .onSuccess { jsonElement ->
-                    try {
-                        val serverReplicas = json.decodeFromString<List<Replica>>(jsonElement.toString())
-                        val uiReplicas = serverReplicas.map {
-                            UiReplica(id = UUID.randomUUID().toString(), speaker = it.speaker, text = it.text)
-                        }
-                        _uiState.update { it.copy(isLoading = false, replicas = uiReplicas) }
-                    } catch (e: Exception) {
-                        _uiState.update { it.copy(isLoading = false, errorMessage = "Ошибка парсинга сценария: ${e.message}") }
+            getChapterScenarioUseCase(bookName, volume, chapter)
+                .onSuccess { scenario ->
+                    val uiReplicas = scenario.replicas.map { domainReplica ->
+                        UiReplica(
+                            id = UUID.randomUUID().toString(),
+                            speaker = domainReplica.speaker,
+                            text = domainReplica.text
+                        )
                     }
+                    _uiState.update { it.copy(isLoading = false, replicas = uiReplicas) }
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(isLoading = false, errorMessage = "Ошибка загрузки: ${error.message}") }
@@ -73,18 +67,12 @@ class ScenarioEditorViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
 
-            val serverReplicas = currentUiReplicas.map { Replica(speaker = it.speaker, text = it.text) }
+            val domainReplicas = currentUiReplicas.map { uiReplica ->
+                Replica(speaker = uiReplica.speaker, text = uiReplica.text)
+            }
+            val scenarioToSave = Scenario(domainReplicas)
 
-            val contentToSave = json.encodeToJsonElement(serverReplicas)
-
-            // ИСПРАВЛЕНО: Вызываем новый метод для обновления артефакта главы
-            apiClient.updateChapterArtifact(
-                bookName = bookName,
-                volumeNum = volume,
-                chapterNum = chapter,
-                artifactName = ChapterArtifact.SCENARIO,
-                content = contentToSave
-            )
+            updateChapterScenarioUseCase(bookName, volume, chapter, scenarioToSave)
                 .onSuccess {
                     _uiState.update { it.copy(isSaving = false) }
                 }
@@ -103,4 +91,3 @@ class ScenarioEditorViewModel(
         }
     }
 }
-

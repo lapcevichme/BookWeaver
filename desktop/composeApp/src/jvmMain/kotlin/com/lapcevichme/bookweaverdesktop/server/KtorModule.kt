@@ -1,12 +1,11 @@
 package com.lapcevichme.bookweaverdesktop.server
 
-import com.lapcevichme.bookweaverdesktop.data.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.data.model.Book
+import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
 import com.lapcevichme.bookweaverdesktop.data.model.WsBookList
 import com.lapcevichme.bookweaverdesktop.data.model.WsMessage
 import com.lapcevichme.bookweaverdesktop.data.model.WsRequestAudio
 import com.lapcevichme.bookweaverdesktop.data.model.WsRequestBookList
-import com.lapcevichme.bookweaverdesktop.core.settings.SettingsManager
+import com.lapcevichme.bookweaverdesktop.domain.repository.ProjectRepository
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.contentnegotiation.*
@@ -29,8 +28,7 @@ private const val BUFFER_SIZE = 8192
 
 fun Application.configureKtorApp(
     serverManager: ServerManager,
-    bookManager: BookManager,
-    // ИЗМЕНЕНО: Принимаем SettingsManager
+    projectRepository: ProjectRepository,
     settingsManager: SettingsManager
 ) {
     install(ContentNegotiation) {
@@ -63,16 +61,20 @@ fun Application.configureKtorApp(
                             val message = serverManager.json.decodeFromString<WsMessage>(text)
                             when (message) {
                                 is WsRequestAudio -> {
-                                    // ИЗМЕНЕНО: Передаем settingsManager в обработчик
                                     launch(Dispatchers.IO) { handleAudioRequest(this@webSocket, message.filePath, settingsManager) }
                                 }
 
                                 is WsRequestBookList -> {
                                     logger.info { "Received request for book list from $remoteHost" }
-
-                                    val result = bookManager.getProjectList()
+                                    val result = projectRepository.getProjects()
                                     val response = WsBookList(
-                                        books = result.getOrNull()?.map { Book(it, "", "") } ?: emptyList()
+                                        books = result.getOrNull()?.map { project ->
+                                            com.lapcevichme.bookweaverdesktop.data.model.Book(
+                                                title = project.name,
+                                                author = "",
+                                                filePath = ""
+                                            )
+                                        } ?: emptyList()
                                     )
                                     sendSerialized(serverManager.json, response)
                                 }
@@ -102,19 +104,15 @@ fun Application.configureKtorApp(
 private suspend fun handleAudioRequest(
     session: WebSocketSession,
     requestedPath: String,
-    // ИЗМЕНЕНО: Принимаем SettingsManager
     settingsManager: SettingsManager
 ) {
-    // ИЗМЕНЕНО: Загружаем настройки, чтобы найти правильную директорию.
     val settingsResult = settingsManager.loadSettings()
     val baseDir = settingsResult.fold(
         onSuccess = {
-            // Предполагаем, что все проекты бэкенд хранит в папке 'projects' внутри своей рабочей директории
             File(it.backendWorkingDirectory, "projects")
         },
         onFailure = {
             logger.error(it) { "Could not load settings to determine audio file path." }
-            // TODO: Отправить клиенту сообщение об ошибке
             return
         }
     )
@@ -122,16 +120,13 @@ private suspend fun handleAudioRequest(
 
     val requestedFile = File(baseDir, requestedPath).canonicalFile
 
-    // ПРОВЕРКА БЕЗОПАСНОСТИ: Убеждаемся, что запрашиваемый файл находится внутри разрешенной директории.
     if (!requestedFile.startsWith(baseDir)) {
         logger.warn { "Path Traversal attempt blocked for path: $requestedPath" }
-        // TODO: В идеале, отправить клиенту сообщение об ошибке.
         return
     }
 
     if (!requestedFile.exists() || !requestedFile.isFile) {
         logger.warn { "File not found: ${requestedFile.path}" }
-        // TODO: Отправить клиенту сообщение, что файл не найден.
         return
     }
 
@@ -144,10 +139,8 @@ private suspend fun handleAudioRequest(
                 session.send(Frame.Binary(true, buffer.copyOf(bytesRead)))
             }
         }
-        // TODO: session.sendSerialized(WsAudioStreamEnd) // Сообщить клиенту, что передача завершена
     } catch (e: IOException) {
         logger.error(e) { "Error reading file '$requestedPath'" }
-        // TODO: session.sendSerialized(WsAudioStreamError("File read error: ${e.message}"))
     }
 }
 
@@ -157,4 +150,3 @@ private suspend fun WebSocketSession.sendSerialized(json: kotlinx.serialization.
     val jsonString = json.encodeToString(WsMessage.serializer(), message)
     send(Frame.Text(jsonString))
 }
-

@@ -2,15 +2,15 @@ package com.lapcevichme.bookweaverdesktop.ui.editor.manifest
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaverdesktop.data.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.data.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.domain.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.domain.usecase.GetBookArtifactUseCase
+import com.lapcevichme.bookweaverdesktop.domain.usecase.UpdateBookArtifactUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.jsonObject
 
 data class ManifestEditorUiState(
     val manifestContent: String? = null,
@@ -22,8 +22,9 @@ data class ManifestEditorUiState(
 
 class ManifestEditorViewModel(
     private val bookName: String,
-    private val apiClient: ApiClient,
-    private val json: Json
+    private val getBookArtifactUseCase: GetBookArtifactUseCase,
+    private val updateBookArtifactUseCase: UpdateBookArtifactUseCase,
+    private val json: Json // Оставляем для pretty-print
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ManifestEditorUiState())
@@ -38,9 +39,10 @@ class ManifestEditorViewModel(
     private fun loadManifest() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            apiClient.getBookArtifact(bookName, BookArtifact.MANIFEST)
-                .onSuccess { jsonElement ->
+            getBookArtifactUseCase(bookName, BookArtifact.MANIFEST)
+                .onSuccess { rawJsonString ->
                     // Форматируем JSON для красивого отображения
+                    val jsonElement = json.parseToJsonElement(rawJsonString)
                     val prettyJson = json.encodeToString(JsonElement.serializer(), jsonElement)
                     originalContent = prettyJson
                     _uiState.update {
@@ -56,20 +58,22 @@ class ManifestEditorViewModel(
     fun saveManifest(newContent: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
-            try {
-                // Перед сохранением парсим строку обратно в JsonElement
-                val jsonElement = json.parseToJsonElement(newContent).jsonObject
-                apiClient.updateBookArtifact(bookName, BookArtifact.MANIFEST, jsonElement)
-                    .onSuccess {
-                        originalContent = newContent
-                        _uiState.update { it.copy(isSaving = false, isModified = false) }
-                    }
-                    .onFailure { error ->
-                        _uiState.update { it.copy(isSaving = false, errorMessage = "Ошибка сохранения: ${error.message}") }
-                    }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isSaving = false, errorMessage = "Некорректный JSON: ${e.message}") }
+            // Проверяем, что JSON валиден перед отправкой
+            val validationResult = runCatching { json.parseToJsonElement(newContent) }
+
+            if (validationResult.isFailure) {
+                _uiState.update { it.copy(isSaving = false, errorMessage = "Некорректный JSON: ${validationResult.exceptionOrNull()?.message}") }
+                return@launch
             }
+
+            updateBookArtifactUseCase(bookName, BookArtifact.MANIFEST, newContent)
+                .onSuccess {
+                    originalContent = newContent
+                    _uiState.update { it.copy(isSaving = false, isModified = false) }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(isSaving = false, errorMessage = "Ошибка сохранения: ${error.message}") }
+                }
         }
     }
 
