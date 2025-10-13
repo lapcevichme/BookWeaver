@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.ui
+package com.lapcevichme.bookweaverdesktop.ui.workspace
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background

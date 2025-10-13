@@ -7,6 +7,10 @@ import com.lapcevichme.bookweaverdesktop.config.ConfigManager
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
 import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import com.lapcevichme.bookweaverdesktop.ui.*
+import com.lapcevichme.bookweaverdesktop.ui.dashboard.DashboardViewModel
+import com.lapcevichme.bookweaverdesktop.ui.editor.ScenarioEditorViewModel
+import com.lapcevichme.bookweaverdesktop.ui.settings.SettingsAndAssetsViewModel
+import com.lapcevichme.bookweaverdesktop.ui.workspace.WorkspaceViewModel
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*

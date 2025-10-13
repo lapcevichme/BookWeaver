@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.ui
+package com.lapcevichme.bookweaverdesktop.ui.dashboard
 
 
 import androidx.compose.foundation.layout.*
@@ -14,14 +14,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.unit.dp
 import org.koin.compose.koinInject
+import java.awt.FileDialog
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectDashboardScreen(
     onProjectClick: (bookName: String) -> Unit,
     onSettingsClick: () -> Unit,
+    window: ComposeWindow,
     viewModel: DashboardViewModel = koinInject()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -31,7 +35,7 @@ fun ProjectDashboardScreen(
             TopAppBar(
                 title = { Text("BookWeaver: Панель Проектов") },
                 actions = {
-                    IconButton(onClick = { viewModel.loadProjects() }) {
+                    IconButton(onClick = { viewModel.loadProjects() }, enabled = !uiState.isLoading) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Обновить")
                     }
                     IconButton(onClick = onSettingsClick) {
@@ -42,9 +46,27 @@ fun ProjectDashboardScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                text = { Text("Импорт") },
-                icon = { Icon(Icons.Filled.Add, contentDescription = "Импорт") },
-                onClick = { viewModel.importNewBook() }
+                text = { if (uiState.isImporting) Text("Импорт...") else Text("Импорт") },
+                icon = {
+                    if (uiState.isImporting) {
+                        CircularProgressIndicator(Modifier.size(24.dp))
+                    } else {
+                        Icon(Icons.Filled.Add, contentDescription = "Импорт")
+                    }
+                },
+                onClick = {
+                    if (uiState.isImporting) return@ExtendedFloatingActionButton
+
+                    // Используем переданное окно для создания диалога
+                    val fileDialog = FileDialog(window, "Выберите книгу (.txt, .epub)", FileDialog.LOAD).apply {
+                        isVisible = true
+                    }
+
+                    if (fileDialog.directory != null && fileDialog.file != null) {
+                        val selectedFile = File(fileDialog.directory, fileDialog.file)
+                        viewModel.importNewBook(selectedFile)
+                    }
+                }
             )
         }
     ) { paddingValues ->

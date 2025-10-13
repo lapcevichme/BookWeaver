@@ -1,11 +1,15 @@
 package com.lapcevichme.bookweaverdesktop.server
 
 import com.lapcevichme.bookweaverdesktop.backend.BookManager
-import com.lapcevichme.bookweaverdesktop.model.*
+import com.lapcevichme.bookweaverdesktop.model.Book
+import com.lapcevichme.bookweaverdesktop.model.WsBookList
+import com.lapcevichme.bookweaverdesktop.model.WsMessage
+import com.lapcevichme.bookweaverdesktop.model.WsRequestAudio
+import com.lapcevichme.bookweaverdesktop.model.WsRequestBookList
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
-import io.ktor.server.plugins.*
 import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.plugins.origin
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
@@ -17,7 +21,6 @@ import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import java.io.File
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -93,50 +96,43 @@ fun Application.configureKtorApp(serverManager: ServerManager, bookManager: Book
 }
 
 private suspend fun handleAudioRequest(session: WebSocketSession, requestedPath: String) {
-    val musicDir = File(System.getProperty("user.dir"), "shared_music").apply { if (!exists()) mkdirs() }
-    val normalizedPath: Path
-    try {
-        normalizedPath = Paths.get(requestedPath).normalize()
-    } catch (e: InvalidPathException) {
-        logger.error { "Invalid path requested: '$requestedPath': ${e.message}" }
-        // TODO: Переделать отправку ошибок на новый лад, если нужно
-        // session.sendSerialized(WsAudioStreamError("Invalid file name: contains invalid characters."))
+    // ВАЖНО: Убедитесь, что директория для файлов существует и безопасна.
+    // В реальном приложении путь нужно брать из настроек.
+    val baseDir = File(System.getProperty("user.home"), "BookWeaver/shared").apply { mkdirs() }
+    val requestedFile = File(baseDir, requestedPath).canonicalFile
+
+    // ПРОВЕРКА БЕЗОПАСНОСТИ: Убеждаемся, что запрашиваемый файл находится внутри разрешенной директории.
+    if (!requestedFile.startsWith(baseDir)) {
+        logger.warn { "Path Traversal attempt blocked for path: $requestedPath" }
+        // В идеале, отправить клиенту сообщение об ошибке.
         return
     }
-    if (normalizedPath.nameCount > 1 || normalizedPath.toString().contains("..")) {
-        logger.warn { "❌ Error: Invalid path requested: '$requestedPath'. Contains separators or '..'." }
-        // session.sendSerialized(WsAudioStreamError("Invalid file name: path must not contain separators or '..'."))
+
+    if (!requestedFile.exists() || !requestedFile.isFile) {
+        logger.warn { "File not found: ${requestedFile.path}" }
+        // Отправить клиенту сообщение, что файл не найден.
         return
     }
+
     try {
-        val audioFile = File(musicDir, normalizedPath.toString())
-        if (!audioFile.exists() || !audioFile.isFile || !Files.isSameFile(
-                audioFile.toPath(),
-                Paths.get(musicDir.path, normalizedPath.toString())
-            )
-        ) {
-            logger.warn { "❌ Error: File not found or access denied: '$requestedPath'" }
-            // session.sendSerialized(WsAudioStreamError("File not found or access denied: $requestedPath"))
-            return
-        }
         val buffer = ByteArray(BUFFER_SIZE)
-        audioFile.inputStream().use { inputStream ->
+        requestedFile.inputStream().use { inputStream ->
             while (session.isActive) {
                 val bytesRead = inputStream.read(buffer)
                 if (bytesRead == -1) break
                 session.send(Frame.Binary(true, buffer.copyOf(bytesRead)))
             }
         }
-        // session.sendSerialized(WsAudioStreamEnd)
+        // session.sendSerialized(WsAudioStreamEnd) // Сообщить клиенту, что передача завершена
     } catch (e: IOException) {
-        logger.error { "❌ Error: Failed to read file '$requestedPath': ${e.message}" }
+        logger.error(e) { "Error reading file '$requestedPath'" }
         // session.sendSerialized(WsAudioStreamError("File read error: ${e.message}"))
     }
 }
+
 
 private suspend fun WebSocketSession.sendSerialized(json: kotlinx.serialization.json.Json, message: WsMessage) {
     if (!isActive) return
     val jsonString = json.encodeToString(WsMessage.serializer(), message)
     send(Frame.Text(jsonString))
 }
-

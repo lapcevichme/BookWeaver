@@ -1,9 +1,9 @@
-package com.lapcevichme.bookweaverdesktop.ui
+package com.lapcevichme.bookweaverdesktop.ui.editor
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaverdesktop.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.model.BookArtifactName
+import com.lapcevichme.bookweaverdesktop.model.BookArtifact
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -38,7 +38,7 @@ class ManifestEditorViewModel(
     private fun loadManifest() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            apiClient.getBookArtifact(bookName, BookArtifactName.MANIFEST)
+            apiClient.getBookArtifact(bookName, BookArtifact.MANIFEST)
                 .onSuccess { jsonElement ->
                     // Форматируем JSON для красивого отображения
                     val prettyJson = json.encodeToString(JsonElement.serializer(), jsonElement)
@@ -59,7 +59,7 @@ class ManifestEditorViewModel(
             try {
                 // Перед сохранением парсим строку обратно в JsonElement
                 val jsonElement = json.parseToJsonElement(newContent).jsonObject
-                apiClient.updateBookArtifact(bookName, BookArtifactName.MANIFEST, jsonElement)
+                apiClient.updateBookArtifact(bookName, BookArtifact.MANIFEST, jsonElement)
                     .onSuccess {
                         originalContent = newContent
                         _uiState.update { it.copy(isSaving = false, isModified = false) }

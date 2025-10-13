@@ -9,46 +9,56 @@ class ConfigManager(
     private val settingsManager: SettingsManager
 ) {
     /**
-     * Внутренняя функция для получения пути к файлу конфигурации.
-     * Загружает настройки асинхронно, чтобы не блокировать поток.
+     * ИЗМЕНЕНО: Возвращает Result<File> для корректной обработки ошибок
+     * при загрузке настроек из SettingsManager.
      */
-    private suspend fun getConfigFile(): File {
-        // Загружаем настройки прямо здесь, в момент, когда они понадобились
-        val settings = settingsManager.loadSettings()
-        // Собираем путь к config.py относительно рабочей директории бэкенда
-        return File(settings.backendWorkingDirectory, "config.py")
+    private suspend fun getConfigFile(): Result<File> {
+        return settingsManager.loadSettings().map { settings ->
+            File(settings.backendWorkingDirectory, "config.py")
+        }
     }
 
-    /**
-     * Асинхронно читает содержимое файла config.py.
-     * @return Содержимое файла или сообщение об ошибке.
-     */
-    suspend fun loadConfigContent(): String = withContext(Dispatchers.IO) {
-        try {
-            val file = getConfigFile()
-            if (!file.exists()) {
-                "❌ Файл конфигурации не найден по пути: ${file.absolutePath}"
-            } else {
-                file.readText()
+    suspend fun loadConfigContent(): Result<String> = withContext(Dispatchers.IO) {
+        // .fold - это безопасный способ развернуть Result
+        getConfigFile().fold(
+            onSuccess = { configFile ->
+                runCatching {
+                    // Проверка безопасности: убеждаемся, что файл находится внутри рабочей директории
+                    val settings = settingsManager.loadSettings().getOrThrow()
+                    val workingDir = File(settings.backendWorkingDirectory).canonicalFile
+                    if (!configFile.canonicalFile.startsWith(workingDir)) {
+                        throw SecurityException("Attempted to access file outside of the working directory.")
+                    }
+
+                    if (!configFile.exists()) {
+                        "Файл конфигурации не найден: ${configFile.absolutePath}"
+                    } else {
+                        configFile.readText()
+                    }
+                }
+            },
+            onFailure = { error ->
+                Result.failure(error)
             }
-        } catch (e: Exception) {
-            "❌ Не удалось прочитать config.py: ${e.message}"
-        }
+        )
     }
 
-    /**
-     * Асинхронно сохраняет новое содержимое в файл config.py.
-     * @param content Новое содержимое файла.
-     * @return true в случае успеха, false в случае неудачи.
-     */
-    suspend fun saveConfigContent(content: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            getConfigFile().writeText(content)
-            true
-        } catch (e: Exception) {
-            println("ERROR saving config file: ${e.message}")
-            false
-        }
+    suspend fun saveConfigContent(content: String): Result<Unit> = withContext(Dispatchers.IO) {
+        getConfigFile().fold(
+            onSuccess = { configFile ->
+                runCatching {
+                    val settings = settingsManager.loadSettings().getOrThrow()
+                    val workingDir = File(settings.backendWorkingDirectory).canonicalFile
+                    if (!configFile.canonicalFile.startsWith(workingDir)) {
+                        throw SecurityException("Attempted to access file outside of the working directory.")
+                    }
+                    configFile.writeText(content)
+                }
+            },
+            onFailure = { error ->
+                Result.failure(error)
+            }
+        )
     }
 }
 

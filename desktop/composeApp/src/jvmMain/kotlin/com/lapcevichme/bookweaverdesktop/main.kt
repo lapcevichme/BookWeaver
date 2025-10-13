@@ -33,7 +33,7 @@ fun main() = application {
             onCloseRequest = ::exitApplication,
             title = "BookWeaver"
         ) {
-            BookWeaverNavHost()
+            BookWeaverNavHost(window = this.window)
         }
     }
 }

@@ -45,10 +45,10 @@ data class WsAudioStreamError(val error: String) : WsMessage()
 
 @Serializable
 data class ConnectionInfo(val ips: List<String>, val port: Int, val fingerprint: String)
-sealed class ServerState {
-    object Disconnected : ServerState()
-    object ReadyForConnection : ServerState()
-    data class AwaitingConnection(val qrCodeData: String) : ServerState()
-    data class PeerConnected(val peerInfo: String) : ServerState()
-    data class Error(val message: String) : ServerState()
+sealed class WsServerState {
+    object Disconnected : WsServerState()
+    object ReadyForConnection : WsServerState()
+    data class AwaitingConnection(val qrCodeData: String) : WsServerState()
+    data class PeerConnected(val peerInfo: String) : WsServerState()
+    data class Error(val message: String) : WsServerState()
 }

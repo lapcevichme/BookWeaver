@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.ui
+package com.lapcevichme.bookweaverdesktop.ui.settings
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -22,8 +22,9 @@ import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
-import com.lapcevichme.bookweaverdesktop.model.ServerState
+import com.lapcevichme.bookweaverdesktop.model.WsServerState
 import com.lapcevichme.bookweaverdesktop.settings.AppSettings
+import com.lapcevichme.bookweaverdesktop.ui.MainViewModel
 import org.koin.compose.koinInject
 import java.awt.image.BufferedImage
 
@@ -210,31 +211,31 @@ private fun ConnectionTab(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.Center
     ) {
         when (val currentState = serverState) {
-            is ServerState.Disconnected -> {
+            is WsServerState.Disconnected -> {
                 Text("Сервер остановлен.")
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = { viewModel.startWebSocketServer() }) {
                     Text("Начать подключение")
                 }
             }
-            is ServerState.ReadyForConnection -> {
+            is WsServerState.ReadyForConnection -> {
                 Text("Сервер готов к подключению", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = { viewModel.showConnectionInstructions() }) {
                     Text("Показать QR-код")
                 }
             }
-            is ServerState.AwaitingConnection -> {
+            is WsServerState.AwaitingConnection -> {
                 Text("Отсканируйте QR-код", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(16.dp))
                 QrCodeImage(currentState.qrCodeData)
             }
-            is ServerState.PeerConnected -> {
+            is WsServerState.PeerConnected -> {
                 Text("Устройство подключено!", style = MaterialTheme.typography.titleLarge, color = Color(0xFF008000))
                 Spacer(Modifier.height(8.dp))
                 Text("Адрес: ${currentState.peerInfo}")
             }
-            is ServerState.Error -> {
+            is WsServerState.Error -> {
                 Text("Произошла ошибка:", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(8.dp))
                 Text(currentState.message, color = MaterialTheme.colorScheme.error)

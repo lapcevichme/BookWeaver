@@ -30,8 +30,8 @@ class ServerManager(private val bookManager: BookManager) {
     private val SERVICE_NAME = "BookWeaver Desktop Server"
     private val KEY_ALIAS = "bookweaver"
 
-    private val _serverState = MutableStateFlow<ServerState>(ServerState.Disconnected)
-    val serverState = _serverState.asStateFlow()
+    private val _wsServerState = MutableStateFlow<WsServerState>(WsServerState.Disconnected)
+    val serverState = _wsServerState.asStateFlow()
 
     private var ktorServer: EmbeddedServer<*, *>? = null
     private var jmDnsInstances: List<JmDNS> = emptyList()
@@ -83,11 +83,11 @@ class ServerManager(private val bookManager: BookManager) {
             keystorePassword.fill('\u0000')
 
             setupJmDNS()
-            _serverState.value = ServerState.ReadyForConnection
+            _wsServerState.value = WsServerState.ReadyForConnection
             logger.info { "✅ Server started. Certificate fingerprint: $fingerprint" }
         } catch (e: Exception) {
             logger.error(e) { "Error starting server" }
-            _serverState.value = ServerState.Error(e.message ?: "Unknown error starting server")
+            _wsServerState.value = WsServerState.Error(e.message ?: "Unknown error starting server")
         }
     }
 
@@ -95,7 +95,7 @@ class ServerManager(private val bookManager: BookManager) {
         try {
             jmDnsInstances.forEach { it.close() }
             ktorServer?.stop(gracePeriodMillis = 1000L, timeoutMillis = 2000L)
-            _serverState.value = ServerState.Disconnected
+            _wsServerState.value = WsServerState.Disconnected
             logger.info { "🛑 Server stopped." }
         } catch (e: Exception) {
             logger.error(e) { "Error stopping server" }
@@ -109,26 +109,26 @@ class ServerManager(private val bookManager: BookManager) {
         }
         val ips = NetworkUtils.getAllLocalIPs().map { it.hostAddress }
         if (ips.isEmpty()) {
-            _serverState.value = ServerState.Error("No active network interfaces found.")
+            _wsServerState.value = WsServerState.Error("No active network interfaces found.")
             return
         }
         val connectionInfo = ConnectionInfo(ips = ips, port = PORT, fingerprint = fingerprint)
         val qrCodePayload = json.encodeToString(ConnectionInfo.serializer(), connectionInfo)
-        _serverState.value = ServerState.AwaitingConnection(qrCodePayload)
+        _wsServerState.value = WsServerState.AwaitingConnection(qrCodePayload)
     }
 
     fun onPeerConnected(session: WebSocketSession, remoteHost: String) {
-        _serverState.value = ServerState.PeerConnected(remoteHost)
+        _wsServerState.value = WsServerState.PeerConnected(remoteHost)
     }
 
     fun onPeerDisconnected() {
-        _serverState.value = ServerState.ReadyForConnection
+        _wsServerState.value = WsServerState.ReadyForConnection
     }
 
     private fun setupJmDNS() {
         val addresses = NetworkUtils.getAllLocalIPs()
         if (addresses.isEmpty()) {
-            _serverState.value = ServerState.Error("No network interfaces found.")
+            _wsServerState.value = WsServerState.Error("No network interfaces found.")
             return
         }
         jmDnsInstances = addresses.map { addr ->

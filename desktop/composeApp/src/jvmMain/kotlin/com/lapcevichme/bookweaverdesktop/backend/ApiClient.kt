@@ -1,15 +1,19 @@
 package com.lapcevichme.bookweaverdesktop.backend
 
-import com.lapcevichme.bookweaverdesktop.model.*
+import com.lapcevichme.bookweaverdesktop.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.model.BookTaskRequest
+import com.lapcevichme.bookweaverdesktop.model.ChapterArtifact
+import com.lapcevichme.bookweaverdesktop.model.ChapterTaskRequest
+import com.lapcevichme.bookweaverdesktop.model.ProjectDetails
+import com.lapcevichme.bookweaverdesktop.model.ServerStatus
+import com.lapcevichme.bookweaverdesktop.model.TaskStatus
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
-import io.ktor.client.request.forms.MultiPartFormDataContent
-import io.ktor.client.request.forms.formData
-import io.ktor.client.statement.HttpResponse
+import io.ktor.client.request.forms.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 class ApiClient(private val httpClient: HttpClient) {
@@ -17,25 +21,21 @@ class ApiClient(private val httpClient: HttpClient) {
     private val baseApiUrl = "http://127.0.0.1:8000/api/v1"
     private val healthUrl = "http://127.0.0.1:8000/health"
 
-    // --- Health Check & Task Status ---
+    // --- Health Check и статус задач ---
 
-    /**
-     * ИСПРАВЛЕНИЕ: Используем корректную модель ServerStatus из ApiModels.kt,
-     * которая соответствует схеме OpenAPI.
-     */
     suspend fun healthCheck(): Result<ServerStatus> {
         return runCatching {
             httpClient.get(healthUrl).body<ServerStatus>()
         }
     }
 
-    suspend fun getTaskStatus(taskId: String): Result<TaskStatusResponse> {
+    suspend fun getTaskStatus(taskId: String): Result<TaskStatus> {
         return runCatching {
-            httpClient.get("$baseApiUrl/tasks/$taskId/status").body<TaskStatusResponse>()
+            httpClient.get("$baseApiUrl/tasks/$taskId/status").body<TaskStatus>()
         }
     }
 
-    // --- Project & File Endpoints ---
+    // --- Эндпоинты проектов и файлов ---
 
     suspend fun getProjects(): Result<List<String>> {
         return runCatching {
@@ -43,35 +43,28 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-    suspend fun getProjectDetails(bookName: String): Result<ProjectDetailsResponse> {
+    suspend fun getProjectDetails(bookName: String): Result<ProjectDetails> {
         return runCatching {
-            httpClient.get("$baseApiUrl/projects/$bookName").body<ProjectDetailsResponse>()
+            httpClient.get("$baseApiUrl/projects/$bookName").body<ProjectDetails>()
         }
     }
 
-    /**
-     * ИСПРАВЛЕНИЕ: Ожидаем JsonElement вместо JsonObject, так как ответ
-     * может быть и объектом, и массивом.
-     * ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
-     */
-    suspend fun getBookArtifact(bookName: String, artifact: BookArtifactName): Result<JsonElement> {
+    suspend fun getBookArtifact(bookName: String, artifact: BookArtifact): Result<JsonElement> {
         return runCatching {
+            // ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
             val artifactPath = artifact.name.lowercase()
             httpClient.get("$baseApiUrl/projects/$bookName/artifacts/$artifactPath").body<JsonElement>()
         }
     }
 
-    /**
-     * ИСПРАВЛЕНИЕ: Ожидаем JsonElement вместо JsonObject.
-     * ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
-     */
     suspend fun getChapterArtifact(
         bookName: String,
         volumeNum: Int,
         chapterNum: Int,
-        artifact: ChapterArtifactName
+        artifact: ChapterArtifact
     ): Result<JsonElement> {
         return runCatching {
+            // ИСПРАВЛЕНИЕ: Используем .name.lowercase() для соответствия URL в OpenAPI.
             val artifactPath = artifact.name.lowercase()
             val url = "$baseApiUrl/projects/$bookName/chapters/$volumeNum/$chapterNum/artifacts/$artifactPath"
             httpClient.get(url).body<JsonElement>()
@@ -80,8 +73,8 @@ class ApiClient(private val httpClient: HttpClient) {
 
     suspend fun updateBookArtifact(
         bookName: String,
-        artifact: BookArtifactName,
-        content: JsonObject
+        artifact: BookArtifact,
+        content: JsonElement
     ): Result<HttpResponse> {
         return runCatching {
             val artifactPath = artifact.name.lowercase()
@@ -92,51 +85,19 @@ class ApiClient(private val httpClient: HttpClient) {
         }
     }
 
-
-    // --- AI Task Endpoints ---
-
-    suspend fun startCharacterAnalysis(request: BookTaskRequest): Result<TaskStatusResponse> {
+    suspend fun updateChapterArtifact(
+        bookName: String,
+        volumeNum: Int,
+        chapterNum: Int,
+        artifactName: ChapterArtifact,
+        content: JsonElement
+    ): Result<HttpResponse> {
         return runCatching {
-            httpClient.post("$baseApiUrl/analyze_characters") {
+            val artifactPath = artifactName.name.lowercase()
+            httpClient.post("$baseApiUrl/projects/$bookName/volumes/$volumeNum/chapters/$chapterNum/artifacts/$artifactPath") {
                 contentType(ContentType.Application.Json)
-                setBody(request)
-            }.body<TaskStatusResponse>()
-        }
-    }
-
-    suspend fun startSummaryGeneration(request: BookTaskRequest): Result<TaskStatusResponse> {
-        return runCatching {
-            httpClient.post("$baseApiUrl/generate_summaries") {
-                contentType(ContentType.Application.Json)
-                setBody(request)
-            }.body<TaskStatusResponse>()
-        }
-    }
-
-    suspend fun startScenarioGeneration(request: ChapterTaskRequest): Result<TaskStatusResponse> {
-        return runCatching {
-            httpClient.post("$baseApiUrl/generate_scenario") {
-                contentType(ContentType.Application.Json)
-                setBody(request)
-            }.body<TaskStatusResponse>()
-        }
-    }
-
-    suspend fun startTtsSynthesis(request: ChapterTaskRequest): Result<TaskStatusResponse> {
-        return runCatching {
-            httpClient.post("$baseApiUrl/synthesize_tts") {
-                contentType(ContentType.Application.Json)
-                setBody(request)
-            }.body<TaskStatusResponse>()
-        }
-    }
-
-    suspend fun startVoiceConversion(request: ChapterTaskRequest): Result<TaskStatusResponse> {
-        return runCatching {
-            httpClient.post("$baseApiUrl/apply_voice_conversion") {
-                contentType(ContentType.Application.Json)
-                setBody(request)
-            }.body<TaskStatusResponse>()
+                setBody(content)
+            }
         }
     }
 
@@ -147,13 +108,66 @@ class ApiClient(private val httpClient: HttpClient) {
                     MultiPartFormDataContent(
                         formData {
                             append("file", file.readBytes(), Headers.build {
-                                append(HttpHeaders.ContentType, ContentType.Application.OctetStream)
+                                // Определяем ContentType в зависимости от расширения файла
+                                val contentType = when (file.extension.lowercase()) {
+                                    "txt" -> ContentType.Text.Plain
+                                    "epub" -> ContentType("application", "epub+zip")
+                                    else -> ContentType.Application.OctetStream // Общий тип для остальных файлов
+                                }
+                                append(HttpHeaders.ContentType, contentType)
                                 append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
                             })
                         }
                     )
                 )
             }
+        }
+    }
+
+    // --- Эндпоинты AI задач ---
+
+    suspend fun startCharacterAnalysis(request: BookTaskRequest): Result<TaskStatus> {
+        return runCatching {
+            httpClient.post("$baseApiUrl/analyze_characters") {
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }.body<TaskStatus>()
+        }
+    }
+
+    suspend fun startSummaryGeneration(request: BookTaskRequest): Result<TaskStatus> {
+        return runCatching {
+            httpClient.post("$baseApiUrl/generate_summaries") {
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }.body<TaskStatus>()
+        }
+    }
+
+    suspend fun startScenarioGeneration(request: ChapterTaskRequest): Result<TaskStatus> {
+        return runCatching {
+            httpClient.post("$baseApiUrl/generate_scenario") {
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }.body<TaskStatus>()
+        }
+    }
+
+    suspend fun startTtsSynthesis(request: ChapterTaskRequest): Result<TaskStatus> {
+        return runCatching {
+            httpClient.post("$baseApiUrl/synthesize_tts") {
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }.body<TaskStatus>()
+        }
+    }
+
+    suspend fun startVoiceConversion(request: ChapterTaskRequest): Result<TaskStatus> {
+        return runCatching {
+            httpClient.post("$baseApiUrl/apply_voice_conversion") {
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }.body<TaskStatus>()
         }
     }
 }

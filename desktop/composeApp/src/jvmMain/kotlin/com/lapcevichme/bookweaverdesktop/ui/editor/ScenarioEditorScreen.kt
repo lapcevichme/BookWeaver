@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaverdesktop.ui
+package com.lapcevichme.bookweaverdesktop.ui.editor
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.lapcevichme.bookweaverdesktop.model.Replica
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 
@@ -73,7 +72,7 @@ fun ScenarioEditorScreen(
 
 @Composable
 private fun ScenarioEditor(
-    replicas: List<Replica>,
+    replicas: List<UiReplica>,
     onReplicaChange: (id: String, newText: String) -> Unit
 ) {
     LazyColumn(
@@ -92,7 +91,7 @@ private fun ScenarioEditor(
 
 @Composable
 private fun ReplicaEditorItem(
-    replica: Replica,
+    replica: UiReplica,
     onTextChange: (String) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -116,4 +115,3 @@ private fun ReplicaEditorItem(
         }
     }
 }
-

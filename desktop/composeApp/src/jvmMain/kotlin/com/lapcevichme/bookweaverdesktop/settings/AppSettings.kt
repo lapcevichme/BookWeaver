@@ -1,14 +1,14 @@
 package com.lapcevichme.bookweaverdesktop.settings
 
-import java.nio.file.Paths
+import kotlinx.serialization.Serializable
 
+/**
+ * Data-класс для хранения всех настроек приложения.
+ * Использование @Serializable позволяет легко сохранять и загружать
+ * настройки в формате JSON.
+ */
+@Serializable
 data class AppSettings(
     val pythonExecutablePath: String,
     val backendWorkingDirectory: String
-) {
-    /**
-     * Вычисляемое свойство для получения полного пути к файлу config.py.
-     */
-    val configPath: String
-        get() = Paths.get(backendWorkingDirectory, "config.py").toString()
-}
+)

@@ -3,21 +3,51 @@ package com.lapcevichme.bookweaverdesktop.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Этот файл содержит все data-классы, которые точно соответствуют
- * схеме OpenAPI вашего бэкенда. Использование @SerialName гарантирует,
- * что поля будут корректно парситься, даже если в Kotlin используется
- * camelCase, а в JSON - snake_case.
- */
-
-// --- Модели для эндпоинтов управления задачами ---
+// --- Модели для Health Check и управления задачами ---
 
 @Serializable
-data class TaskStatusResponse(
+enum class ServerState {
+    @SerialName("INITIALIZING")
+    INITIALIZING,
+
+    @SerialName("READY")
+    READY,
+
+    @SerialName("ERROR")
+    ERROR
+}
+
+@Serializable
+data class ServerStatus(
+    @SerialName("status") val status: ServerState,
+    @SerialName("message") val message: String? = null
+)
+
+@Serializable
+enum class TaskStatusEnum {
+    @SerialName("queued")
+    QUEUED,
+
+    @SerialName("processing")
+    PROCESSING,
+
+    @SerialName("complete")
+    COMPLETE,
+
+    @SerialName("failed")
+    FAILED
+}
+
+/**
+ * Имя модели изменено на TaskStatus для соответствия openapi (было TaskStatusResponse)
+ */
+@Serializable
+data class TaskStatus(
     @SerialName("task_id") val taskId: String,
-    val status: String, // "queued", "processing", "complete", "failed"
-    val progress: Double,
-    val message: String
+    @SerialName("status") val status: TaskStatusEnum,
+    @SerialName("progress") val progress: Double,
+    @SerialName("stage") val stage: String,
+    @SerialName("message") val message: String
 )
 
 @Serializable
@@ -32,13 +62,15 @@ data class ChapterTaskRequest(
     @SerialName("chapter_num") val chapterNum: Int
 )
 
+// --- Модели для управления проектами ---
 
-// --- Модели для эндпоинтов управления проектами ---
-
+/**
+ * Имя модели изменено на ProjectDetails для соответствия openapi (было ProjectDetailsResponse)
+ */
 @Serializable
-data class ProjectDetailsResponse(
+data class ProjectDetails(
     @SerialName("book_name") val bookName: String,
-    val chapters: List<ChapterStatus>
+    @SerialName("chapters") val chapters: List<ChapterStatus>
 )
 
 @Serializable
@@ -50,25 +82,10 @@ data class ChapterStatus(
     @SerialName("has_audio") val hasAudio: Boolean
 )
 
-
-// --- Модели для артефактов ---
-
-/**
- * ИСПРАВЛЕНИЕ: Это модель одной реплики в сценарии.
- * Сервер возвращает СПИСОК таких объектов, а не один объект Scenario.
- */
-@Serializable
-data class Replica(
-    // ID нужен для стабильности списков в Compose UI, он не приходит с сервера
-    val id: String,
-    val speaker: String,
-    val text: String
-)
-
-// --- Перечисления для имен артефактов ---
+// --- Модели и перечисления для артефактов ---
 
 @Serializable
-enum class BookArtifactName {
+enum class BookArtifact {
     @SerialName("manifest")
     MANIFEST,
 
@@ -80,7 +97,7 @@ enum class BookArtifactName {
 }
 
 @Serializable
-enum class ChapterArtifactName {
+enum class ChapterArtifact {
     @SerialName("scenario")
     SCENARIO,
 
@@ -88,22 +105,27 @@ enum class ChapterArtifactName {
     SUBTITLES
 }
 
-// --- Модели для Health Check ---
+/**
+ * Модель для одной реплики в сценарии.
+ * Сервер возвращает список таких объектов.
+ */
+@Serializable
+data class Replica(
+    val speaker: String,
+    val text: String
+)
+
+// --- Модели для обработки ошибок API ---
 
 @Serializable
-data class ServerStatus(
-    val status: ServerStateEnum,
-    val message: String = ""
+data class ApiError(
+    @SerialName("detail") val detail: List<ValidationErrorDetail>
 )
 
 @Serializable
-enum class ServerStateEnum {
-    @SerialName("INITIALIZING")
-    INITIALIZING,
+data class ValidationErrorDetail(
+    @SerialName("loc") val location: List<String>,
+    @SerialName("msg") val message: String,
+    @SerialName("type") val type: String
+)
 
-    @SerialName("READY")
-    READY,
-
-    @SerialName("ERROR")
-    ERROR
-}

@@ -1,54 +1,45 @@
 package com.lapcevichme.bookweaverdesktop.backend
 
-import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
-import io.ktor.client.statement.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.swing.Swing
-import kotlinx.coroutines.withContext
+import io.ktor.client.statement.HttpResponse
 import java.io.File
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
 
 /**
- * Manages project-related operations like fetching the project list and importing new books.
+ * Управляет операциями, связанными с проектами (книгами),
+ * такими как получение списка проектов и импорт новых книг через API.
  */
-class BookManager(
-    private val apiClient: ApiClient,
-    private val settingsManager: SettingsManager
-) {
+class BookManager(private val apiClient: ApiClient) {
 
     /**
-     * Fetches the list of available projects from the backend API.
+     * Запрашивает список доступных проектов с бэкенд API.
      */
     suspend fun getProjectList(): Result<List<String>> {
         return apiClient.getProjects()
     }
 
     /**
-     * Opens a system file chooser dialog to select a book file to import.
-     * @return The selected File, or null if the dialog was cancelled.
-     */
-    suspend fun selectBookFile(): File? = withContext(Dispatchers.Swing) {
-        // val settings = settingsManager.loadSettings()
-        val chooser = JFileChooser().apply {
-            dialogTitle = "Выберите файл книги (.txt, .epub)"
-            fileFilter = FileNameExtensionFilter("Book Files (.txt, .epub)", "txt", "epub")
-            isAcceptAllFileFilterUsed = false
-        }
-        val result = chooser.showOpenDialog(null)
-        if (result == JFileChooser.APPROVE_OPTION) {
-            chooser.selectedFile
-        } else {
-            null
-        }
-    }
-
-    /**
-     * Imports a selected book file by sending it to the backend.
-     * @param bookFile The file to import.
-     * @return A Result containing the server's HttpResponse.
+     * Импортирует выбранный файл книги, отправляя его на бэкенд.
+     * @param bookFile Файл для импорта.
+     * @return Result, содержащий HttpResponse от сервера.
      */
     suspend fun importBook(bookFile: File): Result<HttpResponse> {
         return apiClient.importBook(bookFile)
     }
+
+    /*
+     * УДАЛЕН МЕТОД `selectBookFile()`
+     *
+     * ПРИЧИНА: Этот метод использовал JFileChooser (компонент Swing UI) внутри
+     * класса бизнес-логики. Это является плохой практикой, так как "ядро"
+     * приложения не должно зависеть от конкретной реализации UI.
+     *
+     * ЧТО ДЕЛАТЬ ВМЕСТО ЭТОГО:
+     * 1. В вашем UI-коде (например, в Composable-функции экрана) используйте
+     * системный диалог выбора файла, подходящий для вашей платформы
+     * (например, `FileDialog` в Compose for Desktop).
+     * 2. После того как пользователь выберет файл, вы получите объект `File`.
+     * 3. Этот объект `File` передайте во ViewModel, которая затем вызовет
+     * метод `importBook(file)` из этого менеджера.
+     *
+     * Таким образом, UI отвечает за UI, а бизнес-логика - за работу с данными и API.
+     */
 }

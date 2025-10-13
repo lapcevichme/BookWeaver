@@ -1,6 +1,6 @@
 package com.lapcevichme.bookweaverdesktop.backend
 
-import com.lapcevichme.bookweaverdesktop.model.ServerStateEnum
+import com.lapcevichme.bookweaverdesktop.model.ServerState
 import com.lapcevichme.bookweaverdesktop.settings.SettingsManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +33,7 @@ class BackendProcessManager(
 
     private var process: Process? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var healthCheckJob: Job? = null
+    private var processJobs: Job? = null
 
     suspend fun start() {
         if (state.value !is State.STOPPED && state.value !is State.FAILED) {
@@ -42,103 +42,87 @@ class BackendProcessManager(
         }
 
         _state.value = State.STARTING
-        addLog("Attempting to start Python backend...")
+        _logs.value = emptyList()
+        addLog("--- Starting Python backend process ---")
 
-        val settings = settingsManager.loadSettings()
-        val pythonExecutable = File(settings.pythonExecutablePath)
-        val workingDir = File(settings.backendWorkingDirectory)
-
-        // Валидация путей
-        if (!pythonExecutable.exists() || !pythonExecutable.canExecute()) {
-            val errorMsg = "Python executable not found or not executable at: ${pythonExecutable.absolutePath}"
+        // ИСПРАВЛЕНО: Безопасно получаем настройки или выходим с ошибкой
+        val settings = settingsManager.loadSettings().getOrElse { error ->
+            val errorMsg = "Failed to load settings: ${error.message}"
             addLog("❌ $errorMsg")
             _state.value = State.FAILED(errorMsg)
             return
         }
-        if (!workingDir.exists() || !workingDir.isDirectory) {
+
+        val pythonExecutable = settings.pythonExecutablePath
+        val workingDir = File(settings.backendWorkingDirectory)
+
+        if (!workingDir.isDirectory) {
             val errorMsg = "Backend working directory not found: ${workingDir.absolutePath}"
             addLog("❌ $errorMsg")
             _state.value = State.FAILED(errorMsg)
             return
         }
 
+        val processBuilder = ProcessBuilder(
+            pythonExecutable, "main.py", "run-server"
+        ).directory(workingDir).redirectErrorStream(false)
+
         try {
-            val processBuilder = ProcessBuilder(
-                pythonExecutable.absolutePath,
-                "-u", // Unbuffered output
-                "api_server.py"
-            ).directory(workingDir)
+            process = processBuilder.start()
+            addLog("✅ Python process started with PID: ${process?.pid()}")
 
-            process = withContext(Dispatchers.IO) {
-                processBuilder.start()
+            processJobs = scope.launch {
+                launch { readStream(process?.inputStream, "[INFO]") }
+                launch { readStream(process?.errorStream, "[ERROR]") }
+                launch { waitForProcessExit() }
+                launch { runHealthCheck() }
             }
-            _state.value = State.RUNNING_INITIALIZING
-            addLog("--- Python process started (PID: ${process?.pid()}). Waiting for AI models to load... ---")
-
-            // Запускаем чтение логов и проверку здоровья в фоновых корутинах
-            scope.launch { readLogs() }
-            healthCheckJob = scope.launch { pollHealthStatus() }
-
         } catch (e: Exception) {
             val errorMsg = "Failed to start Python process: ${e.message}"
             addLog("❌ $errorMsg")
+            logger.error(e) { errorMsg }
             _state.value = State.FAILED(errorMsg)
         }
     }
 
     suspend fun stop() {
-        healthCheckJob?.cancel()
-        scope.coroutineContext.cancelChildren()
-
-        process?.let { proc ->
-            addLog("Stopping backend server (PID: ${proc.pid()})...")
-            withContext(Dispatchers.IO) {
-                // Пытаемся завершить процесс штатно
-                proc.destroy()
-                val gracefullyExited = proc.waitFor(5, TimeUnit.SECONDS)
-
-                if (gracefullyExited) {
-                    addLog("✅ Process terminated gracefully with exit code: ${proc.exitValue()}.")
-                } else {
-                    // Если не получилось, завершаем принудительно
-                    addLog("Graceful shutdown timed out. Forcing termination...")
-                    proc.destroyForcibly()
-                    proc.waitFor(5, TimeUnit.SECONDS)
-                    addLog("✅ Process terminated forcibly.")
-                }
-            }
+        addLog("--- Stopping Python backend process ---")
+        processJobs?.cancel()
+        process?.let {
+            it.destroyForcibly()
+            it.waitFor(5, TimeUnit.SECONDS)
         }
         process = null
         _state.value = State.STOPPED
-        addLog("Backend server stopped.")
+        addLog("--- Process stopped ---")
     }
 
-    private suspend fun pollHealthStatus() {
-        val maxRetries = 30 // Ждем до 60 секунд
+    private suspend fun runHealthCheck() {
+        val maxRetries = 15
         for (attempt in 1..maxRetries) {
             if (!currentCoroutineContext().isActive) return
 
-            apiClient.healthCheck()
-                .onSuccess { serverStatus ->
-                    when (serverStatus.status) {
-                        ServerStateEnum.READY -> {
-                            addLog("✅ Health check successful! Backend is online.")
-                            _state.value = State.RUNNING_HEALTHY
-                            return
-                        }
-                        ServerStateEnum.INITIALIZING -> {
-                            addLog("... Health check attempt $attempt/$maxRetries: Backend is still initializing models.")
-                        }
-                        ServerStateEnum.ERROR -> {
-                            val msg = "Backend reported an error during initialization: ${serverStatus.message}"
-                            addLog("❌ $msg")
-                            _state.value = State.FAILED(msg)
-                            return
-                        }
+            apiClient.healthCheck().onSuccess { serverStatus ->
+                when (serverStatus.status) {
+                    ServerState.READY -> {
+                        addLog("✅ Health check successful. API is ready.")
+                        _state.value = State.RUNNING_HEALTHY
+                        return
                     }
-                }.onFailure {
-                    addLog("... Health check attempt $attempt/$maxRetries failed to connect. Retrying...")
+                    ServerState.INITIALIZING -> {
+                        _state.value = State.RUNNING_INITIALIZING
+                        addLog("... API is initializing: ${serverStatus.message}")
+                    }
+                    ServerState.ERROR -> {
+                        val msg = "Backend reported an error: ${serverStatus.message}"
+                        addLog("❌ $msg")
+                        _state.value = State.FAILED(msg)
+                        return
+                    }
                 }
+            }.onFailure {
+                addLog("... Health check attempt $attempt/$maxRetries failed. Retrying...")
+            }
             delay(2000)
         }
         val timeoutMsg = "API health check timed out after $maxRetries retries."
@@ -146,20 +130,24 @@ class BackendProcessManager(
         _state.value = State.FAILED(timeoutMsg)
     }
 
-    private suspend fun readLogs() {
-        process?.inputStream?.let {
-            val reader = BufferedReader(InputStreamReader(it))
-            withContext(Dispatchers.IO) {
-                reader.useLines { lines ->
-                    lines.forEach { line ->
-                        if (isActive) addLog(line)
-                    }
+    private suspend fun readStream(inputStream: java.io.InputStream?, prefix: String) {
+        if (inputStream == null) return
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        withContext(Dispatchers.IO) {
+            reader.useLines { lines ->
+                lines.forEach { line ->
+                    if (isActive) addLog("$prefix $line")
                 }
             }
-            if (process?.isAlive == false && _state.value == State.RUNNING_HEALTHY) {
-                addLog("--- Python process terminated unexpectedly (Exit code: ${process?.exitValue()}) ---")
-                _state.value = State.FAILED("Process terminated unexpectedly")
-            }
+        }
+    }
+
+    private suspend fun waitForProcessExit() {
+        val exitCode = process?.waitFor()
+        if (_state.value is State.RUNNING_HEALTHY || _state.value is State.RUNNING_INITIALIZING) {
+            val errorMsg = "Process terminated unexpectedly with exit code: $exitCode"
+            addLog("--- ❌ $errorMsg ---")
+            _state.value = State.FAILED(errorMsg)
         }
     }
 
@@ -169,4 +157,3 @@ class BackendProcessManager(
         }
     }
 }
-

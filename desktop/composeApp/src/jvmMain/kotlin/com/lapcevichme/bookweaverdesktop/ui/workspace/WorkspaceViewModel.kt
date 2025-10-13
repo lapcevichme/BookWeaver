@@ -1,9 +1,13 @@
-package com.lapcevichme.bookweaverdesktop.ui
+package com.lapcevichme.bookweaverdesktop.ui.workspace
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaverdesktop.backend.ApiClient
-import com.lapcevichme.bookweaverdesktop.model.*
+import com.lapcevichme.bookweaverdesktop.model.BookArtifact
+import com.lapcevichme.bookweaverdesktop.model.ChapterStatus
+import com.lapcevichme.bookweaverdesktop.model.ChapterTaskRequest
+import com.lapcevichme.bookweaverdesktop.model.TaskStatus
+import com.lapcevichme.bookweaverdesktop.model.TaskStatusEnum
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -12,37 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-
-enum class TaskType {
-    SCENARIO, AUDIO
-}
-
-data class ProcessingTaskDetails(
-    val volume: Int,
-    val chapter: Int,
-    val taskId: String,
-    val taskType: TaskType,
-    val status: String = "queued",
-    val progress: Float = 0.0f,
-    val message: String = "Задача в очереди..."
-)
-
-data class AssetsState(
-    val manifestContent: String? = null,
-    val isManifestLoading: Boolean = false,
-    val isManifestSaving: Boolean = false,
-    // TODO: Добавить состояние для персонажей
-)
-
-data class WorkspaceUiState(
-    val bookName: String,
-    val projectDetails: ProjectDetailsResponse? = null,
-    val isLoading: Boolean = true,
-    val errorMessage: String? = null,
-    val activeTask: ProcessingTaskDetails? = null,
-    val selectedChapter: ChapterStatus? = null,
-    val assets: AssetsState = AssetsState()
-)
+import kotlin.onSuccess
 
 class WorkspaceViewModel(
     private val bookName: String,
@@ -62,7 +36,6 @@ class WorkspaceViewModel(
         loadProjectDetails()
     }
 
-    // --- Управление проектом и задачами ---
     fun loadProjectDetails() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
@@ -70,18 +43,10 @@ class WorkspaceViewModel(
                 .onSuccess { details ->
                     _uiState.update {
                         val currentSelected = it.selectedChapter
-                        val newSelected = if (currentSelected != null && details.chapters.any { c -> c.volumeNum == currentSelected.volumeNum && c.chapterNum == currentSelected.chapterNum }) {
-                            details.chapters.find { ch ->
-                                ch.volumeNum == currentSelected.volumeNum && ch.chapterNum == currentSelected.chapterNum
-                            }
-                        } else {
-                            details.chapters.firstOrNull()
-                        }
-                        it.copy(
-                            isLoading = false,
-                            projectDetails = details,
-                            selectedChapter = newSelected
-                        )
+                        val newSelected = details.chapters.find { ch ->
+                            ch.volumeNum == currentSelected?.volumeNum && ch.chapterNum == currentSelected.chapterNum
+                        } ?: details.chapters.firstOrNull()
+                        it.copy(isLoading = false, projectDetails = details, selectedChapter = newSelected)
                     }
                 }
                 .onFailure { error -> _uiState.update { it.copy(isLoading = false, errorMessage = "Ошибка: ${error.message}") } }
@@ -94,35 +59,28 @@ class WorkspaceViewModel(
 
     fun generateScenario(volume: Int, chapter: Int) {
         val request = ChapterTaskRequest(bookName, volume, chapter)
-        runTask(volume, chapter, TaskType.SCENARIO) {
-            apiClient.startScenarioGeneration(request)
-        }
+        runTask(volume, chapter, TaskType.SCENARIO) { apiClient.startScenarioGeneration(request) }
     }
 
     fun synthesizeAudio(volume: Int, chapter: Int) {
         val request = ChapterTaskRequest(bookName, volume, chapter)
-        runTask(volume, chapter, TaskType.AUDIO) {
-            apiClient.startTtsSynthesis(request)
-        }
+        runTask(volume, chapter, TaskType.AUDIO) { apiClient.startTtsSynthesis(request) }
     }
 
-    private fun runTask(volume: Int, chapter: Int, taskType: TaskType, apiCall: suspend () -> Result<TaskStatusResponse>) {
+    private fun runTask(volume: Int, chapter: Int, taskType: TaskType, apiCall: suspend () -> Result<TaskStatus>) {
         pollingJob?.cancel()
         viewModelScope.launch {
-            _uiState.update { it.copy(activeTask = ProcessingTaskDetails(volume, chapter, "", taskType, "queued", 0.0f, "Запуск...")) }
+            _uiState.update { it.copy(activeTask = ProcessingTaskDetails(volume, chapter, "", taskType)) }
             apiCall()
                 .onSuccess { initialResponse ->
                     _uiState.update {
-                        it.copy(
-                            activeTask = ProcessingTaskDetails(
-                                volume,
-                                chapter,
-                                initialResponse.taskId,
-                                taskType,
-                                initialResponse.status,
-                                initialResponse.progress.toFloat(),
-                                initialResponse.message
-                            )
+                        it.copy(activeTask = it.activeTask?.copy(
+                            taskId = initialResponse.taskId,
+                            status = initialResponse.status.name.lowercase(),
+                            progress = initialResponse.progress.toFloat(),
+                            stage = initialResponse.stage,
+                            message = initialResponse.message
+                        )
                         )
                     }
                     startPollingStatus(initialResponse.taskId, taskType)
@@ -144,13 +102,14 @@ class WorkspaceViewModel(
                         _uiState.update {
                             it.copy(
                                 activeTask = it.activeTask?.copy(
-                                    status = statusResponse.status,
+                                    status = statusResponse.status.name.lowercase(),
                                     progress = statusResponse.progress.toFloat(),
+                                    stage = statusResponse.stage,
                                     message = statusResponse.message
                                 )
                             )
                         }
-                        if (statusResponse.status == "complete" || statusResponse.status == "failed") {
+                        if (statusResponse.status == TaskStatusEnum.COMPLETE || statusResponse.status == TaskStatusEnum.FAILED) {
                             break
                         }
                     }
@@ -162,9 +121,9 @@ class WorkspaceViewModel(
                     }
             }
             val finishedTask = _uiState.value.activeTask
-            if (finishedTask?.status == "complete") {
-                updateChapterStateLocally(finishedTask.volume, finishedTask.chapter, taskType)
+            if (finishedTask?.status == TaskStatusEnum.COMPLETE.name.lowercase()) {
                 _userMessages.emit("✅ Задача успешно завершена!")
+                loadProjectDetails() // Перезагружаем все детали, чтобы получить актуальное состояние
             } else {
                 _userMessages.emit("❌ Задача завершилась с ошибкой.")
             }
@@ -172,44 +131,16 @@ class WorkspaceViewModel(
         }
     }
 
-    private fun updateChapterStateLocally(volume: Int, chapterNum: Int, taskType: TaskType) {
-        _uiState.update { currentState ->
-            val updatedChapters = currentState.projectDetails?.chapters?.map { chapter ->
-                if (chapter.volumeNum == volume && chapter.chapterNum == chapterNum) {
-                    when (taskType) {
-                        TaskType.SCENARIO -> chapter.copy(hasScenario = true)
-                        TaskType.AUDIO -> chapter.copy(hasAudio = true)
-                    }
-                } else {
-                    chapter
-                }
-            }
-            val updatedSelectedChapter = updatedChapters?.find {
-                it.volumeNum == currentState.selectedChapter?.volumeNum && it.chapterNum == currentState.selectedChapter.chapterNum
-            }
-            currentState.copy(
-                projectDetails = currentState.projectDetails?.copy(chapters = updatedChapters ?: emptyList()),
-                selectedChapter = updatedSelectedChapter
-            )
-        }
-    }
-
-    // --- Управление манифестом ---
-
     fun loadManifest() {
         viewModelScope.launch {
             _uiState.update { it.copy(assets = it.assets.copy(isManifestLoading = true)) }
-            apiClient.getBookArtifact(bookName, BookArtifactName.MANIFEST)
+            apiClient.getBookArtifact(bookName, BookArtifact.MANIFEST)
                 .onSuccess { jsonElement ->
                     val formattedJson = json.encodeToString(JsonElement.serializer(), jsonElement)
-                    _uiState.update {
-                        it.copy(assets = it.assets.copy(isManifestLoading = false, manifestContent = formattedJson))
-                    }
+                    _uiState.update { it.copy(assets = it.assets.copy(isManifestLoading = false, manifestContent = formattedJson)) }
                 }
                 .onFailure { error ->
-                    _uiState.update {
-                        it.copy(assets = it.assets.copy(isManifestLoading = false, manifestContent = "Ошибка загрузки: ${error.message}"))
-                    }
+                    _uiState.update { it.copy(assets = it.assets.copy(isManifestLoading = false, manifestContent = "Ошибка загрузки: ${error.message}")) }
                 }
         }
     }
@@ -219,34 +150,27 @@ class WorkspaceViewModel(
             _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = true)) }
             try {
                 val jsonElement = json.decodeFromString(JsonElement.serializer(), content)
-
-                // Проверяем, что декодированный элемент - это именно JsonObject
                 if (jsonElement is JsonObject) {
-                    apiClient.updateBookArtifact(bookName, BookArtifactName.MANIFEST, jsonElement)
+                    apiClient.updateBookArtifact(bookName, BookArtifact.MANIFEST, jsonElement)
                         .onSuccess {
                             _userMessages.emit("✅ Манифест успешно сохранен!")
-                            _uiState.update {
-                                it.copy(assets = it.assets.copy(isManifestSaving = false, manifestContent = content))
-                            }
+                            _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false, manifestContent = content)) }
                         }
                         .onFailure { error ->
                             _userMessages.emit("❌ Ошибка сохранения: ${error.message}")
                             _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false)) }
                         }
                 } else {
-                    // Если тип не JsonObject, сообщаем об ошибке
                     _userMessages.emit("❌ Ошибка: Манифест должен быть JSON-объектом (начинаться с { ).")
                     _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false)) }
                 }
             } catch (e: Exception) {
-                // Ошибка парсинга JSON
                 _userMessages.emit("❌ Ошибка: Введенный текст не является корректным JSON.")
                 _uiState.update { it.copy(assets = it.assets.copy(isManifestSaving = false)) }
             }
         }
     }
 
-    // --- Жизненный цикл ---
     override fun onCleared() {
         super.onCleared()
         pollingJob?.cancel()

@@ -3,7 +3,7 @@ package com.lapcevichme.bookweaverdesktop.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaverdesktop.backend.BackendProcessManager
-import com.lapcevichme.bookweaverdesktop.model.ServerState
+import com.lapcevichme.bookweaverdesktop.model.WsServerState
 import com.lapcevichme.bookweaverdesktop.server.ServerManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +19,7 @@ class MainViewModel(
 ) : ViewModel() {
 
     // --- Состояния ---
-    val webSocketServerState: StateFlow<ServerState> = serverManager.serverState
+    val webSocketServerState: StateFlow<WsServerState> = serverManager.serverState
     val backendState: StateFlow<BackendProcessManager.State> = backendProcessManager.state
     val backendLogs: StateFlow<List<String>> = backendProcessManager.logs
 
@@ -31,7 +31,7 @@ class MainViewModel(
 
     // --- Управление WebSocket-сервером ---
     fun startWebSocketServer() {
-        if (webSocketServerState.value is ServerState.Disconnected) {
+        if (this@MainViewModel.webSocketServerState.value is WsServerState.Disconnected) {
             viewModelScope.launch(Dispatchers.IO) {
                 serverManager.start()
             }
@@ -39,7 +39,7 @@ class MainViewModel(
     }
 
     fun showConnectionInstructions() {
-        if (webSocketServerState.value is ServerState.ReadyForConnection) {
+        if (this@MainViewModel.webSocketServerState.value is WsServerState.ReadyForConnection) {
             serverManager.showConnectionInstructions()
         }
     }
