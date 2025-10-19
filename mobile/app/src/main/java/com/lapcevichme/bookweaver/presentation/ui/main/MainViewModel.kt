@@ -20,18 +20,12 @@ class MainViewModel @Inject constructor(
 
     val connectionStatus: StateFlow<String> = getConnectionStatusUseCase()
      val logs: StateFlow<List<String>> = getLogsUseCase()
-
-    // --- ДОБАВЛЯЕМ ПАРСЕР ---
     private val json = Json { ignoreUnknownKeys = true }
-
-    // --- ОБНОВЛЯЕМ МЕТОД ---
     fun handleQrCodeResult(contents: String?) {
         if (contents.isNullOrBlank()) return
 
         try {
-            // 1. Парсим строку в DTO прямо здесь
             val info = json.decodeFromString(ConnectionInfo.serializer(), contents)
-            // 2. Вызываем use-case с уже чистыми данными
             handleQrCodeUseCase(info.fingerprint)
         } catch (e: Exception) {
             // Здесь можно показать ошибку пользователю

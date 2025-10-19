@@ -1,61 +1,166 @@
 package com.lapcevichme.bookweaver.data.repository.mock
 
 import com.lapcevichme.bookweaver.domain.model.Book
+import com.lapcevichme.bookweaver.domain.model.BookCharacter
+import com.lapcevichme.bookweaver.domain.model.BookDetails
+import com.lapcevichme.bookweaver.domain.model.BookManifest
+import com.lapcevichme.bookweaver.domain.model.Chapter
+import com.lapcevichme.bookweaver.domain.model.ChapterSummary
+import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import java.io.File
+import java.io.InputStream
+import java.util.UUID
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
- * Это моковая реализация репозитория для разработки и тестирования UI.
- * Он не делает реальных сетевых запросов, а просто возвращает
- * заранее заготовленный список книг с небольшой задержкой.
+ * Моковая (тестовая) реализация репозитория книг.
+ * Возвращает заранее заданные данные для разработки и тестирования UI.
  */
+@Singleton
 class MockBookRepository @Inject constructor() : BookRepository {
 
-    // Используем StateFlow, чтобы UI мог на него подписаться, как и на настоящий репозиторий.
-    private val _books = MutableStateFlow<List<Book>>(emptyList())
-    override val books: StateFlow<List<Book>> = _books
-
-    init {
-        // При создании репозитория сразу "загружаем" моковые данные
-        requestBookList()
-    }
-
-    override fun requestBookList() {
-        // Здесь не будет сетевого запроса.
-        // Вместо этого мы просто обновляем наш StateFlow.
-        // Добавляем задержку, чтобы имитировать загрузку из сети.
-        GlobalScope.launch {
-            delay(1500) // Имитируем загрузку в 1.5 секунды
-            _books.value = mockBooks
-        }
-    }
-
-    // Список наших "фейковых" книг
-    private val mockBooks = listOf(
+    private val mockBooks = mutableListOf(
         Book(
-            title = "Хоббит, или Туда и обратно",
-            author = "Дж. Р. Р. Толкин",
-            filePath = "hobbit.epub"
+            id = "mock-book-1",
+            title = "Монолог фармацевта: Приключения Маомао",
+            localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-1",
+            coverPath = null // Обложки пока нет
         ),
         Book(
-            title = "Дюна",
-            author = "Фрэнк Герберт",
-            filePath = "dune.epub"
+            id = "mock-book-2",
+            title = "Стальной Алхимик: Философский камень",
+            localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-2",
+            coverPath = null
         ),
         Book(
-            title = "Задача трёх тел",
-            author = "Лю Цысинь",
-            filePath = "three_body_problem.epub"
-        ),
-        Book(
-            title = "Очень длинное название книги, которое не должно помещаться в одну строку и должно красиво переноситься",
-            author = "Автор с Очень Длинным Именем и Фамилией",
-            filePath = "long_title_book.epub"
+            id = "mock-book-3",
+            title = "Атака Титанов: Падение Шиганшины",
+            localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-3",
+            coverPath = null
         )
     )
+
+    override fun getLocalBooks(): Flow<List<Book>> = flow {
+        delay(1500) // Имитация загрузки из сети или с диска
+        emit(mockBooks)
+    }
+
+    override suspend fun getBookDetails(bookId: String): Result<BookDetails> {
+        val book = mockBooks.find { it.id == bookId }
+            ?: return Result.failure(Exception("Mock book not found"))
+
+        val mockManifest = BookManifest(
+            bookName = book.title,
+            characterVoices = emptyMap(),
+            defaultNarratorVoice = "narrator_default"
+        )
+
+        val mockCharacters = listOf(
+            BookCharacter(
+                id = UUID.randomUUID(),
+                name = "Главный Герой",
+                description = "Полное описание главного героя со спойлерами.",
+                spoilerFreeDescription = "Описание без спойлеров.",
+                aliases = listOf("ГГ"),
+                chapterMentions = emptyMap()
+            )
+        )
+
+        val mockSummaries = mapOf(
+            "vol_1_chap_1" to ChapterSummary(
+                chapterId = "vol_1_chap_1",
+                teaser = "Глава 1: Начало пути",
+                synopsis = "Детальное описание событий первой главы."
+            )
+        )
+
+        val mockChapters = listOf(
+            Chapter(
+                id = "vol_1_chap_1",
+                title = "Глава 1: Начало пути",
+                audioPath = "/fake/path/audio",
+                scenarioPath = "/fake/path/scenario.json",
+                subtitlesPath = null
+            )
+        )
+
+        return Result.success(
+            BookDetails(
+                manifest = mockManifest,
+                bookCharacters = mockCharacters,
+                summaries = mockSummaries,
+                chapters = mockChapters
+            )
+        )
+    }
+
+    override suspend fun getScenarioForChapter(chapter: Chapter): Result<List<ScenarioEntry>> {
+        delay(500)
+        val mockScenario = listOf(
+            ScenarioEntry(
+                id = UUID.randomUUID(),
+                type = "narration",
+                speaker = "Рассказчик",
+                text = "Давным-давно, в далекой-далекой галактике...",
+                emotion = "neutral",
+                ambient = "space_wind",
+                audioFile = "narration_001.mp3"
+            ),
+            ScenarioEntry(
+                id = UUID.randomUUID(),
+                type = "dialogue",
+                speaker = "Главный Герой",
+                text = "Мне нужно найти философский камень!",
+                emotion = "determined",
+                ambient = "space_wind",
+                audioFile = "hero_001.mp3"
+            )
+        )
+        return Result.success(mockScenario)
+    }
+
+    override suspend fun downloadAndInstallBook(url: String): Result<File> {
+        delay(2000) // Симуляция долгой загрузки
+        if (url.contains("fail")) {
+            return Result.failure(Exception("Не удалось скачать книгу (симуляция)"))
+        }
+
+        val newBook = Book(
+            id = "downloaded_${UUID.randomUUID()}",
+            title = "Скачанная книга",
+            localPath = "/mock/downloaded",
+            coverPath = null
+        )
+        mockBooks.add(newBook)
+        return Result.success(File(newBook.localPath))
+    }
+
+    override suspend fun installBook(inputStream: InputStream): Result<File> {
+        delay(1500) // Симуляция установки
+
+        // В моковой реализации нам не важен контент, просто симулируем успех
+        val newBook = Book(
+            id = "installed_${UUID.randomUUID()}",
+            title = "Установленная из файла книга",
+            localPath = "/mock/installed",
+            coverPath = null
+        )
+        mockBooks.add(newBook)
+        return Result.success(File(newBook.localPath))
+    }
+
+    override suspend fun deleteBook(bookId: String): Result<Unit> {
+        delay(500)
+        val removed = mockBooks.removeIf { it.id == bookId }
+        return if (removed) {
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Книга для удаления не найдена"))
+        }
+    }
 }

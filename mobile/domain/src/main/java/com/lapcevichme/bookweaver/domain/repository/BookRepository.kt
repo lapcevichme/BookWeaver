@@ -1,9 +1,47 @@
 package com.lapcevichme.bookweaver.domain.repository
 
 import com.lapcevichme.bookweaver.domain.model.Book
-import kotlinx.coroutines.flow.StateFlow
+import com.lapcevichme.bookweaver.domain.model.BookDetails
+import com.lapcevichme.bookweaver.domain.model.Chapter
+import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
+import kotlinx.coroutines.flow.Flow
+import java.io.File
+import java.io.InputStream
 
 interface BookRepository {
-    val books: StateFlow<List<Book>>
-    fun requestBookList()
+    /**
+     * Получить поток (Flow) со списком всех локально сохраненных книг.
+     * Flow позволяет автоматически обновлять UI при изменении данных.
+     */
+    fun getLocalBooks(): Flow<List<Book>>
+
+    /**
+     * Получить детальную информацию о конкретной книге по ее ID.
+     * @param bookId Уникальный идентификатор книги.
+     */
+    suspend fun getBookDetails(bookId: String): Result<BookDetails>
+
+    /**
+     * Загружает архив книги (.bw) по URL, распаковывает и сохраняет локально.
+     * @param url Ссылка на .bw файл.
+     * @return Возвращает Result с путем к папке книги в случае успеха.
+     */
+    suspend fun downloadAndInstallBook(url: String): Result<File>
+
+    /**
+     * Устанавливает книгу из потока данных.
+     * @param inputStream Поток данных .bw архива.
+     */
+    suspend fun installBook(inputStream: InputStream): Result<File>
+
+    /**
+     * Удалить все файлы, связанные с книгой, с устройства.
+     * @param bookId Уникальный идентификатор книги для удаления.
+     */
+    suspend fun deleteBook(bookId: String): Result<Unit>
+
+    /**
+     * Распарсить сценарий для конкретной главы.
+     */
+    suspend fun getScenarioForChapter(chapter: Chapter): Result<List<ScenarioEntry>>
 }

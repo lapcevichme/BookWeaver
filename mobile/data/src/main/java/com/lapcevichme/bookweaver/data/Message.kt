@@ -1,6 +1,5 @@
 package com.lapcevichme.bookweaver.data
 
-import com.lapcevichme.bookweaver.data.network.dto.BookDto
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -12,11 +11,11 @@ sealed class WsMessage
 // --- ИЗМЕНЕНИЕ 2: Убираем `override val type` ---
 object WsRequestBookList : WsMessage()
 
-@Serializable
-@SerialName("book_list")
-data class WsBookList(
-    val books: List<BookDto>
-) : WsMessage()
+//@Serializable
+//@SerialName("book_list")
+//data class WsBookList(
+//    val books: List<BookDto>
+//) : WsMessage()
 
 
 @Serializable
