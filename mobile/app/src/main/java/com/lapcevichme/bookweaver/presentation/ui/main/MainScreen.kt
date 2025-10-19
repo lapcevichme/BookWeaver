@@ -18,7 +18,6 @@ import androidx.navigation.navArgument
 import com.lapcevichme.bookweaver.presentation.characters.CharactersScreen
 import com.lapcevichme.bookweaver.presentation.ui.bookdetails.BookDetailsScreen
 
-// Маршруты теперь включают bookId, чтобы ViewModel мог его получить
 sealed class BookScreen(val route: String, val label: String, val icon: ImageVector) {
     object Chapters : BookScreen("book_chapters/{bookId}", "Главы", Icons.Default.Book) {
         fun createRoute(bookId: String) = "book_chapters/$bookId"
@@ -36,6 +35,7 @@ fun MainScreen(
     bookId: String,
     onSettingsClick: (String) -> Unit,
     onChapterClick: (String, String) -> Unit,
+    onCharacterClick: (String, String) -> Unit, // <-- Добавлен новый коллбэк
     onNavigateBack: () -> Unit,
 ) {
     val navController = rememberNavController()
@@ -67,9 +67,6 @@ fun MainScreen(
             }
         }
     ) { innerPadding ->
-        // ИСПРАВЛЕНО: Мы создаем новые отступы, используя только нижний отступ
-        // от внешнего Scaffold. Это позволяет TopAppBar на дочерних экранах
-        // самому управлять отступом от статус-бара, избегая его дублирования.
         val newPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding())
 
         NavHost(
@@ -91,7 +88,10 @@ fun MainScreen(
                 route = BookScreen.Characters.route,
                 arguments = listOf(navArgument("bookId") { type = NavType.StringType })
             ) {
-                CharactersScreen()
+                // Передаем коллбэк в CharactersScreen
+                CharactersScreen(
+                    onCharacterClick = { characterId -> onCharacterClick(bookId, characterId) }
+                )
             }
         }
     }

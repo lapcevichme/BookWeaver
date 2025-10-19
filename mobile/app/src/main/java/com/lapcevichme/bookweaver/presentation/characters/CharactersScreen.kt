@@ -1,5 +1,6 @@
 package com.lapcevichme.bookweaver.presentation.characters
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,7 +16,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun CharactersScreen(
-    viewModel: CharactersViewModel = hiltViewModel()
+    viewModel: CharactersViewModel = hiltViewModel(),
+    // Добавляем коллбэк для клика
+    onCharacterClick: (characterId: String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -37,7 +40,8 @@ fun CharactersScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(uiState.characters, key = { it.id }) { character ->
-                    CharacterItem(character)
+                    // Передаем id персонажа в коллбэк при клике
+                    CharacterItem(character, onClick = { onCharacterClick(character.id) })
                 }
             }
         }
@@ -45,8 +49,16 @@ fun CharactersScreen(
 }
 
 @Composable
-private fun CharacterItem(character: UiCharacter) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun CharacterItem(
+    character: UiCharacter,
+    // Делаем карточку кликабельной
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
         Column(Modifier.padding(16.dp)) {
             Text(character.name, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))

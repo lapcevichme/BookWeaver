@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.lapcevichme.bookweaver.presentation.charactersdetails.CharacterDetailsScreen
 import com.lapcevichme.bookweaver.presentation.ui.bookinstall.BookInstallationScreen
 import com.lapcevichme.bookweaver.presentation.ui.connection.ConnectionScreen
 import com.lapcevichme.bookweaver.presentation.ui.details.ChapterDetailsScreen
@@ -13,22 +14,22 @@ import com.lapcevichme.bookweaver.presentation.ui.library.LibraryScreen
 import com.lapcevichme.bookweaver.presentation.ui.main.MainScreen
 import com.lapcevichme.bookweaver.presentation.ui.settings.BookSettingsScreen
 
+
 sealed class Screen(val route: String) {
     object Library : Screen("library")
-
-    // ИЗМЕНЕНО: BookDetails теперь MainScreen
     object Main : Screen("main/{bookId}") {
         fun createRoute(bookId: String) = "main/$bookId"
     }
-
     object BookSettings : Screen("book_settings/{bookId}") {
         fun createRoute(bookId: String) = "book_settings/$bookId"
     }
-
     object ChapterDetails : Screen("chapter_details/{bookId}/{chapterId}") {
         fun createRoute(bookId: String, chapterId: String) = "chapter_details/$bookId/$chapterId"
     }
-
+    // Новый маршрут для деталей персонажа
+    object CharacterDetails : Screen("character_details/{bookId}/{characterId}") {
+        fun createRoute(bookId: String, characterId: String) = "character_details/$bookId/$characterId"
+    }
     object Connection : Screen("connection")
     object InstallBook : Screen("install_book")
 }
@@ -43,7 +44,6 @@ fun AppNavHost(onScanQrClick: () -> Unit) {
                 onInstallClick = { navController.navigate(Screen.InstallBook.route) }
             )
         }
-        // ИЗМЕНЕНО: BookDetails заменен на MainScreen
         composable(
             route = Screen.Main.route,
             arguments = listOf(navArgument("bookId") { type = NavType.StringType })
@@ -52,25 +52,28 @@ fun AppNavHost(onScanQrClick: () -> Unit) {
             if (bookId != null) {
                 MainScreen(
                     bookId = bookId,
-                    onSettingsClick = {
-                        navController.navigate(
-                            Screen.BookSettings.createRoute(
-                                bookId
-                            )
-                        )
-                    },
-                    onChapterClick = { _, chapterId ->
-                        navController.navigate(
-                            Screen.ChapterDetails.createRoute(
-                                bookId,
-                                chapterId
-                            )
-                        )
-                    },
+                    onSettingsClick = { navController.navigate(Screen.BookSettings.createRoute(bookId)) },
+                    onChapterClick = { _, chapterId -> navController.navigate(Screen.ChapterDetails.createRoute(bookId, chapterId)) },
+                    // Добавляем новый коллбэк
+                    onCharacterClick = { _, characterId -> navController.navigate(Screen.CharacterDetails.createRoute(bookId, characterId)) },
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
         }
+        // ... другие composable ...
+
+        // Добавляем новый экран в граф
+        composable(
+            route = Screen.CharacterDetails.route,
+            arguments = listOf(
+                navArgument("bookId") { type = NavType.StringType },
+                navArgument("characterId") { type = NavType.StringType }
+            )
+        ) {
+            CharacterDetailsScreen(onNavigateBack = { navController.popBackStack() })
+        }
+
+        // --- Существующие composable без изменений ---
         composable(
             route = Screen.BookSettings.route,
             arguments = listOf(navArgument("bookId") { type = NavType.StringType })
@@ -97,4 +100,3 @@ fun AppNavHost(onScanQrClick: () -> Unit) {
         }
     }
 }
-
