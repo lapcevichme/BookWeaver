@@ -99,29 +99,20 @@ class MockBookRepository @Inject constructor() : BookRepository {
         )
     }
 
-    override suspend fun getScenarioForChapter(chapter: Chapter): Result<List<ScenarioEntry>> {
-        delay(500)
-        val mockScenario = listOf(
+    override suspend fun getScenarioForChapter(bookId: String, chapterId: String): Result<List<ScenarioEntry>> {
+        delay(300)
+        val entries = (1..10).map {
             ScenarioEntry(
                 id = UUID.randomUUID(),
-                type = "narration",
-                speaker = "Рассказчик",
-                text = "Давным-давно, в далекой-далекой галактике...",
-                emotion = "neutral",
-                ambient = "space_wind",
-                audioFile = "narration_001.mp3"
-            ),
-            ScenarioEntry(
-                id = UUID.randomUUID(),
-                type = "dialogue",
-                speaker = "Главный Герой",
-                text = "Мне нужно найти философский камень!",
-                emotion = "determined",
-                ambient = "space_wind",
-                audioFile = "hero_001.mp3"
+                type = if (it % 2 == 0) "dialogue" else "narration",
+                text = "Это строка номер $it в сценарии главы $chapterId.",
+                speaker = if (it % 2 == 0) "Маомао" else "Рассказчик",
+                emotion = null,
+                ambient = "none",
+                audioFile = null
             )
-        )
-        return Result.success(mockScenario)
+        }
+        return Result.success(entries)
     }
 
     override suspend fun downloadAndInstallBook(url: String): Result<File> {
@@ -152,6 +143,21 @@ class MockBookRepository @Inject constructor() : BookRepository {
         )
         mockBooks.add(newBook)
         return Result.success(File(newBook.localPath))
+    }
+
+    override suspend fun getChapterOriginalText(bookId: String, chapterId: String): Result<String> {
+        delay(200)
+        return Result.success(
+            """
+            Это оригинальный текст для главы $chapterId.
+            
+            Здесь содержится полный, неадаптированный текст произведения. 
+            Он может быть использован для сверки или просто для чтения.
+            
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. 
+            Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+            """.trimIndent()
+        )
     }
 
     override suspend fun deleteBook(bookId: String): Result<Unit> {

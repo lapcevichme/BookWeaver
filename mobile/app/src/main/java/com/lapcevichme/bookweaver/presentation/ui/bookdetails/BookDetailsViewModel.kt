@@ -4,8 +4,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetBookDetailsUseCase
-import com.lapcevichme.bookweaver.presentation.ui.book_details.mapper.UiBookDetails
-import com.lapcevichme.bookweaver.presentation.ui.book_details.mapper.toUiBookDetails
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow

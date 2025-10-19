@@ -34,7 +34,9 @@ interface BookRepository {
      */
     suspend fun installBook(inputStream: InputStream): Result<File>
 
-    /**
+    suspend fun getChapterOriginalText(bookId: String, chapterId: String): Result<String>
+
+        /**
      * Удалить все файлы, связанные с книгой, с устройства.
      * @param bookId Уникальный идентификатор книги для удаления.
      */
@@ -43,5 +45,5 @@ interface BookRepository {
     /**
      * Распарсить сценарий для конкретной главы.
      */
-    suspend fun getScenarioForChapter(chapter: Chapter): Result<List<ScenarioEntry>>
+    suspend fun getScenarioForChapter(bookId: String, chapterId: String): Result<List<ScenarioEntry>>
 }

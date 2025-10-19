@@ -91,3 +91,12 @@ data class ScenarioEntry(
     val ambient: String = "none",
     val audioFile: String?
 )
+
+/**
+ * Domain-модель, объединяющая всю информацию о главе.
+ */
+data class ChapterDetails(
+    val summary: ChapterSummary?,
+    val scenario: List<ScenarioEntry>,
+    val originalText: String
+)

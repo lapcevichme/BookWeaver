@@ -1,7 +1,6 @@
 package com.lapcevichme.bookweaver.data.repository
 
 import android.content.Context
-import android.net.Uri
 import com.lapcevichme.bookweaver.data.network.dto.BookManifestDto
 import com.lapcevichme.bookweaver.data.network.dto.ChapterSummaryDto
 import com.lapcevichme.bookweaver.data.network.dto.CharacterDto
@@ -89,21 +88,29 @@ class BookRepositoryImpl @Inject constructor(
                     json.decodeFromString<BookManifestDto>(manifestFile.readText()).toDomain()
 
                 val charactersFile = File(bookDir, "character_archive.json")
-                val characters =
+                val characters = if (charactersFile.exists()) {
                     json.decodeFromString<List<CharacterDto>>(charactersFile.readText())
                         .map { it.toDomain() }
+                } else emptyList()
+
 
                 val summariesFile = File(bookDir, "chapter_summaries.json")
-                val summaries =
+                val summaries = if (summariesFile.exists()){
                     json.decodeFromString<Map<String, ChapterSummaryDto>>(summariesFile.readText())
                         .mapValues { it.value.toDomain() }
+                } else emptyMap()
 
                 val chapters = bookDir.listFiles()
                     ?.filter { it.isDirectory && it.name.startsWith("vol_") }
-                    ?.map { chapterDir ->
+                    // ИСПРАВЛЕНО: Добавлена числовая сортировка по тому и главе
+                    ?.sortedWith(compareBy(
+                        { file -> file.name.substringAfter("vol_").substringBefore("_chap").toIntOrNull() ?: Int.MAX_VALUE },
+                        { file -> file.name.substringAfter("chap_").toIntOrNull() ?: Int.MAX_VALUE }
+                    ))
+                    ?.mapNotNull { chapterDir ->
                         Chapter(
                             id = chapterDir.name,
-                            title = formatChapterIdToTitle(chapterDir.name), // <-- ИСПРАВЛЕНО
+                            title = formatChapterIdToTitle(chapterDir.name),
                             audioPath = File(chapterDir, "audio").absolutePath,
                             scenarioPath = File(chapterDir, "scenario.json").absolutePath,
                             subtitlesPath = File(
@@ -111,7 +118,7 @@ class BookRepositoryImpl @Inject constructor(
                                 "subtitles.json"
                             ).takeIf { it.exists() }?.absolutePath
                         )
-                    }?.sortedBy { it.id } ?: emptyList()
+                    } ?: emptyList()
 
                 Result.success(BookDetails(manifest, characters, summaries, chapters))
             } catch (e: Exception) {
@@ -132,21 +139,23 @@ class BookRepositoryImpl @Inject constructor(
     }
 
 
-    override suspend fun getScenarioForChapter(chapter: Chapter): Result<List<ScenarioEntry>> =
-        withContext(Dispatchers.IO) {
-            try {
-                val scenarioFile = File(chapter.scenarioPath)
-                if (!scenarioFile.exists()) throw Exception("Scenario file not found at ${chapter.scenarioPath}")
+    override suspend fun getScenarioForChapter(
+        bookId: String,
+        chapterId: String
+    ): Result<List<ScenarioEntry>> = withContext(Dispatchers.IO) {
+        try {
+            val bookDir = File(booksDir, bookId)
+            val scenarioFile = File(bookDir, "$chapterId/scenario.json")
+            if (!scenarioFile.exists()) throw Exception("Scenario file not found at ${scenarioFile.path}")
 
-                val scenario =
-                    json.decodeFromString<List<ScenarioEntryDto>>(scenarioFile.readText())
-                        .map { it.toDomain() }
-                Result.success(scenario)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Result.failure(e)
-            }
+            val scenario = json.decodeFromString<List<ScenarioEntryDto>>(scenarioFile.readText())
+                .map { it.toDomain() }
+            Result.success(scenario)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
         }
+    }
 
     override suspend fun downloadAndInstallBook(url: String): Result<File> =
         withContext(Dispatchers.IO) {
@@ -221,6 +230,33 @@ class BookRepositoryImpl @Inject constructor(
             }
         }
 
+    override suspend fun getChapterOriginalText(bookId: String, chapterId: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val (volNum, chapNum) = parseChapterId(chapterId)
+                val textFile =
+                    File(booksDir, "$bookId/book_source/$bookId/vol_$volNum/chapter_$chapNum.txt")
+
+
+                if (!textFile.exists()) throw Exception("Original text file not found at ${textFile.path}")
+
+                Result.success(textFile.readText())
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Result.failure(e)
+            }
+        }
+
+    private fun parseChapterId(chapterId: String): Pair<String, String> {
+        return try {
+            val parts = chapterId.split("_")
+            val volNum = parts[1]
+            val chapNum = parts[3]
+            volNum to chapNum
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Invalid chapterId format: $chapterId")
+        }
+    }
 
     override suspend fun deleteBook(bookId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
