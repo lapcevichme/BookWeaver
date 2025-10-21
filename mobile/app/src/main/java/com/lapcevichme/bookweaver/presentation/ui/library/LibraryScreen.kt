@@ -2,16 +2,34 @@ package com.lapcevichme.bookweaver.presentation.ui.library
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,46 +37,41 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import java.io.File
 
 
+/**
+ * Полностью переработанный LibraryScreen.
+ * Теперь это "глупый" компонент, который принимает состояние (uiState) и
+ * сообщает о действиях пользователя через коллбэк onEvent.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
-    viewModel: LibraryViewModel = hiltViewModel(),
-    onBookClick: (bookId: String) -> Unit,
-    // Add a new callback for the install button click
-    onInstallClick: () -> Unit
+    uiState: LibraryUiState,
+    onEvent: (LibraryEvent) -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Библиотека") },
-                actions = {
-                    IconButton(onClick = { /* TODO: viewModel.onRefresh() */ }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Обновить")
-                    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("Библиотека") },
+            actions = {
+                IconButton(onClick = { onEvent(LibraryEvent.Refresh) }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Обновить")
                 }
-            )
-        },
-        // Add the floating action button
-        floatingActionButton = {
-            FloatingActionButton(onClick = onInstallClick) {
-                Icon(Icons.Default.Add, contentDescription = "Установить новую книгу")
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "Настройки приложения")
+                }
             }
-        }
-    ) { padding ->
+        )
+
         AnimatedContent(
             targetState = uiState.isLoading,
             label = "loading-animation",
             modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
         ) { isLoading ->
             if (isLoading) {
                 Box(
@@ -70,7 +83,9 @@ fun LibraryScreen(
             } else {
                 LibraryContent(
                     books = uiState.books,
-                    onBookClick = onBookClick
+                    onBookClick = { bookId ->
+                        onEvent(LibraryEvent.BookSelected(bookId))
+                    }
                 )
             }
         }
@@ -130,6 +145,7 @@ private fun BookItem(
                     .size(width = 60.dp, height = 90.dp)
                     .clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop,
+                // TODO: Добавить плейсхолдер
             )
 
             Spacer(Modifier.width(16.dp))

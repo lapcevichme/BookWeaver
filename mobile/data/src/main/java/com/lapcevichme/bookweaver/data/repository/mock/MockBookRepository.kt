@@ -115,6 +115,18 @@ class MockBookRepository @Inject constructor() : BookRepository {
         return Result.success(entries)
     }
 
+    override fun getActiveBookIdFlow(): Flow<String?> {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun setActiveBookId(bookId: String) {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getActiveBookId(): String? {
+        TODO("Not yet implemented")
+    }
+
     override suspend fun downloadAndInstallBook(url: String): Result<File> {
         delay(2000) // Симуляция долгой загрузки
         if (url.contains("fail")) {

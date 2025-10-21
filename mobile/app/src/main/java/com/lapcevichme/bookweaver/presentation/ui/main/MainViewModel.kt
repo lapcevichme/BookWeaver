@@ -1,35 +1,54 @@
 package com.lapcevichme.bookweaver.presentation.ui.main
 
 import androidx.lifecycle.ViewModel
-// --- ДОБАВЛЯЕМ ИМПОРТЫ ---
-import com.lapcevichme.bookweaver.data.ConnectionInfo // Импортируем DTO из :data
-import com.lapcevichme.bookweaver.domain.usecase.connection.GetConnectionStatusUseCase
-import com.lapcevichme.bookweaver.domain.usecase.connection.GetLogsUseCase
-import com.lapcevichme.bookweaver.domain.usecase.connection.HandleQrCodeUseCase
+import androidx.lifecycle.viewModelScope
+import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
+import com.lapcevichme.bookweaver.domain.usecase.books.GetLocalBooksUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.serialization.json.Json // Импортируем Json
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Определяет, какой экран показать при запуске.
+ */
+sealed class StartupState {
+    object Loading : StartupState()
+    object NoBooks : StartupState() // В приложении нет ни одной книги
+    object GoToLibrary : StartupState() // Книги есть, но активная не выбрана
+    object GoToBookHub : StartupState() // Есть активная книга
+}
+
+/**
+ * ViewModel для определения стартового маршрута на основе реальных данных.
+ */
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    getConnectionStatusUseCase: GetConnectionStatusUseCase,
-    getLogsUseCase: GetLogsUseCase,
-    private val handleQrCodeUseCase: HandleQrCodeUseCase
+    getLocalBooksUseCase: GetLocalBooksUseCase,
+    getActiveBookFlowUseCase: GetActiveBookFlowUseCase
 ) : ViewModel() {
+    private val _startupState = MutableStateFlow<StartupState>(StartupState.Loading)
+    val startupState = _startupState.asStateFlow()
 
-    val connectionStatus: StateFlow<String> = getConnectionStatusUseCase()
-     val logs: StateFlow<List<String>> = getLogsUseCase()
-    private val json = Json { ignoreUnknownKeys = true }
-    fun handleQrCodeResult(contents: String?) {
-        if (contents.isNullOrBlank()) return
-
-        try {
-            val info = json.decodeFromString(ConnectionInfo.serializer(), contents)
-            handleQrCodeUseCase(info.fingerprint)
-        } catch (e: Exception) {
-            // Здесь можно показать ошибку пользователю
-            println("Ошибка парсинга QR-кода: ${e.message}")
+    init {
+        viewModelScope.launch {
+            // Используем combine, чтобы получить последние данные из обоих источников
+            combine(
+                getLocalBooksUseCase(),
+                getActiveBookFlowUseCase()
+            ) { localBooks, activeBookId ->
+                // Определяем состояние на основе полученных данных
+                when {
+                    localBooks.isEmpty() -> StartupState.NoBooks
+                    activeBookId == null -> StartupState.GoToLibrary
+                    else -> StartupState.GoToBookHub
+                }
+            }.collect { state ->
+                // Обновляем состояние для UI
+                _startupState.value = state
+            }
         }
     }
 }

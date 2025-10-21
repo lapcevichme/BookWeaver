@@ -46,4 +46,9 @@ interface BookRepository {
      * Распарсить сценарий для конкретной главы.
      */
     suspend fun getScenarioForChapter(bookId: String, chapterId: String): Result<List<ScenarioEntry>>
+
+    fun getActiveBookIdFlow(): Flow<String?>
+    suspend fun setActiveBookId(bookId: String)
+    suspend fun getActiveBookId(): String?
+
 }

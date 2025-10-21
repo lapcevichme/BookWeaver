@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.presentation.ui.details
+package com.lapcevichme.bookweaver.presentation.ui.chapterdetails
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
@@ -12,23 +12,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChapterDetailsScreen(
-    viewModel: ChapterDetailsViewModel = hiltViewModel(),
+    state: ChapterDetailsUiState,
     onNavigateBack: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
     val tabTitles = listOf("Сводка", "Сценарий", "Оригинал")
@@ -36,7 +32,7 @@ fun ChapterDetailsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(uiState.chapterTitle, maxLines = 1) },
+                title = { Text(state.chapterTitle, maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -56,23 +52,27 @@ fun ChapterDetailsScreen(
                 }
             }
 
-            if (uiState.isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+            when {
+                state.isLoading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            } else if (uiState.error != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Ошибка: ${uiState.error}")
+                state.error != null -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Ошибка: ${state.error}")
+                    }
                 }
-            } else {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize()
-                ) { page ->
-                    when (page) {
-                        0 -> SummaryContent(uiState.details?.teaser ?: "", uiState.details?.synopsis ?: "")
-                        1 -> ScenarioContent(uiState.details?.scenario ?: emptyList())
-                        2 -> OriginalTextContent(uiState.details?.originalText ?: "")
+                else -> {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
+                        when (page) {
+                            0 -> SummaryContent(state.details?.teaser ?: "", state.details?.synopsis ?: "")
+                            1 -> ScenarioContent(state.details?.scenario ?: emptyList())
+                            2 -> OriginalTextContent(state.details?.originalText ?: "")
+                        }
                     }
                 }
             }
@@ -128,4 +128,3 @@ private fun OriginalTextContent(text: String) {
         Text(text, style = MaterialTheme.typography.bodyLarge)
     }
 }
-

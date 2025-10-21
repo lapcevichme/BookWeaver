@@ -20,8 +20,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import com.lapcevichme.bookweaver.presentation.ui.navigation.AppNavHost
 import com.lapcevichme.bookweaver.ui.theme.BookWeaverTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -29,26 +27,19 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    // MainViewModel больше не нужна здесь, так как логика переключения экранов ушла в NavHost.
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-
-        val qrCodeLauncher = registerForActivityResult(ScanContract()) { result ->
-            if (result.contents != null) {
-                // TODO: Логику обработки результата QR-кода нужно перенести в ConnectionViewModel
-                println("Scanned QR Code: ${result.contents}")
-            }
-        }
 
         setContent {
             val view = LocalView.current
             if (!view.isInEditMode) {
                 SideEffect {
                     val window = (view.context as Activity).window
-                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-                    WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
+                        false
+                    WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars =
+                        false
                 }
             }
 
@@ -58,14 +49,22 @@ class MainActivity : ComponentActivity() {
                     contract = ActivityResultContracts.RequestPermission(),
                     onResult = { isGranted ->
                         if (!isGranted) {
-                            Toast.makeText(context, "Разрешение на уведомления нужно для отображения статуса", Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                context,
+                                "Разрешение на уведомления нужно для отображения статуса",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                     }
                 )
 
                 LaunchedEffect(Unit) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        if (ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     }
@@ -75,17 +74,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Вместо старой логики с Crossfade, просто вызываем наш NavHost
-                    AppNavHost(
-                        onScanQrClick = {
-                            qrCodeLauncher.launch(
-                                ScanOptions()
-                                    .setPrompt("Scan a server QR code")
-                                    .setBeepEnabled(true)
-                                    .setOrientationLocked(false)
-                            )
-                        }
-                    )
+                    // Просто запускаем наш умный NavHost
+                    AppNavHost()
                 }
             }
         }

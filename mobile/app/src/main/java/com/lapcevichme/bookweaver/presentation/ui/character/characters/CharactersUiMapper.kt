@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.presentation.characters
+package com.lapcevichme.bookweaver.presentation.ui.character.characters
 
 import com.lapcevichme.bookweaver.domain.model.BookCharacter
 

@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.presentation.characters
+package com.lapcevichme.bookweaver.presentation.ui.character.characters
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel

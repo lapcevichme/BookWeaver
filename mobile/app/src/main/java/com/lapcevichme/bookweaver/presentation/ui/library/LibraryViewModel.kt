@@ -3,21 +3,37 @@ package com.lapcevichme.bookweaver.presentation.ui.library
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetLocalBooksUseCase
+import com.lapcevichme.bookweaver.domain.usecase.books.SetActiveBookUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+// UiState and Events remain the same
 data class LibraryUiState(
     val isLoading: Boolean = true,
     val books: List<UiBook> = emptyList()
 )
 
+sealed class LibraryEvent {
+    data class BookSelected(val bookId: String) : LibraryEvent()
+    object Refresh : LibraryEvent()
+}
+
+sealed class NavigationEvent {
+    object NavigateToBookHub : NavigationEvent()
+}
+
+
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    getLocalBooksUseCase: GetLocalBooksUseCase
+    getLocalBooksUseCase: GetLocalBooksUseCase,
+    private val setActiveBookUseCase: SetActiveBookUseCase
 ) : ViewModel() {
 
     val uiState: StateFlow<LibraryUiState> = getLocalBooksUseCase()
@@ -33,8 +49,24 @@ class LibraryViewModel @Inject constructor(
             initialValue = LibraryUiState(isLoading = true)
         )
 
-    fun onBookClicked(book: UiBook) {
-        // TODO: Реализовать навигацию на экран деталей книги
-        println("Clicked on book: ${book.title}")
+    private val _navigationEvent = Channel<NavigationEvent>()
+    val navigationEvent = _navigationEvent.receiveAsFlow()
+
+    fun onEvent(event: LibraryEvent) {
+        when (event) {
+            is LibraryEvent.BookSelected -> {
+                viewModelScope.launch {
+                    // Используем UseCase для сохранения ID активной книги
+                    setActiveBookUseCase(event.bookId)
+                    // И только после этого отправляем событие навигации
+                    _navigationEvent.send(NavigationEvent.NavigateToBookHub)
+                }
+            }
+
+            LibraryEvent.Refresh -> {
+                // TODO: Implement refresh logic
+            }
+        }
     }
 }
+

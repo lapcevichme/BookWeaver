@@ -1,102 +1,360 @@
 package com.lapcevichme.bookweaver.presentation.ui.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.LibraryBooks
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.lapcevichme.bookweaver.presentation.charactersdetails.CharacterDetailsScreen
-import com.lapcevichme.bookweaver.presentation.ui.bookinstall.BookInstallationScreen
-import com.lapcevichme.bookweaver.presentation.ui.connection.ConnectionScreen
-import com.lapcevichme.bookweaver.presentation.ui.details.ChapterDetailsScreen
+import com.lapcevichme.bookweaver.presentation.ui.book.BookHubScreen
+import com.lapcevichme.bookweaver.presentation.ui.book.InstallBookScreen
+import com.lapcevichme.bookweaver.presentation.ui.book.bookdetails.BookDetailsViewModel
+import com.lapcevichme.bookweaver.presentation.ui.book.bookinstall.BookInstallationViewModel
+import com.lapcevichme.bookweaver.presentation.ui.character.characters.CharactersScreen
+import com.lapcevichme.bookweaver.presentation.ui.character.charactersdetails.CharacterDetailsScreen
+import com.lapcevichme.bookweaver.presentation.ui.chapterdetails.ChapterDetailsScreen
+import com.lapcevichme.bookweaver.presentation.ui.chapterdetails.ChapterDetailsViewModel
 import com.lapcevichme.bookweaver.presentation.ui.library.LibraryScreen
-import com.lapcevichme.bookweaver.presentation.ui.main.MainScreen
+import com.lapcevichme.bookweaver.presentation.ui.library.LibraryViewModel
+import com.lapcevichme.bookweaver.presentation.ui.library.NavigationEvent
+import com.lapcevichme.bookweaver.presentation.ui.main.MainViewModel
+import com.lapcevichme.bookweaver.presentation.ui.main.StartupState
 import com.lapcevichme.bookweaver.presentation.ui.settings.BookSettingsScreen
+import kotlinx.coroutines.flow.collectLatest
 
+
+// --- ОПРЕДЕЛЕНИЕ ВСЕХ МАРШРУТОВ ПРИЛОЖЕНИЯ ---
 
 sealed class Screen(val route: String) {
-    object Library : Screen("library")
-    object Main : Screen("main/{bookId}") {
-        fun createRoute(bookId: String) = "main/$bookId"
-    }
-    object BookSettings : Screen("book_settings/{bookId}") {
-        fun createRoute(bookId: String) = "book_settings/$bookId"
-    }
-    object ChapterDetails : Screen("chapter_details/{bookId}/{chapterId}") {
-        fun createRoute(bookId: String, chapterId: String) = "chapter_details/$bookId/$chapterId"
-    }
-    // Новый маршрут для деталей персонажа
-    object CharacterDetails : Screen("character_details/{bookId}/{characterId}") {
-        fun createRoute(bookId: String, characterId: String) = "character_details/$bookId/$characterId"
-    }
-    object Connection : Screen("connection")
+    // --- Верхнеуровневые экраны (появляются поверх BottomNav) ---
+    object OnboardingLibrary : Screen("onboarding_library")
     object InstallBook : Screen("install_book")
+    object AppSettings : Screen("app_settings")
+
+    object ChapterDetails: Screen("chapter_details") {
+        const val bookIdArg = "bookId"
+        const val chapterIdArg = "chapterId"
+        val routeWithArgs = "$route/{$bookIdArg}/{$chapterIdArg}"
+        val arguments = listOf(
+            navArgument(bookIdArg) { type = NavType.StringType },
+            navArgument(chapterIdArg) { type = NavType.StringType }
+        )
+        fun createRoute(bookId: String, chapterId: String) = "$route/$bookId/$chapterId"
+    }
+
+    object Characters: Screen("characters") {
+        const val bookIdArg = "bookId"
+        val routeWithArgs = "$route/{$bookIdArg}"
+        val arguments = listOf(navArgument(bookIdArg) { type = NavType.StringType })
+        fun createRoute(bookId: String) = "$route/$bookId"
+    }
+
+    object CharacterDetails: Screen("character_details") {
+        const val bookIdArg = "bookId"
+        const val characterIdArg = "characterId"
+        val routeWithArgs = "$route/{$bookIdArg}/{$characterIdArg}"
+        val arguments = listOf(
+            navArgument(bookIdArg) { type = NavType.StringType },
+            navArgument(characterIdArg) { type = NavType.StringType }
+        )
+        fun createRoute(bookId: String, characterId: String) = "$route/$bookId/$characterId"
+    }
+
+    object BookSettings: Screen("book_settings") {
+        const val bookIdArg = "bookId"
+        val routeWithArgs = "$route/{$bookIdArg}"
+        val arguments = listOf(navArgument(bookIdArg) { type = NavType.StringType })
+        fun createRoute(bookId: String) = "$route/$bookId"
+    }
+
+
+    // --- Экраны внутри BottomNav ---
+    sealed class Bottom(route: String, val label: String, val icon: ImageVector) : Screen(route) {
+        object BookHub : Bottom("bottom_book_hub", "Книга", Icons.Default.Book)
+        object Player : Bottom("bottom_player", "Плеер", Icons.Default.PlayArrow)
+        object LoreHelper : Bottom("bottom_lore_helper", "Помощник", Icons.Default.QuestionAnswer)
+        object Library : Bottom("bottom_library", "Библиотека", Icons.Default.LibraryBooks)
+    }
 }
 
+private val bottomNavItems = listOf(
+    Screen.Bottom.BookHub,
+    Screen.Bottom.Player,
+    Screen.Bottom.LoreHelper,
+    Screen.Bottom.Library,
+)
+
+// --- ГЛАВНЫЙ NAVHOST ПРИЛОЖЕНИЯ ---
+
 @Composable
-fun AppNavHost(onScanQrClick: () -> Unit) {
+fun AppNavHost() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = Screen.Library.route) {
-        composable(Screen.Library.route) {
-            LibraryScreen(
-                onBookClick = { bookId -> navController.navigate(Screen.Main.createRoute(bookId)) },
-                onInstallClick = { navController.navigate(Screen.InstallBook.route) }
-            )
-        }
-        composable(
-            route = Screen.Main.route,
-            arguments = listOf(navArgument("bookId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val bookId = backStackEntry.arguments?.getString("bookId")
-            if (bookId != null) {
-                MainScreen(
-                    bookId = bookId,
-                    onSettingsClick = { navController.navigate(Screen.BookSettings.createRoute(bookId)) },
-                    onChapterClick = { _, chapterId -> navController.navigate(Screen.ChapterDetails.createRoute(bookId, chapterId)) },
-                    // Добавляем новый коллбэк
-                    onCharacterClick = { _, characterId -> navController.navigate(Screen.CharacterDetails.createRoute(bookId, characterId)) },
-                    onNavigateBack = { navController.popBackStack() }
-                )
+
+    NavHost(
+        navController = navController,
+        startDestination = "app_root" // Новый стартовый маршрут-диспетчер
+    ) {
+        // --- Маршрут-диспетчер для определения, куда направить пользователя ---
+        composable("app_root") {
+            val viewModel: MainViewModel = hiltViewModel()
+            val startupState by viewModel.startupState.collectAsStateWithLifecycle()
+
+            // Экран загрузки, пока ViewModel определяет состояние
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+
+            LaunchedEffect(startupState) {
+                when (startupState) {
+                    StartupState.NoBooks -> {
+                        navController.navigate(Screen.OnboardingLibrary.route) {
+                            popUpTo("app_root") { inclusive = true }
+                        }
+                    }
+                    StartupState.GoToLibrary -> {
+                        // Передаем маршрут библиотеки как стартовый для MainScaffold
+                        navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
+                            popUpTo("app_root") { inclusive = true }
+                        }
+                    }
+                    StartupState.GoToBookHub -> {
+                        // Передаем маршрут хаба как стартовый для MainScaffold
+                        navController.navigate("main_scaffold/${Screen.Bottom.BookHub.route}") {
+                            popUpTo("app_root") { inclusive = true }
+                        }
+                    }
+                    StartupState.Loading -> { /* Ничего не делаем, ждем */ }
+                }
             }
         }
-        // ... другие composable ...
 
-        // Добавляем новый экран в граф
+        // --- Главный экран с нижней навигацией. Теперь он принимает стартовую вкладку ---
         composable(
-            route = Screen.CharacterDetails.route,
-            arguments = listOf(
-                navArgument("bookId") { type = NavType.StringType },
-                navArgument("characterId") { type = NavType.StringType }
-            )
-        ) {
-            CharacterDetailsScreen(onNavigateBack = { navController.popBackStack() })
+            "main_scaffold/{start_route}",
+            arguments = listOf(navArgument("start_route") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val startRoute = backStackEntry.arguments?.getString("start_route")
+            checkNotNull(startRoute)
+            MainScaffold(rootNavController = navController, startBottomRoute = startRoute)
         }
 
-        // --- Существующие composable без изменений ---
+        // --- Экраны, которые открываются поверх всего ---
+        composable(Screen.OnboardingLibrary.route) {
+            OnboardingLibraryScreen(
+                onBookInstalled = {
+                    // После установки первой книги переходим в библиотеку
+                    navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
+                        popUpTo(Screen.OnboardingLibrary.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+        composable(Screen.InstallBook.route) {
+            val viewModel: BookInstallationViewModel = hiltViewModel()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+            InstallBookScreen(
+                uiState = uiState,
+                onEvent = viewModel::onEvent,
+                onInstallationSuccess = { navController.popBackStack() }
+            )
+        }
         composable(
-            route = Screen.BookSettings.route,
-            arguments = listOf(navArgument("bookId") { type = NavType.StringType })
-        ) {
-            BookSettingsScreen(
-                onNavigateBack = { navController.popBackStack() },
-                onBookDeleted = {
-                    navController.popBackStack(Screen.Library.route, inclusive = false)
+            route = Screen.ChapterDetails.routeWithArgs,
+            arguments = Screen.ChapterDetails.arguments
+        ) { backStackEntry ->
+            val viewModel: ChapterDetailsViewModel = hiltViewModel(backStackEntry)
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            ChapterDetailsScreen(
+                state = uiState,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(
+            route = Screen.Characters.routeWithArgs,
+            arguments = Screen.Characters.arguments
+        ) { backStackEntry ->
+            CharactersScreen(
+                onCharacterClick = { characterId ->
+                    val bookId = backStackEntry.arguments?.getString(Screen.Characters.bookIdArg)
+                    checkNotNull(bookId) { "bookId is required for CharacterDetails" }
+                    navController.navigate(
+                        Screen.CharacterDetails.createRoute(bookId, characterId)
+                    )
                 }
             )
         }
         composable(
-            route = Screen.ChapterDetails.route,
-            arguments = listOf(
-                navArgument("bookId") { type = NavType.StringType },
-                navArgument("chapterId") { type = NavType.StringType }
-            )
+            route = Screen.CharacterDetails.routeWithArgs,
+            arguments = Screen.CharacterDetails.arguments
         ) {
-            ChapterDetailsScreen(onNavigateBack = { navController.popBackStack() })
+            CharacterDetailsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
-        composable(Screen.Connection.route) { ConnectionScreen(onScanQrClick = onScanQrClick) }
-        composable(Screen.InstallBook.route) {
-            BookInstallationScreen(onInstallationSuccess = { navController.popBackStack() })
+        composable(
+            route = Screen.BookSettings.routeWithArgs,
+            arguments = Screen.BookSettings.arguments
+        ) {
+            BookSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onBookDeleted = {
+                    // После удаления книги возвращаемся в библиотеку
+                    navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
+                        popUpTo("app_root") { inclusive = true }
+                    }
+                }
+            )
         }
+    }
+}
+
+
+// --- SCAFFOLD С BOTTOMNAV И ВЛОЖЕННЫМ NAVHOST ---
+
+@Composable
+fun MainScaffold(
+    rootNavController: NavHostController,
+    startBottomRoute: String // <-- Новый параметр для стартовой вкладки
+) {
+    val bottomNavController = rememberNavController()
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
+                val currentDestination = navBackStackEntry?.destination
+
+                bottomNavItems.forEach { screen ->
+                    NavigationBarItem(
+                        icon = { Icon(screen.icon, contentDescription = screen.label) },
+                        label = { Text(screen.label) },
+                        selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                        onClick = {
+                            bottomNavController.navigate(screen.route) {
+                                popUpTo(bottomNavController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
+            }
+        },
+        floatingActionButton = {
+            val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
+            if (navBackStackEntry?.destination?.route == Screen.Bottom.Library.route) {
+                FloatingActionButton(onClick = { rootNavController.navigate(Screen.InstallBook.route) }) {
+                    Icon(Icons.Default.LibraryBooks, contentDescription = "Добавить книгу")
+                }
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = bottomNavController,
+            startDestination = startBottomRoute, // <-- Используем параметр здесь
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            composable(Screen.Bottom.BookHub.route) {
+                val viewModel: BookDetailsViewModel = hiltViewModel()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                BookHubScreen(
+                    uiState = uiState,
+                    onNavigateToCharacters = {
+                        uiState.bookId?.let { bookId ->
+                            rootNavController.navigate(Screen.Characters.createRoute(bookId))
+                        }
+                    },
+                    onNavigateToSettings = { bookId ->
+                        rootNavController.navigate(Screen.BookSettings.createRoute(bookId))
+                    },
+                    onChapterClick = { chapterId ->
+                        uiState.bookId?.let { bookId ->
+                            rootNavController.navigate(
+                                Screen.ChapterDetails.createRoute(
+                                    bookId = bookId,
+                                    chapterId = chapterId
+                                )
+                            )
+                        }
+                    }
+                )
+            }
+            composable(Screen.Bottom.Library.route) {
+                val viewModel: LibraryViewModel = hiltViewModel()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+                LaunchedEffect(Unit) {
+                    viewModel.navigationEvent.collectLatest { event ->
+                        when (event) {
+                            is NavigationEvent.NavigateToBookHub -> {
+                                bottomNavController.navigate(Screen.Bottom.BookHub.route) {
+                                    popUpTo(bottomNavController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        }
+                    }
+                }
+
+                LibraryScreen(
+                    uiState = uiState,
+                    onEvent = viewModel::onEvent,
+                    onNavigateToSettings = { rootNavController.navigate(Screen.AppSettings.route) }
+                )
+            }
+            composable(Screen.Bottom.Player.route) { PlayerScreenPlaceholder() }
+            composable(Screen.Bottom.LoreHelper.route) { LoreHelperScreenPlaceholder() }
+        }
+    }
+}
+
+// --- Заглушки для недостающих экранов ---
+
+@Composable
+fun OnboardingLibraryScreen(onBookInstalled: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Button(onClick = onBookInstalled) {
+            Text("Добавить первую книгу (заглушка)")
+        }
+    }
+}
+
+@Composable
+fun PlayerScreenPlaceholder() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("Экран плеера", style = MaterialTheme.typography.headlineMedium)
+    }
+}
+
+@Composable
+fun LoreHelperScreenPlaceholder() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("Помощник по лору", style = MaterialTheme.typography.headlineMedium)
     }
 }

@@ -53,5 +53,6 @@ dependencies {
     // Hilt для внедрения зависимостей в репозитории
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    implementation(libs.androidx.datastore.preferences)
 
 }

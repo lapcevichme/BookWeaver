@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.presentation.ui.bookinstall
+package com.lapcevichme.bookweaver.presentation.ui.book.bookinstall
 
 import android.content.Context
 import android.net.Uri

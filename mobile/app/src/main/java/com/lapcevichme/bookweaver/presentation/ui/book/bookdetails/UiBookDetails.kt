@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.presentation.ui.bookdetails
+package com.lapcevichme.bookweaver.presentation.ui.book.bookdetails
 
 import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.Chapter

@@ -1,6 +1,11 @@
 package com.lapcevichme.bookweaver.data.repository
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import com.lapcevichme.bookweaver.data.network.dto.BookManifestDto
 import com.lapcevichme.bookweaver.data.network.dto.ChapterSummaryDto
 import com.lapcevichme.bookweaver.data.network.dto.CharacterDto
@@ -11,7 +16,9 @@ import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -28,11 +35,18 @@ import javax.inject.Singleton
  * Основная реализация репозитория. Работает с файловой системой устройства.
  * Hilt будет автоматически создавать единственный экземпляр этого класса.
  */
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+
 @Singleton
 class BookRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient
 ) : BookRepository {
+
+    private object PreferencesKeys {
+        val ACTIVE_BOOK_ID = stringPreferencesKey("active_book_id")
+    }
 
     // Создаем экземпляр парсера JSON.
     private val json = Json { ignoreUnknownKeys = true }
@@ -272,5 +286,22 @@ class BookRepositoryImpl @Inject constructor(
             e.printStackTrace()
             Result.failure(e)
         }
+    }
+
+    override fun getActiveBookIdFlow(): Flow<String?> {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[PreferencesKeys.ACTIVE_BOOK_ID]
+            }
+    }
+
+    override suspend fun setActiveBookId(bookId: String) {
+        context.dataStore.edit { settings ->
+            settings[PreferencesKeys.ACTIVE_BOOK_ID] = bookId
+        }
+    }
+
+    override suspend fun getActiveBookId(): String? {
+        return context.dataStore.data.first()[PreferencesKeys.ACTIVE_BOOK_ID]
     }
 }
