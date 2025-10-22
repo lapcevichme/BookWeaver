@@ -8,7 +8,15 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
-import androidx.compose.material3.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,15 +38,16 @@ import com.lapcevichme.bookweaver.presentation.ui.book.BookHubScreen
 import com.lapcevichme.bookweaver.presentation.ui.book.InstallBookScreen
 import com.lapcevichme.bookweaver.presentation.ui.book.bookdetails.BookDetailsViewModel
 import com.lapcevichme.bookweaver.presentation.ui.book.bookinstall.BookInstallationViewModel
-import com.lapcevichme.bookweaver.presentation.ui.character.characters.CharactersScreen
-import com.lapcevichme.bookweaver.presentation.ui.character.charactersdetails.CharacterDetailsScreen
 import com.lapcevichme.bookweaver.presentation.ui.chapterdetails.ChapterDetailsScreen
 import com.lapcevichme.bookweaver.presentation.ui.chapterdetails.ChapterDetailsViewModel
+import com.lapcevichme.bookweaver.presentation.ui.character.characters.CharactersScreen
+import com.lapcevichme.bookweaver.presentation.ui.character.charactersdetails.CharacterDetailsScreen
 import com.lapcevichme.bookweaver.presentation.ui.library.LibraryScreen
 import com.lapcevichme.bookweaver.presentation.ui.library.LibraryViewModel
 import com.lapcevichme.bookweaver.presentation.ui.library.NavigationEvent
 import com.lapcevichme.bookweaver.presentation.ui.main.MainViewModel
 import com.lapcevichme.bookweaver.presentation.ui.main.StartupState
+import com.lapcevichme.bookweaver.presentation.ui.player.PlayerScreen
 import com.lapcevichme.bookweaver.presentation.ui.settings.BookSettingsScreen
 import kotlinx.coroutines.flow.collectLatest
 
@@ -51,7 +60,7 @@ sealed class Screen(val route: String) {
     object InstallBook : Screen("install_book")
     object AppSettings : Screen("app_settings")
 
-    object ChapterDetails: Screen("chapter_details") {
+    object ChapterDetails : Screen("chapter_details") {
         const val bookIdArg = "bookId"
         const val chapterIdArg = "chapterId"
         val routeWithArgs = "$route/{$bookIdArg}/{$chapterIdArg}"
@@ -59,17 +68,18 @@ sealed class Screen(val route: String) {
             navArgument(bookIdArg) { type = NavType.StringType },
             navArgument(chapterIdArg) { type = NavType.StringType }
         )
+
         fun createRoute(bookId: String, chapterId: String) = "$route/$bookId/$chapterId"
     }
 
-    object Characters: Screen("characters") {
+    object Characters : Screen("characters") {
         const val bookIdArg = "bookId"
         val routeWithArgs = "$route/{$bookIdArg}"
         val arguments = listOf(navArgument(bookIdArg) { type = NavType.StringType })
         fun createRoute(bookId: String) = "$route/$bookId"
     }
 
-    object CharacterDetails: Screen("character_details") {
+    object CharacterDetails : Screen("character_details") {
         const val bookIdArg = "bookId"
         const val characterIdArg = "characterId"
         val routeWithArgs = "$route/{$bookIdArg}/{$characterIdArg}"
@@ -77,10 +87,11 @@ sealed class Screen(val route: String) {
             navArgument(bookIdArg) { type = NavType.StringType },
             navArgument(characterIdArg) { type = NavType.StringType }
         )
+
         fun createRoute(bookId: String, characterId: String) = "$route/$bookId/$characterId"
     }
 
-    object BookSettings: Screen("book_settings") {
+    object BookSettings : Screen("book_settings") {
         const val bookIdArg = "bookId"
         val routeWithArgs = "$route/{$bookIdArg}"
         val arguments = listOf(navArgument(bookIdArg) { type = NavType.StringType })
@@ -131,19 +142,23 @@ fun AppNavHost() {
                             popUpTo("app_root") { inclusive = true }
                         }
                     }
+
                     StartupState.GoToLibrary -> {
                         // Передаем маршрут библиотеки как стартовый для MainScaffold
                         navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
                             popUpTo("app_root") { inclusive = true }
                         }
                     }
+
                     StartupState.GoToBookHub -> {
                         // Передаем маршрут хаба как стартовый для MainScaffold
                         navController.navigate("main_scaffold/${Screen.Bottom.BookHub.route}") {
                             popUpTo("app_root") { inclusive = true }
                         }
                     }
-                    StartupState.Loading -> { /* Ничего не делаем, ждем */ }
+
+                    StartupState.Loading -> { /* Ничего не делаем, ждем */
+                    }
                 }
             }
         }
@@ -274,7 +289,7 @@ fun MainScaffold(
     ) { innerPadding ->
         NavHost(
             navController = bottomNavController,
-            startDestination = startBottomRoute, // <-- Используем параметр здесь
+            startDestination = startBottomRoute,
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Bottom.BookHub.route) {
@@ -302,6 +317,7 @@ fun MainScaffold(
                     }
                 )
             }
+
             composable(Screen.Bottom.Library.route) {
                 val viewModel: LibraryViewModel = hiltViewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -328,7 +344,11 @@ fun MainScaffold(
                     onNavigateToSettings = { rootNavController.navigate(Screen.AppSettings.route) }
                 )
             }
-            composable(Screen.Bottom.Player.route) { PlayerScreenPlaceholder() }
+
+            composable(Screen.Bottom.Player.route) {
+                PlayerScreen()
+            }
+
             composable(Screen.Bottom.LoreHelper.route) { LoreHelperScreenPlaceholder() }
         }
     }
@@ -342,13 +362,6 @@ fun OnboardingLibraryScreen(onBookInstalled: () -> Unit) {
         Button(onClick = onBookInstalled) {
             Text("Добавить первую книгу (заглушка)")
         }
-    }
-}
-
-@Composable
-fun PlayerScreenPlaceholder() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Экран плеера", style = MaterialTheme.typography.headlineMedium)
     }
 }
 
