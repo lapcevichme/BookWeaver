@@ -6,6 +6,7 @@ import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.BookManifest
 import com.lapcevichme.bookweaver.domain.model.Chapter
 import com.lapcevichme.bookweaver.domain.model.ChapterSummary
+import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import kotlinx.coroutines.delay
@@ -124,6 +125,25 @@ class MockBookRepository @Inject constructor() : BookRepository {
     }
 
     override suspend fun getActiveBookId(): String? {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getPlayerChapterInfo(
+        bookId: String,
+        chapterId: String
+    ): Result<PlayerChapterInfo> {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun setActiveChapterId(chapterId: String) {
+        TODO("Not yet implemented")
+    }
+
+    override fun getActiveChapterIdFlow(): Flow<String?> {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getActiveChapterId(): String? {
         TODO("Not yet implemented")
     }
 

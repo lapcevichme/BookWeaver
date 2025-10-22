@@ -4,11 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetBookDetailsUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -20,6 +23,7 @@ data class BookDetailsUiState(
     val isLoading: Boolean = true,
     val bookId: String? = null,
     val bookDetails: UiBookDetails? = null,
+    val activeChapterId: String? = null,
     val error: String? = null
 )
 
@@ -27,7 +31,9 @@ data class BookDetailsUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class BookDetailsViewModel @Inject constructor(
     private val getBookDetailsUseCase: GetBookDetailsUseCase,
-    private val getActiveBookFlowUseCase: GetActiveBookFlowUseCase
+    private val getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
+    private val getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase,
+    private val setActiveChapterUseCase: SetActiveChapterUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BookDetailsUiState())
@@ -35,51 +41,90 @@ class BookDetailsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Теперь ViewModel слушает поток активной книги
+            // Комбинируем Flow активной книги и активной главы
             getActiveBookFlowUseCase()
-                .flatMapLatest { activeBookId ->
+                .combine(getActiveChapterFlowUseCase()) { bookId, chapterId ->
+                    Pair(bookId, chapterId)
+                }
+                .flatMapLatest { (activeBookId, activeChapterId) ->
+                    // Обновляем activeChapterId в состоянии немедленно
+                    _uiState.update { it.copy(activeChapterId = activeChapterId) }
+
                     if (activeBookId != null) {
                         // Если активная книга есть, загружаем ее детали
                         flow {
-                            emit(BookDetailsUiState(isLoading = true, bookId = activeBookId))
-                            val result = getBookDetailsUseCase(activeBookId)
-                            result.fold(
-                                onSuccess = { bookDetails ->
-                                    emit(
-                                        BookDetailsUiState(
-                                            isLoading = false,
-                                            bookId = activeBookId,
-                                            bookDetails = bookDetails.toUiBookDetails()
-                                        )
+                            // Если детали еще не загружены или ID книги изменился, грузим
+                            if (_uiState.value.bookDetails == null || _uiState.value.bookId != activeBookId) {
+                                emit(
+                                    _uiState.value.copy(
+                                        isLoading = true,
+                                        bookId = activeBookId,
+                                        activeChapterId = activeChapterId,
+                                        error = null
                                     )
-                                },
-                                onFailure = { error ->
-                                    emit(
-                                        BookDetailsUiState(
-                                            isLoading = false,
-                                            bookId = activeBookId,
-                                            error = error.message ?: "Unknown error"
+                                )
+                                val result = getBookDetailsUseCase(activeBookId)
+                                result.fold(
+                                    onSuccess = { bookDetails ->
+                                        emit(
+                                            BookDetailsUiState(
+                                                isLoading = false,
+                                                bookId = activeBookId,
+                                                bookDetails = bookDetails.toUiBookDetails(),
+                                                activeChapterId = activeChapterId
+                                            )
                                         )
+                                    },
+                                    onFailure = { error ->
+                                        emit(
+                                            BookDetailsUiState(
+                                                isLoading = false,
+                                                bookId = activeBookId,
+                                                error = error.message ?: "Unknown error",
+                                                activeChapterId = activeChapterId
+                                            )
+                                        )
+                                    }
+                                )
+                            } else {
+                                // Если детали уже есть, просто обновляем ID главы и isLoading
+                                emit(
+                                    _uiState.value.copy(
+                                        isLoading = false,
+                                        bookId = activeBookId,
+                                        activeChapterId = activeChapterId
                                     )
-                                }
-                            )
+                                )
+                            }
                         }
                     } else {
                         // Если активной книги нет, показываем "пустое" состояние
                         flowOf(
                             BookDetailsUiState(
                                 isLoading = false,
-                                error = "Активная книга не выбрана"
+                                error = "Активная книга не выбрана",
+                                activeChapterId = activeChapterId
                             )
                         )
                     }
                 }
                 .catch { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
+                    e.printStackTrace()
                 }
                 .collect { newState ->
                     _uiState.value = newState
                 }
+        }
+    }
+
+    /**
+     * Вызывается, когда пользователь нажимает "Play" на главе.
+     * Устанавливает эту главу как активную.
+     */
+    fun onPlayChapter(chapterId: String) {
+        viewModelScope.launch {
+            setActiveChapterUseCase(chapterId)
         }
     }
 }

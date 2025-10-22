@@ -19,7 +19,6 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
-import androidx.core.net.toUri
 import androidx.core.text.buildSpannedString
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -60,9 +59,8 @@ class MediaPlayerService : Service() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSessionCompat
     private var placeholderBitmap: Bitmap? = null
-    private var currentMediaUri: Uri? = null
-
-
+    private var currentAudioUri: Uri? = null
+    private var currentSubtitlesUri: Uri? = null
     private val _playerStateFlow = MutableStateFlow(PlayerState())
     val playerStateFlow = _playerStateFlow.asStateFlow()
 
@@ -88,12 +86,12 @@ class MediaPlayerService : Service() {
         super.onCreate()
         createNotificationChannel()
 
-        try {
-            // TODO: R.drawable.album_art_placeholder
-            // placeholderBitmap = BitmapFactory.decodeResource(resources, R.drawable.album_art_placeholder)
-        } catch (e: Exception) {
-            // Игнорируем, если ресурса нет
-        }
+//        try {
+//             TODO: Раскомментировать, когда добавишь ресурс
+//             placeholderBitmap = BitmapFactory.decodeResource(resources, R.drawable.album_art_placeholder)
+//        } catch (e: Exception) {
+//             Игнорируем, если ресурса нет
+//        }
 
         player = ExoPlayer.Builder(this).build()
         mediaSession = MediaSessionCompat(this, "AudioPlayerSession")
@@ -156,90 +154,55 @@ class MediaPlayerService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun findSubtitleFile(audioUri: Uri): Uri? {
-        val audioPath = audioUri.path ?: run {
-            Log.w(TAG, "Audio URI path is null. Cannot search for subtitles.")
-            return null
+    /**
+     * Новый метод для установки медиа из ViewModel.
+     * Заменяет старый `playFile` и `reloadWithSubtitles`.
+     */
+    fun setMedia(audioUri: Uri, subtitlesUri: Uri?) {
+        // Проверяем, не тот ли это самый файл, который уже играет
+        if (audioUri == currentAudioUri && subtitlesUri == currentSubtitlesUri) {
+            Log.d(TAG, "Media is already set. Skipping.")
+            return
         }
-        Log.d(TAG, "Searching for subtitles for audio file: $audioPath")
-        val audioFile = File(audioPath)
-        val srtPath = audioFile.absolutePath.replaceAfterLast('.', "srt")
-        Log.d(TAG, "Expected subtitle file path: $srtPath")
-        val srtFile = File(srtPath)
 
-        return if (srtFile.exists() && srtFile.canRead()) {
-            Log.i(TAG, "Subtitle file FOUND at: $srtPath")
-            srtFile.toUri()
-        } else {
-            Log.w(TAG, "Subtitle file NOT found or cannot be read at the expected path.")
-            null
-        }
-    }
+        Log.d(TAG, "setMedia called. Audio: $audioUri, Subtitles: $subtitlesUri")
+        currentAudioUri = audioUri
+        currentSubtitlesUri = subtitlesUri
 
-    fun playFile(uri: Uri, context: Context) {
-        // --- НОВОЕ: Сохраняем URI при запуске воспроизведения ---
-        currentMediaUri = uri
-
-        Log.d(TAG, "playFile called with URI: $uri")
         player.stop()
         player.clearMediaItems()
 
-        val mediaItemBuilder = MediaItem.Builder().setUri(uri)
+        val mediaItemBuilder = MediaItem.Builder().setUri(audioUri)
 
-        val subtitleUri = findSubtitleFile(uri)
-        if (subtitleUri != null) {
-            Log.i(TAG, "Found subtitle URI: $subtitleUri. Adding to MediaItem.")
-            val subtitleConfiguration = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
-                .setMimeType(MimeTypes.APPLICATION_SUBRIP)
+        if (subtitlesUri != null) {
+            Log.i(TAG, "Found subtitle URI: $subtitlesUri. Adding to MediaItem.")
+            val subtitleConfiguration = MediaItem.SubtitleConfiguration.Builder(subtitlesUri)
+                .setMimeType(MimeTypes.APPLICATION_SUBRIP) // .srt
                 .setLanguage("ru")
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                 .build()
             mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfiguration))
         } else {
-            Log.w(TAG, "No subtitle URI found. Playing audio without subtitles.")
+            Log.w(TAG, "No subtitle URI provided. Playing audio without subtitles.")
         }
 
         player.setMediaItem(mediaItemBuilder.build())
         player.prepare()
         play()
         setPlaybackSpeed(1.0f)
-        toggleSubtitles(subtitleUri != null)
+        toggleSubtitles(subtitlesUri != null)
 
-        val fileName = File(uri.path!!).nameWithoutExtension
-        val albumArt = getAlbumArt(uri, context)
+        val fileName = try {
+            File(audioUri.path!!).nameWithoutExtension
+        } catch (e: Exception) {
+            "Аудиофайл"
+        }
+        val albumArt = getAlbumArt(audioUri, this)
 
         _playerStateFlow.value = PlayerState(
             fileName = fileName,
             albumArt = albumArt,
-            subtitlesEnabled = subtitleUri != null
-        )
-    }
-
-    // Метод для перезагрузки плеера с новыми субтитрами
-    fun reloadWithSubtitles() {
-        val uri = currentMediaUri ?: run {
-            Log.e(TAG, "reloadWithSubtitles called but currentMediaUri is null.")
-            return
-        }
-        Log.d(TAG, "Reloading player for URI: $uri to check for new subtitles.")
-
-        val currentPosition = player.currentPosition
-        val wasPlaying = player.isPlaying
-
-        // Просто вызываем playFile снова. Он перестроит MediaItem и найдет новый SRT файл.
-        playFile(uri, applicationContext)
-
-        // Восстанавливаем состояние
-        player.seekTo(currentPosition)
-        if (wasPlaying) {
-            player.play()
-        } else {
-            // playFile по умолчанию запускает воспроизведение, так что ставим на паузу, если не играло
-            player.pause()
-        }
-        Log.d(
-            TAG,
-            "Player reloaded. Position restored to $currentPosition. Was playing: $wasPlaying"
+            subtitlesEnabled = subtitlesUri != null
         )
     }
 
@@ -249,6 +212,14 @@ class MediaPlayerService : Service() {
 
     fun pause() {
         player.pause()
+    }
+
+    fun togglePlayPause() {
+        if (player.isPlaying) {
+            pause()
+        } else {
+            play()
+        }
     }
 
     fun seekTo(position: Long) {
@@ -266,7 +237,6 @@ class MediaPlayerService : Service() {
             .build()
         _playerStateFlow.value = _playerStateFlow.value.copy(subtitlesEnabled = enabled)
     }
-
 
     private fun getAlbumArt(uri: Uri, context: Context): Bitmap? {
         val retriever = MediaMetadataRetriever()
@@ -311,6 +281,7 @@ class MediaPlayerService : Service() {
         positionUpdateJob?.cancel()
     }
 
+    @OptIn(UnstableApi::class)
     private fun updateNotification() {
         val isPlaying = player.isPlaying
         val playPauseAction = if (isPlaying) {
@@ -340,7 +311,7 @@ class MediaPlayerService : Service() {
 
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, _playerStateFlow.value.fileName)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "Неизвестный исполнитель")
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "BookWeaver")
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, player.duration)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, _playerStateFlow.value.albumArt)
             .build()
@@ -358,7 +329,7 @@ class MediaPlayerService : Service() {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(_playerStateFlow.value.fileName.ifEmpty { "Аудиоплеер" })
-            .setContentText("Неизвестный исполнитель")
+            .setContentText("BookWeaver")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setLargeIcon(_playerStateFlow.value.albumArt ?: placeholderBitmap)
             .setContentIntent(mediaSession.controller.sessionActivity)
@@ -403,3 +374,4 @@ class MediaPlayerService : Service() {
         mediaSession.release()
     }
 }
+

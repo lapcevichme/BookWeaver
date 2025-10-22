@@ -295,6 +295,7 @@ fun MainScaffold(
             composable(Screen.Bottom.BookHub.route) {
                 val viewModel: BookDetailsViewModel = hiltViewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
                 BookHubScreen(
                     uiState = uiState,
                     onNavigateToCharacters = {
@@ -305,7 +306,8 @@ fun MainScaffold(
                     onNavigateToSettings = { bookId ->
                         rootNavController.navigate(Screen.BookSettings.createRoute(bookId))
                     },
-                    onChapterClick = { chapterId ->
+                    // Этот коллбэк открывает ДЕТАЛИ главы
+                    onChapterViewDetailsClick = { chapterId ->
                         uiState.bookId?.let { bookId ->
                             rootNavController.navigate(
                                 Screen.ChapterDetails.createRoute(
@@ -313,6 +315,18 @@ fun MainScaffold(
                                     chapterId = chapterId
                                 )
                             )
+                        }
+                    },
+                    // Этот коллбэк ЗАПУСКАЕТ главу и переходит в плеер
+                    onChapterPlayClick = { chapterId ->
+                        viewModel.onPlayChapter(chapterId)
+
+                        bottomNavController.navigate(Screen.Bottom.Player.route) {
+                            popUpTo(bottomNavController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
                         }
                     }
                 )
