@@ -100,3 +100,21 @@ data class ChapterDetails(
     val scenario: List<ScenarioEntry>,
     val originalText: String
 )
+
+/**
+ * Модель, содержащая пути к медиа-файлам главы.
+ * Эти пути абсолютные и готовы для использования.
+ */
+data class ChapterMedia(
+    val audioPath: String,
+    val subtitlesPath: String?
+)
+
+/**
+ * Модель, содержащая всю информацию для плеера
+ */
+data class PlayerChapterInfo(
+    val bookTitle: String,
+    val chapterTitle: String,
+    val media: ChapterMedia
+)

@@ -2,7 +2,7 @@ package com.lapcevichme.bookweaver.domain.repository
 
 import com.lapcevichme.bookweaver.domain.model.Book
 import com.lapcevichme.bookweaver.domain.model.BookDetails
-import com.lapcevichme.bookweaver.domain.model.Chapter
+import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -50,5 +50,25 @@ interface BookRepository {
     fun getActiveBookIdFlow(): Flow<String?>
     suspend fun setActiveBookId(bookId: String)
     suspend fun getActiveBookId(): String?
+
+    /**
+     * Получает полную информацию, необходимую для запуска плеера для конкретной главы.
+     */
+    suspend fun getPlayerChapterInfo(bookId: String, chapterId: String): Result<PlayerChapterInfo>
+
+    /**
+     * Устанавливает ID активной главы.
+     */
+    suspend fun setActiveChapterId(chapterId: String)
+
+    /**
+     * Получает Flow с ID активной главы.
+     */
+    fun getActiveChapterIdFlow(): Flow<String?>
+
+    /**
+     * Получает ID активной главы один раз.
+     */
+    suspend fun getActiveChapterId(): String?
 
 }

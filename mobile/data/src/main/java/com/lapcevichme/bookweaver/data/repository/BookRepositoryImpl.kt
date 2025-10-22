@@ -46,6 +46,7 @@ class BookRepositoryImpl @Inject constructor(
 
     private object PreferencesKeys {
         val ACTIVE_BOOK_ID = stringPreferencesKey("active_book_id")
+        val ACTIVE_CHAPTER_ID = stringPreferencesKey("active_chapter_id")
     }
 
     // Создаем экземпляр парсера JSON.
@@ -303,5 +304,70 @@ class BookRepositoryImpl @Inject constructor(
 
     override suspend fun getActiveBookId(): String? {
         return context.dataStore.data.first()[PreferencesKeys.ACTIVE_BOOK_ID]
+    }
+
+    override suspend fun getPlayerChapterInfo(
+        bookId: String,
+        chapterId: String
+    ): Result<PlayerChapterInfo> = withContext(Dispatchers.IO) {
+        try {
+            // Сначала получаем детали книги, чтобы взять из них название
+            val bookDetails = getBookDetails(bookId).getOrThrow()
+            val chapter = bookDetails.chapters.firstOrNull { it.id == chapterId }
+                ?: throw Exception("Глава $chapterId не найдена в книге $bookId")
+
+            // Ищем главный аудио файл
+            val bookDir = File(booksDir, bookId)
+            val chapterDir = File(bookDir, chapterId)
+            val audioFile = findChapterAudioFile(chapterDir)
+                ?: throw Exception("Аудиофайл (audio.mp3/m4a) не найден для главы $chapterId")
+
+            // Ищем файл субтитров .srt
+            val subtitlesFile = File(chapterDir, "subtitles.srt")
+
+            val media = ChapterMedia(
+                audioPath = audioFile.absolutePath,
+                subtitlesPath = subtitlesFile.takeIf { it.exists() }?.absolutePath
+            )
+
+            val info = PlayerChapterInfo(
+                bookTitle = bookDetails.manifest.bookName,
+                chapterTitle = chapter.title,
+                media = media
+            )
+            Result.success(info)
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun setActiveChapterId(chapterId: String) {
+        context.dataStore.edit { settings ->
+            settings[PreferencesKeys.ACTIVE_CHAPTER_ID] = chapterId
+        }
+    }
+
+    override fun getActiveChapterIdFlow(): Flow<String?> {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[PreferencesKeys.ACTIVE_CHAPTER_ID]
+            }
+    }
+
+    override suspend fun getActiveChapterId(): String? {
+        return context.dataStore.data.first()[PreferencesKeys.ACTIVE_CHAPTER_ID]
+    }
+
+    /**
+     * Помощник для поиска главного аудио файла главы.
+     * Ищет audio.mp3, audio.m4a или audio.wav.
+     */
+    private fun findChapterAudioFile(chapterDir: File): File? {
+        val possibleNames = listOf("audio.mp3", "audio.m4a", "audio.wav")
+        return possibleNames
+            .map { File(chapterDir, it) }
+            .firstOrNull { it.exists() && it.isFile }
     }
 }
