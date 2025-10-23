@@ -1,5 +1,7 @@
 package com.lapcevichme.bookweaver.presentation.ui.chapterdetails
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -7,6 +9,9 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,10 +19,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -25,10 +32,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -39,6 +49,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -117,6 +129,40 @@ fun ChapterDetailsScreen(
         }
     }
 
+    // 1. Состояние для скопированного текста
+    var copiedText by remember { mutableStateOf<String?>(null) }
+    // 2. Получаем системный ClipboardManager
+    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+    // 3. Слушатель буфера обмена
+    DisposableEffect(clipboardManager) {
+        val listener = ClipboardManager.OnPrimaryClipChangedListener {
+            try {
+                // Проверяем, что в буфере есть ТЕКСТ
+                if (clipboardManager.hasPrimaryClip() &&
+                    clipboardManager.primaryClipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true
+                ) {
+                    val text =
+                        clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()
+                    if (!text.isNullOrEmpty()) {
+                        Log.d("ChapterDetailsScreen", "Text copied: $text")
+                        copiedText = text
+                    }
+                }
+            } catch (e: Exception) {
+                // Обработка ошибки чтения буфера (может быть занят)
+                Log.e("ChapterDetailsScreen", "Error reading clipboard", e)
+            }
+        }
+
+        clipboardManager.addPrimaryClipChangedListener(listener)
+
+        onDispose {
+            clipboardManager.removePrimaryClipChangedListener(listener)
+        }
+    }
+
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -129,58 +175,141 @@ fun ChapterDetailsScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            TabRow(selectedTabIndex = pagerState.currentPage) {
-                tabTitles.forEachIndexed { index, title ->
-                    Tab(
-                        selected = pagerState.currentPage == index,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                        text = { Text(title) }
-                    )
+        // Оборачиваем все в Box, чтобы показать карточку поверх контента
+        Box(modifier = Modifier.fillMaxSize()) {
+
+            // Это старый UI, он лежит "снизу"
+            Column(modifier = Modifier.padding(padding)) {
+                TabRow(selectedTabIndex = pagerState.currentPage) {
+                    tabTitles.forEachIndexed { index, title ->
+                        Tab(
+                            selected = pagerState.currentPage == index,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                            text = { Text(title) }
+                        )
+                    }
+                }
+
+                when {
+                    state.isLoading -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
+                    state.error != null -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Ошибка: ${state.error}")
+                        }
+                    }
+
+                    else -> {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize()
+                        ) { page ->
+                            when (page) {
+                                0 -> SummaryContent(
+                                    state.details?.teaser ?: "",
+                                    state.details?.synopsis ?: ""
+                                )
+
+                                1 -> ScenarioContent(
+                                    scenario = state.details?.scenario ?: emptyList(),
+                                    currentPosition = playerState,
+                                    onEntryClick = { entry ->
+                                        mediaService?.seekTo(entry.startMs)
+                                        mainViewModel.navigateToPlayerTab()
+                                    }
+                                )
+
+                                2 -> OriginalTextContent(state.details?.originalText ?: "")
+                            }
+                        }
+                    }
                 }
             }
 
-            when {
-                state.isLoading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+            // Оно лежит "сверху" в Box и выровнено по низу
+            CopiedTextActionsCard(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                copiedText = copiedText ?: "",
+                onDismiss = { copiedText = null },
+                onSaveQuote = { text ->
+                    Log.d("ChapterDetailsScreen", "СОХРАНИТЬ ЦИТАТУ: $text")
+                    copiedText = null
+                },
+                onSaveNote = { text ->
+                    Log.d("ChapterDetailsScreen", "СОХРАНИТЬ ЗАМЕТКУ: $text")
+                    copiedText = null
                 }
+            )
+        }
+    }
+}
 
-                state.error != null -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Ошибка: ${state.error}")
+/**
+ * Новая Composable-функция для отображения карточки с действиями
+ */
+@Composable
+private fun CopiedTextActionsCard(
+    modifier: Modifier = Modifier,
+    copiedText: String,
+    onDismiss: () -> Unit,
+    onSaveQuote: (String) -> Unit,
+    onSaveNote: (String) -> Unit
+) {
+    AnimatedVisibility(
+        visible = copiedText.isNotEmpty(),
+        modifier = modifier,
+        enter = slideInVertically(initialOffsetY = { it }), // Въезжает снизу
+        exit = slideOutVertically(targetOffsetY = { it }) // Уезжает вниз
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .navigationBarsPadding(), // Отступ от навигационной панели
+            shape = RoundedCornerShape(12.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "Скопированный текст:",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = copiedText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                // Ряд с нашими кнопками
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Закрыть")
                     }
-                }
-
-                else -> {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.fillMaxSize()
-                    ) { page ->
-                        when (page) {
-                            0 -> SummaryContent(
-                                state.details?.teaser ?: "",
-                                state.details?.synopsis ?: ""
-                            )
-
-                            1 -> ScenarioContent(
-                                scenario = state.details?.scenario ?: emptyList(),
-                                currentPosition = playerState,
-                                onEntryClick = { entry ->
-                                    mediaService?.seekTo(entry.startMs)
-                                    mainViewModel.navigateToPlayerTab()
-                                }
-                            )
-
-                            2 -> OriginalTextContent(state.details?.originalText ?: "")
-                        }
+                    TextButton(onClick = {
+                        onSaveNote(copiedText)
+                    }) {
+                        Text("Заметка")
+                    }
+                    TextButton(onClick = {
+                        onSaveQuote(copiedText)
+                    }) {
+                        Text("Цитата")
                     }
                 }
             }
         }
     }
 }
+
 
 @Composable
 private fun SummaryContent(teaser: String, synopsis: String) {
@@ -207,20 +336,48 @@ private fun ScenarioContent(
 ) {
     val lazyListState = rememberLazyListState()
 
+    // ВАЖНО: Это определение currentPlayingEntryId тоже должно
+    // использовать НЕ-включающую логику, чтобы LaunchedEffect
+    // не срабатывал "на границе" для двух реплик.
     val currentPlayingEntryId by remember(currentPosition) {
         derivedStateOf {
-            scenario.firstOrNull {
-                currentPosition >= it.startMs && currentPosition <= it.endMs
+            scenario.firstOrNull { entry ->
+                // Находим реплику, которая либо последняя (<= endMs),
+                // либо не последняя (< endMs)
+                val isLastEntry = scenario.lastOrNull()?.id == entry.id
+                if (isLastEntry) {
+                    currentPosition >= entry.startMs && currentPosition <= entry.endMs
+                } else {
+                    currentPosition >= entry.startMs && currentPosition < entry.endMs
+                }
             }?.id
         }
     }
 
     LaunchedEffect(currentPlayingEntryId) {
         if (currentPlayingEntryId != null) {
-            val index = scenario.indexOfFirst { it.id == currentPlayingEntryId }
-            if (index != -1) {
-                // TODO: Добавить проверку, виден ли элемент, чтобы не скроллить, если пользователь читает
-                lazyListState.animateScrollToItem(index, scrollOffset = -100)
+            val targetIndex = scenario.indexOfFirst { it.id == currentPlayingEntryId }
+            if (targetIndex != -1) {
+
+                // 1. Получаем список видимых элементов
+                val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
+
+                // 2. Проверяем, виден ли наш целевой элемент
+                val isTargetVisible = visibleItems.any { it.index == targetIndex }
+
+                // 3. Если элемент виден, плавно скроллим к нему, чтобы он был в фокусе.
+                //    Если нет - ничего не делаем, чтобы не мешать пользователю.
+                if (isTargetVisible) {
+                    Log.d("ScenarioContent", "Item $targetIndex is visible. Scrolling to focus.")
+                    // Плавно скроллим, чтобы элемент был примерно вверху экрана
+                    lazyListState.animateScrollToItem(targetIndex, scrollOffset = -100)
+                } else {
+                    Log.d(
+                        "ScenarioContent",
+                        "Item $targetIndex is NOT visible. User is reading. No scroll."
+                    )
+                    // Пользователь смотрит на другую часть списка, не мешаем ему.
+                }
             }
         }
     }
@@ -233,8 +390,18 @@ private fun ScenarioContent(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(scenario, key = { _, entry -> entry.id }) { index, entry ->
-                val isPlaying =
+
+                // Проверяем, последняя ли это реплика в списке
+                val isLastEntry = index == scenario.lastIndex
+
+                val isPlaying = if (isLastEntry) {
+                    // Для ПОСЛЕДНЕЙ реплики, endMs ДОЛЖЕН быть включен
                     currentPosition >= entry.startMs && currentPosition <= entry.endMs
+                } else {
+                    // Для всех ОСТАЛЬНЫХ, endMs НЕ включается ( [start, end) )
+                    // Это решает проблему "двойной" подсветки
+                    currentPosition >= entry.startMs && currentPosition < entry.endMs
+                }
 
                 val highlightColor = MaterialTheme.colorScheme.primary
                 val speakerColor = MaterialTheme.colorScheme.onBackground
@@ -301,6 +468,7 @@ private fun ScenarioContent(
         }
     }
 }
+
 
 @Composable
 private fun OriginalTextContent(text: String) {

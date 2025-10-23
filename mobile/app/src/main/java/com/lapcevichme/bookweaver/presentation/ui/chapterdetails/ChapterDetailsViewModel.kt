@@ -206,4 +206,3 @@ private fun ChapterDetails.toUiModel(mergedScenario: List<UiScenarioEntry>): UiC
         originalText = this.originalText
     )
 }
-
