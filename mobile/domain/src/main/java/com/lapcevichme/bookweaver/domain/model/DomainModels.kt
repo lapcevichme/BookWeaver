@@ -46,14 +46,14 @@ data class BookManifest(
  *
  * @param id Идентификатор главы (например, "vol_1_chap_1").
  * @param title Название главы (можно взять из `ChapterSummary.teaser`).
- * @param audioPath Путь к папке с аудиофайлами главы.
+ * @param audioDirectoryPath Путь к папке с аудиофайлами главы (например, ".../vol_1_chap_1/audio").
  * @param scenarioPath Путь к файлу сценария (scenario.json).
- * @param subtitlesPath Путь к файлу субтитров.
+ * @param subtitlesPath Путь к файлу субтитров (subtitles.json).
  */
 data class Chapter(
     val id: String,
     val title: String,
-    val audioPath: String,
+    val audioDirectoryPath: String,
     val scenarioPath: String,
     val subtitlesPath: String?
 )
@@ -106,8 +106,8 @@ data class ChapterDetails(
  * Эти пути абсолютные и готовы для использования.
  */
 data class ChapterMedia(
-    val audioPath: String,
-    val subtitlesPath: String?
+    val subtitlesPath: String?,
+    val audioDirectoryPath: String
 )
 
 /**

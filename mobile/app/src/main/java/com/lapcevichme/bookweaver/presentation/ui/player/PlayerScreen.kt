@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.text.method.ScrollingMovementMethod
+import android.widget.TextView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,16 +22,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -40,12 +46,13 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,311 +61,355 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import kotlinx.coroutines.launch
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-/**
- * Главный экран плеера, который теперь управляется ViewModel.
- */
 @Composable
 fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var mediaPlayerService by remember { mutableStateOf<MediaPlayerService?>(null) }
-    var serviceBound by remember { mutableStateOf(false) }
 
-    // Состояние плеера из сервиса
-    // --- ИСПРАВЛЕНИЕ: Обращаемся к playerStateFlow ---
-    val playerState by mediaPlayerService?.playerStateFlow?.collectAsState() ?: remember {
-        mutableStateOf(PlayerState())
-    }
+    var mediaService by remember { mutableStateOf<MediaPlayerService?>(null) }
+    var isServiceBound by remember { mutableStateOf(false) }
 
-    // Логика подключения к сервису
-    val connection = remember {
+    val serviceConnection = remember {
         object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
                 val binder = service as MediaPlayerService.LocalBinder
-                mediaPlayerService = binder.getService()
-                serviceBound = true
+                mediaService = binder.getService()
+                isServiceBound = true
             }
 
             override fun onServiceDisconnected(name: ComponentName?) {
-                mediaPlayerService = null
-                serviceBound = false
+                mediaService = null
+                isServiceBound = false
             }
         }
     }
 
-    // Привязка к сервису при входе на экран и отвязка при выходе
-    DisposableEffect(context) {
-        Intent(context, MediaPlayerService::class.java).also { intent ->
-            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-        }
+    DisposableEffect(Unit) {
+        val serviceIntent = Intent(context, MediaPlayerService::class.java)
+        ContextCompat.startForegroundService(context, serviceIntent)
+        context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+
         onDispose {
-            context.unbindService(connection)
+            if (isServiceBound) {
+                context.unbindService(serviceConnection)
+            }
         }
     }
 
-    // Эффект, который реагирует на изменение главы ИЛИ подключение сервиса.
-    // Как только оба готовы - запускает плеер.
-    LaunchedEffect(uiState.chapterInfo, mediaPlayerService) {
-        val chapter = uiState.chapterInfo
-        val service = mediaPlayerService
+    val playerState by mediaService?.playerStateFlow?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(PlayerState()) }
 
-        if (chapter != null && service != null) {
-            val audioUri = File(chapter.media.audioPath).toUri()
-            val subtitlesUri = chapter.media.subtitlesPath?.let { File(it).toUri() }
+    LaunchedEffect(uiState.chapterInfo, mediaService) {
+        val chapterInfo = uiState.chapterInfo
+        val service = mediaService
 
-            service.setMedia(audioUri, subtitlesUri)
+        if (chapterInfo != null && service != null) {
+            service.setMedia(chapterInfo.media, chapterInfo.chapterTitle)
         }
     }
 
-    // UI плеера
-    AudioPlayerScreen(
-        uiState = uiState,
-        playerState = playerState,
-        mediaPlayerService = mediaPlayerService
-    )
+    when {
+        uiState.isLoading -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+
+        uiState.error != null -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "Ошибка: ${uiState.error}",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        }
+
+        else -> {
+            AudioPlayerScreenUI(
+                playerState = playerState,
+                chapterTitle = uiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
+                mediaPlayerService = mediaService
+            )
+        }
+    }
 }
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AudioPlayerScreen(
-    uiState: PlayerUiState,
+private fun AudioPlayerScreenUI(
     playerState: PlayerState,
+    chapterTitle: String,
     mediaPlayerService: MediaPlayerService?
 ) {
     val coroutineScope = rememberCoroutineScope()
-    var showSpeedSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
+    var showSpeedSheet by remember { mutableStateOf(false) }
+
+    fun formatTime(millis: Long): String {
+        if (millis < 0) return "00:00"
+        val totalSeconds = (millis / 1000).toInt()
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d", minutes, seconds)
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Плеер") }
+                title = {
+                    Text(
+                        chapterTitle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { /* TODO: Handle back */ }) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { /* TODO: Handle more options */ }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Еще")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
-    ) { padding ->
+    ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
+                .padding(paddingValues)
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
+            Spacer(modifier = Modifier.height(32.dp))
 
-            // --- Отображение состояния загрузки/ошибки/плеера ---
-            when {
-                uiState.isLoading -> {
-                    CircularProgressIndicator()
-                }
-                uiState.error != null -> {
-                    Text(
-                        text = uiState.error,
-                        style = MaterialTheme.typography.bodyLarge,
-                        textAlign = TextAlign.Center
+            // Блок обложки
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (playerState.albumArt != null) {
+                    Image(
+                        bitmap = playerState.albumArt!!.asImageBitmap(),
+                        contentDescription = "Обложка альбома",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
-                }
-                uiState.chapterInfo != null -> {
-                    // --- UI Плеера, когда все готово ---
-                    PlayerContent(
-                        playerState = playerState,
-                        chapterInfo = uiState.chapterInfo,
-                        onPlayPause = { mediaPlayerService?.togglePlayPause() },
-                        onSeek = { position -> mediaPlayerService?.seekTo(position) },
-                        onShowSpeedSheet = { showSpeedSheet = true }
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Headphones,
+                        contentDescription = "Иконка плеера",
+                        modifier = Modifier.size(100.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
                 }
             }
-        }
 
-        // --- Нижний лист для выбора скорости ---
-        if (showSpeedSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showSpeedSheet = false },
-                sheetState = sheetState
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Блок субтитров
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .padding(vertical = 8.dp)
+                    .verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center
             ) {
-                val speeds = listOf(0.5f, 0.75f, 1.0f, 1.5f, 2.0f)
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "Скорость воспроизведения", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
-                    speeds.forEach { speed ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    mediaPlayerService?.setPlaybackSpeed(speed)
-                                    coroutineScope
-                                        .launch { sheetState.hide() }
-                                        .invokeOnCompletion { if (!sheetState.isVisible) showSpeedSheet = false }
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = playerState.playbackSpeed == speed,
-                                onClick = null
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text(text = "${speed}x")
+                if (playerState.currentSubtitle.isNotEmpty()) {
+                    val subtitleColor = MaterialTheme.colorScheme.onBackground
+                    val subtitleColorInt = subtitleColor.toArgb()
+
+                    AndroidView(
+                        factory = { ctx ->
+                            TextView(ctx).apply {
+                                textSize = 18f
+                                textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+                                setTextColor(subtitleColorInt)
+                                setShadowLayer(8f, 0f, 0f, android.graphics.Color.BLACK)
+                                movementMethod = ScrollingMovementMethod.getInstance()
+                            }
+                        },
+                        update = { textView ->
+                            textView.text = playerState.currentSubtitle
+                            textView.setTextColor(subtitleColorInt)
                         }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Блок кнопок управления
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                IconButton(onClick = {
+                    mediaPlayerService?.seekTo(
+                        (playerState.currentPosition - 10000).coerceAtLeast(
+                            0L
+                        )
+                    )
+                }) {
+                    Icon(
+                        Icons.Default.Replay10,
+                        contentDescription = "Назад на 10 сек",
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { mediaPlayerService?.togglePlayPause() },
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(
+                        modifier = Modifier.size(48.dp),
+                        imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (playerState.isPlaying) "Пауза" else "Воспроизвести",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+                IconButton(onClick = {
+                    mediaPlayerService?.seekTo(
+                        (playerState.currentPosition + 10000).coerceAtMost(
+                            playerState.duration
+                        )
+                    )
+                }) {
+                    Icon(
+                        Icons.Default.Forward10,
+                        contentDescription = "Вперед на 10 сек",
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Нижний ряд кнопок
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                IconButton(onClick = { mediaPlayerService?.toggleSubtitles(!playerState.subtitlesEnabled) }) {
+                    Icon(
+                        Icons.Default.ClosedCaption,
+                        contentDescription = "Субтитры",
+                        tint = if (playerState.subtitlesEnabled) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
+
+                TextButton(onClick = { showSpeedSheet = true }) {
+                    Text(
+                        text = "${playerState.playbackSpeed}x",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 16.sp
+                    )
+                }
+                IconButton(onClick = { /* TODO: Settings */ }) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Настройки",
+                        tint = Color.White
+                    )
+                }
+            }
+
+            // Блок слайдера
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "${formatTime(playerState.currentPosition)} / ${formatTime(playerState.duration)}",
+                    modifier = Modifier.align(Alignment.End),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = playerState.currentPosition.toFloat(),
+                    onValueChange = { position -> mediaPlayerService?.seekTo(position.toLong()) },
+                    valueRange = 0f..playerState.duration.toFloat().coerceAtLeast(1f),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+
+    // Модальное окно скорости
+    if (showSpeedSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSpeedSheet = false },
+            sheetState = sheetState
+        ) {
+            val speeds = listOf(0.5f, 0.75f, 1.0f, 1.5f, 2.0f)
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "Скорость воспроизведения",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                speeds.forEach { speed ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                mediaPlayerService?.setPlaybackSpeed(speed)
+                                coroutineScope
+                                    .launch { sheetState.hide() }
+                                    .invokeOnCompletion {
+                                        if (!sheetState.isVisible) showSpeedSheet = false
+                                    }
+                            }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = playerState.playbackSpeed == speed,
+                            onClick = null
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("${speed}x")
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-fun PlayerContent(
-    playerState: PlayerState,
-    chapterInfo: PlayerChapterInfo,
-    onPlayPause: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onShowSpeedSheet: () -> Unit
-) {
-    // --- Обложка/плейсхолдер ---
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .padding(horizontal = 32.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center
-    ) {
-        if (playerState.albumArt != null) {
-            Image(
-                bitmap = playerState.albumArt.asImageBitmap(),
-                contentDescription = "Обложка",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Default.Book,
-                contentDescription = "Обложка",
-                modifier = Modifier.size(100.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(32.dp))
-
-    // --- Названия ---
-    Text(
-        text = chapterInfo.chapterTitle,
-        style = MaterialTheme.typography.headlineSmall,
-        fontWeight = FontWeight.Bold,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis
-    )
-    Text(
-        text = chapterInfo.bookTitle,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis
-    )
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // --- Субтитры (если есть) ---
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp) // Фиксированная высота для 1-2 строк текста
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = playerState.currentSubtitle.ifEmpty { " " }.toString(),
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            maxLines = 2
-        )
-    }
-
-    // --- Слайдер времени ---
-    Slider(
-        value = playerState.currentPosition.toFloat(),
-        onValueChange = { onSeek(it.toLong()) },
-        valueRange = 0f..(playerState.duration.toFloat().coerceAtLeast(0f)),
-        modifier = Modifier.fillMaxWidth()
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = formatTime(playerState.currentPosition), style = MaterialTheme.typography.bodySmall)
-        Text(text = formatTime(playerState.duration), style = MaterialTheme.typography.bodySmall)
-    }
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // --- Кнопки управления ---
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Кнопка скорости
-        IconButton(onClick = onShowSpeedSheet) {
-            Icon(Icons.Default.Speed, contentDescription = "Скорость")
-        }
-
-        // Кнопка "назад" (пока заглушка)
-        IconButton(onClick = { /* TODO */ }) {
-            Icon(Icons.Default.SkipPrevious, contentDescription = "Назад", modifier = Modifier.size(40.dp))
-        }
-
-        // Кнопка Play/Pause
-        IconButton(
-            onClick = onPlayPause,
-            modifier = Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
-        ) {
-            Icon(
-                imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = "Play/Pause",
-                modifier = Modifier.size(40.dp)
-            )
-        }
-
-        // Кнопка "вперед" (пока заглушка)
-        IconButton(onClick = { /* TODO */ }) {
-            Icon(Icons.Default.SkipNext, contentDescription = "Вперед", modifier = Modifier.size(40.dp))
-        }
-
-        // Кнопка "повтор" (пока заглушка)
-        IconButton(onClick = { /* TODO */ }) {
-            Icon(Icons.Default.Repeat, contentDescription = "Повтор")
-        }
-    }
-}
-
-private fun formatTime(millis: Long): String {
-    val formatter = SimpleDateFormat("mm:ss", Locale.getDefault())
-    return formatter.format(Date(millis))
 }
 

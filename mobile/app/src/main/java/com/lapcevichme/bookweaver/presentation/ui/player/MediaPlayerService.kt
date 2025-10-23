@@ -4,30 +4,31 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
-import android.net.Uri
+import android.graphics.Typeface
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.text.SpannableString
+import android.text.style.StyleSpan
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
-import androidx.core.text.buildSpannedString
-import androidx.media3.common.C
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ConcatenatingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,7 +39,29 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.io.File
+
+// --- DTO ДЛЯ ПАРСИНГА JSON СУБТИТРОВ ---
+
+// --- ДОБАВЛЕНО: DTO для слова ---
+@Serializable
+data class WordEntry(
+    val word: String,
+    val start: Long,
+    val end: Long
+)
+
+@Serializable
+data class SubtitleEntry(
+    @SerialName("audio_file") val audioFile: String,
+    val text: String,
+    @SerialName("start_ms") val startMs: Long,
+    @SerialName("end_ms") val endMs: Long,
+    val words: List<WordEntry> = emptyList()
+)
 
 data class PlayerState(
     val isPlaying: Boolean = false,
@@ -59,8 +82,15 @@ class MediaPlayerService : Service() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSessionCompat
     private var placeholderBitmap: Bitmap? = null
-    private var currentAudioUri: Uri? = null
-    private var currentSubtitlesUri: Uri? = null
+
+    private var currentSubtitlesPath: String? = null
+    private var currentSubtitles: List<SubtitleEntry> = emptyList()
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private var currentMediaItemIndex = 0
+    private var basePositionOffsetMs = 0L
+    private var totalChapterDurationMs = 0L
+
     private val _playerStateFlow = MutableStateFlow(PlayerState())
     val playerStateFlow = _playerStateFlow.asStateFlow()
 
@@ -85,13 +115,6 @@ class MediaPlayerService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-
-//        try {
-//             TODO: Раскомментировать, когда добавишь ресурс
-//             placeholderBitmap = BitmapFactory.decodeResource(resources, R.drawable.album_art_placeholder)
-//        } catch (e: Exception) {
-//             Игнорируем, если ресурса нет
-//        }
 
         player = ExoPlayer.Builder(this).build()
         mediaSession = MediaSessionCompat(this, "AudioPlayerSession")
@@ -123,7 +146,7 @@ class MediaPlayerService : Service() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
-                    player.seekTo(0)
+                    player.seekTo(0, 0L)
                     player.playWhenReady = false
                 }
                 updatePlayerState()
@@ -135,9 +158,18 @@ class MediaPlayerService : Service() {
             }
 
             override fun onCues(cues: List<Cue>) {
-                val subtitleText = cues.firstOrNull()?.text ?: buildSpannedString { }
-                Log.d(TAG, "onCues triggered. Text: '$subtitleText'")
-                _playerStateFlow.value = _playerStateFlow.value.copy(currentSubtitle = subtitleText)
+                // не используется
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                currentMediaItemIndex = player.currentMediaItemIndex
+                basePositionOffsetMs =
+                    currentSubtitles.getOrNull(currentMediaItemIndex)?.startMs ?: 0L
+                Log.d(
+                    TAG,
+                    "MediaItem transition. New index: $currentMediaItemIndex, new offset: $basePositionOffsetMs"
+                )
+                updatePlayerState()
             }
         })
     }
@@ -147,63 +179,76 @@ class MediaPlayerService : Service() {
         when (intent?.action) {
             ACTION_PLAY -> play()
             ACTION_PAUSE -> pause()
-            ACTION_PREVIOUS -> seekTo((player.currentPosition - 10000).coerceAtLeast(0L))
-            ACTION_NEXT -> seekTo((player.currentPosition + 10000).coerceAtMost(player.duration))
+            ACTION_PREVIOUS -> player.seekToPreviousMediaItem()
+            ACTION_NEXT -> player.seekToNextMediaItem()
             ACTION_STOP -> stopSelf()
         }
         return START_NOT_STICKY
     }
 
-    /**
-     * Новый метод для установки медиа из ViewModel.
-     * Заменяет старый `playFile` и `reloadWithSubtitles`.
-     */
-    fun setMedia(audioUri: Uri, subtitlesUri: Uri?) {
-        // Проверяем, не тот ли это самый файл, который уже играет
-        if (audioUri == currentAudioUri && subtitlesUri == currentSubtitlesUri) {
+    @OptIn(UnstableApi::class)
+    fun setMedia(media: ChapterMedia, chapterTitle: String) {
+        val subtitlesPath = media.subtitlesPath
+        val audioDirectoryPath = media.audioDirectoryPath
+
+        if (subtitlesPath == currentSubtitlesPath) {
             Log.d(TAG, "Media is already set. Skipping.")
             return
         }
 
-        Log.d(TAG, "setMedia called. Audio: $audioUri, Subtitles: $subtitlesUri")
-        currentAudioUri = audioUri
-        currentSubtitlesUri = subtitlesUri
+        Log.d(TAG, "setMedia called. Subtitles: $subtitlesPath, AudioDir: $audioDirectoryPath")
+        currentSubtitlesPath = subtitlesPath
 
         player.stop()
         player.clearMediaItems()
+        currentSubtitles = emptyList()
 
-        val mediaItemBuilder = MediaItem.Builder().setUri(audioUri)
+        currentMediaItemIndex = 0
+        basePositionOffsetMs = 0L
+        totalChapterDurationMs = 0L
 
-        if (subtitlesUri != null) {
-            Log.i(TAG, "Found subtitle URI: $subtitlesUri. Adding to MediaItem.")
-            val subtitleConfiguration = MediaItem.SubtitleConfiguration.Builder(subtitlesUri)
-                .setMimeType(MimeTypes.APPLICATION_SUBRIP) // .srt
-                .setLanguage("ru")
-                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                .build()
-            mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfiguration))
-        } else {
-            Log.w(TAG, "No subtitle URI provided. Playing audio without subtitles.")
-        }
+        try {
+            val subtitlesFile = File(subtitlesPath)
+            val subtitlesJson = subtitlesFile.readText()
+            currentSubtitles = json.decodeFromString<List<SubtitleEntry>>(subtitlesJson)
 
-        player.setMediaItem(mediaItemBuilder.build())
-        player.prepare()
-        play()
-        setPlaybackSpeed(1.0f)
-        toggleSubtitles(subtitlesUri != null)
+            if (currentSubtitles.isEmpty()) {
+                throw Exception("Файл субтитров пуст")
+            }
 
-        val fileName = try {
-            File(audioUri.path!!).nameWithoutExtension
+            totalChapterDurationMs = currentSubtitles.lastOrNull()?.endMs ?: 0L
+
+            val concatenatingMediaSource = ConcatenatingMediaSource()
+            val dataSourceFactory = DefaultDataSource.Factory(this)
+
+            for (entry in currentSubtitles) {
+                val audioFile = File(audioDirectoryPath, entry.audioFile)
+                if (!audioFile.exists()) {
+                    Log.w(TAG, "Missing audio file: ${entry.audioFile}")
+                    continue
+                }
+
+                val mediaItem = MediaItem.fromUri(audioFile.toUri())
+                val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(mediaItem)
+                concatenatingMediaSource.addMediaSource(mediaSource)
+            }
+
+            player.setMediaSource(concatenatingMediaSource)
+            player.prepare()
+            play()
+            setPlaybackSpeed(1.0f)
+
+            _playerStateFlow.value = PlayerState(
+                fileName = chapterTitle,
+                albumArt = null,
+                subtitlesEnabled = true,
+                duration = totalChapterDurationMs
+            )
+
         } catch (e: Exception) {
-            "Аудиофайл"
+            Log.e(TAG, "Error setting media source", e)
         }
-        val albumArt = getAlbumArt(audioUri, this)
-
-        _playerStateFlow.value = PlayerState(
-            fileName = fileName,
-            albumArt = albumArt,
-            subtitlesEnabled = subtitlesUri != null
-        )
     }
 
     fun play() {
@@ -223,48 +268,101 @@ class MediaPlayerService : Service() {
     }
 
     fun seekTo(position: Long) {
-        player.seekTo(position); updatePlayerState()
+        if (currentSubtitles.isEmpty()) return
+
+        val targetItemIndex = currentSubtitles.indexOfLast { position >= it.startMs }
+            .coerceAtLeast(0)
+        val targetItem = currentSubtitles.getOrNull(targetItemIndex) ?: currentSubtitles.first()
+        val relativePosition = (position - targetItem.startMs).coerceAtLeast(0L)
+        player.seekTo(targetItemIndex, relativePosition)
+        updatePlayerState()
     }
 
     fun setPlaybackSpeed(speed: Float) {
         player.playbackParameters = PlaybackParameters(speed)
     }
 
+    // вкл/выкл субтитров
     fun toggleSubtitles(enabled: Boolean) {
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled)
-            .build()
         _playerStateFlow.value = _playerStateFlow.value.copy(subtitlesEnabled = enabled)
-    }
-
-    private fun getAlbumArt(uri: Uri, context: Context): Bitmap? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, uri)
-            val art = retriever.embeddedPicture
-            if (art != null) {
-                BitmapFactory.decodeByteArray(art, 0, art.size)
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        } finally {
-            retriever.release()
-        }
+        // Немедленно обновляем, чтобы скрыть/показать субтитры
+        updatePlayerState()
     }
 
     private fun updatePlayerState() {
-        if (player.playbackState == Player.STATE_IDLE) return
+        if (player.playbackState == Player.STATE_IDLE || currentSubtitles.isEmpty()) return
+
+        val absolutePosition = basePositionOffsetMs + player.currentPosition
+
+        // Логика "Караоке" субтитров
+        val currentSubtitleText: CharSequence =
+            // Проверяем, включены ли субтитры
+            if (_playerStateFlow.value.subtitlesEnabled) {
+                // Находим текущую реплику
+                val currentEntry = currentSubtitles.firstOrNull {
+                    absolutePosition >= it.startMs && absolutePosition < it.endMs
+                }
+
+                if (currentEntry == null) {
+                    "" // Пустая строка, если сейчас тишина
+                } else if (currentEntry.words.isEmpty()) {
+                    currentEntry.text // Показываем весь текст, если нет таймингов слов
+                } else {
+                    // Собираем SpannableString с подсветкой
+                    buildKaraokeSubtitle(currentEntry, absolutePosition)
+                }
+            } else {
+                "" // Пустая строка, если субтитры выключены
+            }
+
         _playerStateFlow.value = _playerStateFlow.value.copy(
             isPlaying = player.isPlaying,
-            duration = if (player.duration > 0) player.duration else 0L,
-            currentPosition = player.currentPosition,
-            playbackSpeed = player.playbackParameters.speed
+            duration = totalChapterDurationMs,
+            currentPosition = absolutePosition,
+            playbackSpeed = player.playbackParameters.speed,
+            currentSubtitle = currentSubtitleText
         )
     }
+
+    // Хелпер для создания "Караоке" строки
+    private fun buildKaraokeSubtitle(entry: SubtitleEntry, absolutePosition: Long): CharSequence {
+        try {
+            val spannable = SpannableString(entry.text)
+            var charIndex = 0
+
+            for (word in entry.words) {
+                val startChar = charIndex
+                val endChar = (startChar + word.word.length).coerceAtMost(spannable.length)
+
+                // Проверяем, что endChar не выходит за пределы (на случай ошибок в JSON)
+                if (startChar >= endChar) continue
+
+                // Если текущее слово активно, подсвечиваем его
+                if (absolutePosition >= word.start && absolutePosition <= word.end) {
+                    spannable.setSpan(
+                        StyleSpan(Typeface.BOLD),
+                        startChar,
+                        endChar,
+                        SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                    // Todo: подумать про цвет
+                    // spannable.setSpan(
+                    //    ForegroundColorSpan(Color.YELLOW),
+                    //    startChar,
+                    //    endChar,
+                    //    SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE
+                    // )
+                }
+
+                charIndex = endChar
+            }
+            return spannable
+        } catch (e: Exception) {
+            Log.e(TAG, "Error building karaoke subtitle: ${e.message}")
+            return entry.text
+        }
+    }
+
 
     private var positionUpdateJob: Job? = null
     private fun startPositionUpdates() {
@@ -272,7 +370,7 @@ class MediaPlayerService : Service() {
         positionUpdateJob = serviceScope.launch {
             while (isActive) {
                 updatePlayerState()
-                delay(1000)
+                delay(100)
             }
         }
     }
@@ -312,15 +410,15 @@ class MediaPlayerService : Service() {
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, _playerStateFlow.value.fileName)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "BookWeaver")
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, player.duration)
-            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, _playerStateFlow.value.albumArt)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, totalChapterDurationMs)
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, null)
             .build()
         mediaSession.setMetadata(metadata)
 
         val playbackState = PlaybackStateCompat.Builder()
             .setState(
                 if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
-                player.currentPosition,
+                basePositionOffsetMs + player.currentPosition,
                 1.0f
             )
             .setActions(PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SEEK_TO or PlaybackStateCompat.ACTION_SKIP_TO_NEXT or PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or PlaybackStateCompat.ACTION_STOP)
@@ -331,7 +429,7 @@ class MediaPlayerService : Service() {
             .setContentTitle(_playerStateFlow.value.fileName.ifEmpty { "Аудиоплеер" })
             .setContentText("BookWeaver")
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setLargeIcon(_playerStateFlow.value.albumArt ?: placeholderBitmap)
+            .setLargeIcon(placeholderBitmap)
             .setContentIntent(mediaSession.controller.sessionActivity)
             .setDeleteIntent(createPendingIntent(ACTION_STOP))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

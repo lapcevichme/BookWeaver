@@ -5,12 +5,14 @@ import com.lapcevichme.bookweaver.domain.model.BookCharacter
 import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.BookManifest
 import com.lapcevichme.bookweaver.domain.model.Chapter
+import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import com.lapcevichme.bookweaver.domain.model.ChapterSummary
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import java.io.File
 import java.io.InputStream
@@ -45,6 +47,10 @@ class MockBookRepository @Inject constructor() : BookRepository {
             coverPath = null
         )
     )
+
+    private val _activeBookId = MutableStateFlow<String?>("mock-book-1")
+    private val _activeChapterId = MutableStateFlow<String?>("vol_1_chap_1")
+
 
     override fun getLocalBooks(): Flow<List<Book>> = flow {
         delay(1500) // Имитация загрузки из сети или с диска
@@ -84,9 +90,9 @@ class MockBookRepository @Inject constructor() : BookRepository {
             Chapter(
                 id = "vol_1_chap_1",
                 title = "Глава 1: Начало пути",
-                audioPath = "/fake/path/audio",
+                audioDirectoryPath = "/fake/path/audio",
                 scenarioPath = "/fake/path/scenario.json",
-                subtitlesPath = null
+                subtitlesPath = "/fake/path/subtitles.json"
             )
         )
 
@@ -100,7 +106,10 @@ class MockBookRepository @Inject constructor() : BookRepository {
         )
     }
 
-    override suspend fun getScenarioForChapter(bookId: String, chapterId: String): Result<List<ScenarioEntry>> {
+    override suspend fun getScenarioForChapter(
+        bookId: String,
+        chapterId: String
+    ): Result<List<ScenarioEntry>> {
         delay(300)
         val entries = (1..10).map {
             ScenarioEntry(
@@ -110,41 +119,58 @@ class MockBookRepository @Inject constructor() : BookRepository {
                 speaker = if (it % 2 == 0) "Маомао" else "Рассказчик",
                 emotion = null,
                 ambient = "none",
-                audioFile = null
+                audioFile = "fake_audio_${it}.wav"
             )
         }
         return Result.success(entries)
     }
 
     override fun getActiveBookIdFlow(): Flow<String?> {
-        TODO("Not yet implemented")
+        return _activeBookId
     }
 
     override suspend fun setActiveBookId(bookId: String) {
-        TODO("Not yet implemented")
+        _activeBookId.value = bookId
     }
 
     override suspend fun getActiveBookId(): String? {
-        TODO("Not yet implemented")
+        return _activeBookId.value
     }
 
     override suspend fun getPlayerChapterInfo(
         bookId: String,
         chapterId: String
     ): Result<PlayerChapterInfo> {
-        TODO("Not yet implemented")
+        delay(100)
+        val book = mockBooks.find { it.id == bookId }
+        val chapterTitle = "Глава 1: Начало пути (Мок)"
+
+        val mockMedia = ChapterMedia(
+            // Путь к JSON с субтитрами, который будет парсить сервис
+            subtitlesPath = "/fake/path/subtitles.json",
+            // Путь к папке, где сервис будет искать аудиофайлы (fake_audio_X.wav)
+            audioDirectoryPath = "/fake/path/audio"
+        )
+
+        return Result.success(
+            PlayerChapterInfo(
+                bookTitle = book?.title ?: "Моковая Книга",
+                chapterTitle = chapterTitle,
+                media = mockMedia
+            )
+        )
     }
 
     override suspend fun setActiveChapterId(chapterId: String) {
-        TODO("Not yet implemented")
+        _activeChapterId.value = chapterId
     }
 
     override fun getActiveChapterIdFlow(): Flow<String?> {
-        TODO("Not yet implemented")
+        return _activeChapterId
     }
 
     override suspend fun getActiveChapterId(): String? {
-        TODO("Not yet implemented")
+        return _activeChapterId.value
     }
 
     override suspend fun downloadAndInstallBook(url: String): Result<File> {
@@ -164,7 +190,7 @@ class MockBookRepository @Inject constructor() : BookRepository {
     }
 
     override suspend fun installBook(inputStream: InputStream): Result<File> {
-        delay(1500) // Симуляция установки
+        delay(1500)
 
         // В моковой реализации нам не важен контент, просто симулируем успех
         val newBook = Book(
@@ -182,10 +208,10 @@ class MockBookRepository @Inject constructor() : BookRepository {
         return Result.success(
             """
             Это оригинальный текст для главы $chapterId.
-            
+
             Здесь содержится полный, неадаптированный текст произведения. 
             Он может быть использован для сверки или просто для чтения.
-            
+
             Lorem ipsum dolor sit amet, consectetur adipiscing elit. 
             Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
             """.trimIndent()

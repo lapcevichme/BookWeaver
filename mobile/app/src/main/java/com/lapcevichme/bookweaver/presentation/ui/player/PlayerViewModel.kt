@@ -9,7 +9,13 @@ import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseC
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -66,8 +72,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun loadChapterInfo(bookId: String, chapterId: String) {
-        // Проверяем, не загружена ли уже эта глава
-        if (_uiState.value.chapterInfo?.media?.audioPath?.contains(chapterId) == true) {
+        if (_uiState.value.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true) {
             return
         }
 

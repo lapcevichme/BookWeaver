@@ -11,7 +11,12 @@ import com.lapcevichme.bookweaver.data.network.dto.ChapterSummaryDto
 import com.lapcevichme.bookweaver.data.network.dto.CharacterDto
 import com.lapcevichme.bookweaver.data.network.dto.ScenarioEntryDto
 import com.lapcevichme.bookweaver.data.network.mapper.toDomain
-import com.lapcevichme.bookweaver.domain.model.*
+import com.lapcevichme.bookweaver.domain.model.Book
+import com.lapcevichme.bookweaver.domain.model.BookDetails
+import com.lapcevichme.bookweaver.domain.model.Chapter
+import com.lapcevichme.bookweaver.domain.model.ChapterMedia
+import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
+import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +38,6 @@ import javax.inject.Singleton
 
 /**
  * Основная реализация репозитория. Работает с файловой системой устройства.
- * Hilt будет автоматически создавать единственный экземпляр этого класса.
  */
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -56,7 +60,6 @@ class BookRepositoryImpl @Inject constructor(
     private val booksDir = File(context.filesDir, "books")
 
     init {
-        // Создаем папку, если ее нет.
         if (!booksDir.exists()) {
             booksDir.mkdirs()
         }
@@ -90,8 +93,6 @@ class BookRepositoryImpl @Inject constructor(
         emit(books)
     }
 
-    // ... остальной код класса без изменений ...
-
     override suspend fun getBookDetails(bookId: String): Result<BookDetails> =
         withContext(Dispatchers.IO) {
             try {
@@ -110,23 +111,28 @@ class BookRepositoryImpl @Inject constructor(
 
 
                 val summariesFile = File(bookDir, "chapter_summaries.json")
-                val summaries = if (summariesFile.exists()){
+                val summaries = if (summariesFile.exists()) {
                     json.decodeFromString<Map<String, ChapterSummaryDto>>(summariesFile.readText())
                         .mapValues { it.value.toDomain() }
                 } else emptyMap()
 
                 val chapters = bookDir.listFiles()
                     ?.filter { it.isDirectory && it.name.startsWith("vol_") }
-                    // ИСПРАВЛЕНО: Добавлена числовая сортировка по тому и главе
-                    ?.sortedWith(compareBy(
-                        { file -> file.name.substringAfter("vol_").substringBefore("_chap").toIntOrNull() ?: Int.MAX_VALUE },
-                        { file -> file.name.substringAfter("chap_").toIntOrNull() ?: Int.MAX_VALUE }
+                    ?.sortedWith(
+                        compareBy(
+                        { file ->
+                            file.name.substringAfter("vol_").substringBefore("_chap").toIntOrNull()
+                                ?: Int.MAX_VALUE
+                        },
+                        { file ->
+                            file.name.substringAfter("chap_").toIntOrNull() ?: Int.MAX_VALUE
+                        }
                     ))
                     ?.mapNotNull { chapterDir ->
                         Chapter(
                             id = chapterDir.name,
                             title = formatChapterIdToTitle(chapterDir.name),
-                            audioPath = File(chapterDir, "audio").absolutePath,
+                            audioDirectoryPath = File(chapterDir, "audio").absolutePath,
                             scenarioPath = File(chapterDir, "scenario.json").absolutePath,
                             subtitlesPath = File(
                                 chapterDir,
@@ -152,7 +158,6 @@ class BookRepositoryImpl @Inject constructor(
             id.replace("_", " ").replaceFirstChar { it.uppercase() }
         }
     }
-
 
     override suspend fun getScenarioForChapter(
         bookId: String,
@@ -190,7 +195,7 @@ class BookRepositoryImpl @Inject constructor(
 
     override suspend fun installBook(inputStream: InputStream): Result<File> =
         withContext(Dispatchers.IO) {
-            // 1. Копируем входящий поток во временный файл, чтобы его можно было читать несколько раз.
+            // Копируем входящий поток во временный файл, чтобы его можно было читать несколько раз.
             val tempFile = File.createTempFile("install_", ".bw", context.cacheDir)
             FileOutputStream(tempFile).use { output ->
                 inputStream.use { input -> input.copyTo(output) }
@@ -199,7 +204,7 @@ class BookRepositoryImpl @Inject constructor(
             try {
                 var bookId: String?
 
-                // 2. Первый проход: Ищем manifest.json и определяем ID книги (имя папки).
+                // Первый проход: Ищем manifest.json и определяем ID книги (имя папки).
                 ZipFile(tempFile).use { zipFile ->
                     val manifestEntry = zipFile.getEntry("manifest.json")
                         ?: return@withContext Result.failure(Exception("manifest.json не найден в архиве"))
@@ -218,7 +223,7 @@ class BookRepositoryImpl @Inject constructor(
                 if (bookDir.exists()) bookDir.deleteRecursively()
                 bookDir.mkdirs()
 
-                // 3. Второй проход: Распаковываем все файлы в нужную директорию.
+                // Второй проход: Распаковываем все файлы в нужную директорию.
                 ZipFile(tempFile).use { zipFile ->
                     for (entry in zipFile.entries()) {
                         val outputFile = File(bookDir, entry.name)
@@ -311,25 +316,26 @@ class BookRepositoryImpl @Inject constructor(
         chapterId: String
     ): Result<PlayerChapterInfo> = withContext(Dispatchers.IO) {
         try {
-            // Сначала получаем детали книги, чтобы взять из них название
+            // Получаем детали книги, чтобы найти нужную главу
             val bookDetails = getBookDetails(bookId).getOrThrow()
             val chapter = bookDetails.chapters.firstOrNull { it.id == chapterId }
                 ?: throw Exception("Глава $chapterId не найдена в книге $bookId")
 
-            // Ищем главный аудио файл
-            val bookDir = File(booksDir, bookId)
-            val chapterDir = File(bookDir, chapterId)
-            val audioFile = findChapterAudioFile(chapterDir)
-                ?: throw Exception("Аудиофайл (audio.mp3/m4a) не найден для главы $chapterId")
+            // Проверяем, что необходимые файлы существуют
+            if (chapter.subtitlesPath == null || !File(chapter.subtitlesPath).exists()) {
+                throw Exception("Файл субтитров (subtitles.json) не найден для главы $chapterId")
+            }
+            if (!File(chapter.audioDirectoryPath).exists()) {
+                throw Exception("Папка 'audio' не найдена для главы $chapterId")
+            }
 
-            // Ищем файл субтитров .srt
-            val subtitlesFile = File(chapterDir, "subtitles.srt")
-
+            // Создаем новую ChapterMedia, передавая пути к ПАПКЕ и JSON
             val media = ChapterMedia(
-                audioPath = audioFile.absolutePath,
-                subtitlesPath = subtitlesFile.takeIf { it.exists() }?.absolutePath
+                subtitlesPath = chapter.subtitlesPath,
+                audioDirectoryPath = chapter.audioDirectoryPath
             )
 
+            // Собираем финальную модель
             val info = PlayerChapterInfo(
                 bookTitle = bookDetails.manifest.bookName,
                 chapterTitle = chapter.title,
@@ -342,6 +348,7 @@ class BookRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
 
     override suspend fun setActiveChapterId(chapterId: String) {
         context.dataStore.edit { settings ->
@@ -358,16 +365,5 @@ class BookRepositoryImpl @Inject constructor(
 
     override suspend fun getActiveChapterId(): String? {
         return context.dataStore.data.first()[PreferencesKeys.ACTIVE_CHAPTER_ID]
-    }
-
-    /**
-     * Помощник для поиска главного аудио файла главы.
-     * Ищет audio.mp3, audio.m4a или audio.wav.
-     */
-    private fun findChapterAudioFile(chapterDir: File): File? {
-        val possibleNames = listOf("audio.mp3", "audio.m4a", "audio.wav")
-        return possibleNames
-            .map { File(chapterDir, it) }
-            .firstOrNull { it.exists() && it.isFile }
     }
 }
