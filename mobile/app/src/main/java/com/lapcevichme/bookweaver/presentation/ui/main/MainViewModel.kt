@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetLocalBooksUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -21,6 +23,10 @@ sealed class StartupState {
     object GoToBookHub : StartupState() // Есть активная книга
 }
 
+sealed class NavigationEvent {
+    object NavigateToPlayer : NavigationEvent()
+}
+
 /**
  * ViewModel для определения стартового маршрута на основе реальных данных.
  */
@@ -31,6 +37,9 @@ class MainViewModel @Inject constructor(
 ) : ViewModel() {
     private val _startupState = MutableStateFlow<StartupState>(StartupState.Loading)
     val startupState = _startupState.asStateFlow()
+
+    private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
+    val navigationEvent = _navigationEvent.asSharedFlow()
 
     init {
         viewModelScope.launch {
@@ -51,4 +60,11 @@ class MainViewModel @Inject constructor(
             }
         }
     }
+
+    fun navigateToPlayerTab() {
+        viewModelScope.launch {
+            _navigationEvent.emit(NavigationEvent.NavigateToPlayer)
+        }
+    }
 }
+

@@ -44,12 +44,13 @@ import com.lapcevichme.bookweaver.presentation.ui.character.characters.Character
 import com.lapcevichme.bookweaver.presentation.ui.character.charactersdetails.CharacterDetailsScreen
 import com.lapcevichme.bookweaver.presentation.ui.library.LibraryScreen
 import com.lapcevichme.bookweaver.presentation.ui.library.LibraryViewModel
-import com.lapcevichme.bookweaver.presentation.ui.library.NavigationEvent
 import com.lapcevichme.bookweaver.presentation.ui.main.MainViewModel
+import com.lapcevichme.bookweaver.presentation.ui.main.NavigationEvent
 import com.lapcevichme.bookweaver.presentation.ui.main.StartupState
 import com.lapcevichme.bookweaver.presentation.ui.player.PlayerScreen
 import com.lapcevichme.bookweaver.presentation.ui.settings.BookSettingsScreen
 import kotlinx.coroutines.flow.collectLatest
+import com.lapcevichme.bookweaver.presentation.ui.library.NavigationEvent as LibraryNavigationEvent
 
 
 // --- ОПРЕДЕЛЕНИЕ ВСЕХ МАРШРУТОВ ПРИЛОЖЕНИЯ ---
@@ -120,14 +121,15 @@ private val bottomNavItems = listOf(
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
+    val mainViewModel: MainViewModel = hiltViewModel()
 
     NavHost(
         navController = navController,
         startDestination = "app_root" // Новый стартовый маршрут-диспетчер
     ) {
-        // --- Маршрут-диспетчер для определения, куда направить пользователя ---
+        // Маршрут-диспетчер для определения, куда направить пользователя
         composable("app_root") {
-            val viewModel: MainViewModel = hiltViewModel()
+            val viewModel: MainViewModel = hiltViewModel(it)
             val startupState by viewModel.startupState.collectAsStateWithLifecycle()
 
             // Экран загрузки, пока ViewModel определяет состояние
@@ -170,7 +172,11 @@ fun AppNavHost() {
         ) { backStackEntry ->
             val startRoute = backStackEntry.arguments?.getString("start_route")
             checkNotNull(startRoute)
-            MainScaffold(rootNavController = navController, startBottomRoute = startRoute)
+            MainScaffold(
+                rootNavController = navController,
+                startBottomRoute = startRoute,
+                mainViewModel = mainViewModel
+            )
         }
 
         // --- Экраны, которые открываются поверх всего ---
@@ -205,6 +211,7 @@ fun AppNavHost() {
                 onNavigateBack = { navController.popBackStack() }
             )
         }
+
         composable(
             route = Screen.Characters.routeWithArgs,
             arguments = Screen.Characters.arguments
@@ -227,6 +234,7 @@ fun AppNavHost() {
                 onNavigateBack = { navController.popBackStack() }
             )
         }
+
         composable(
             route = Screen.BookSettings.routeWithArgs,
             arguments = Screen.BookSettings.arguments
@@ -250,9 +258,26 @@ fun AppNavHost() {
 @Composable
 fun MainScaffold(
     rootNavController: NavHostController,
-    startBottomRoute: String // <-- Новый параметр для стартовой вкладки
+    startBottomRoute: String,
+    mainViewModel: MainViewModel
 ) {
     val bottomNavController = rememberNavController()
+
+    LaunchedEffect(Unit) {
+        mainViewModel.navigationEvent.collect { event ->
+            when (event) {
+                is NavigationEvent.NavigateToPlayer -> {
+                    bottomNavController.navigate(Screen.Bottom.Player.route) {
+                        popUpTo(bottomNavController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -339,7 +364,7 @@ fun MainScaffold(
                 LaunchedEffect(Unit) {
                     viewModel.navigationEvent.collectLatest { event ->
                         when (event) {
-                            is NavigationEvent.NavigateToBookHub -> {
+                            is LibraryNavigationEvent.NavigateToBookHub -> {
                                 bottomNavController.navigate(Screen.Bottom.BookHub.route) {
                                     popUpTo(bottomNavController.graph.findStartDestination().id) {
                                         saveState = true
