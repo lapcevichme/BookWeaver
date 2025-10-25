@@ -1,6 +1,5 @@
 package com.lapcevichme.bookweaver.core.service
 
-import android.R
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,7 +8,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.os.Binder
-import android.os.Build
 import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -25,10 +23,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ConcatenatingMediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import kotlinx.coroutines.CoroutineScope
@@ -43,11 +38,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.io.File
-
-// --- DTO ДЛЯ ПАРСИНГА JSON СУБТИТРОВ ---
-
-// --- ДОБАВЛЕНО: DTO для слова ---
-
 
 class MediaPlayerService : Service() {
 
@@ -166,6 +156,12 @@ class MediaPlayerService : Service() {
         val subtitlesPath = media.subtitlesPath
         val audioDirectoryPath = media.audioDirectoryPath
 
+        if (subtitlesPath == null) {
+            Log.e(TAG, "Error setting media: subtitlesPath or audioDirectoryPath is null")
+            _playerStateFlow.value = _playerStateFlow.value.copy(error = "Media paths are missing")
+            return
+        }
+
         if (subtitlesPath == currentSubtitlesPath) {
             Log.d(TAG, "Media is already set. Skipping.")
             return
@@ -193,8 +189,7 @@ class MediaPlayerService : Service() {
 
             totalChapterDurationMs = currentSubtitles.lastOrNull()?.endMs ?: 0L
 
-            val concatenatingMediaSource = ConcatenatingMediaSource()
-            val dataSourceFactory = DefaultDataSource.Factory(this)
+            val mediaItems = mutableListOf<MediaItem>()
 
             for (entry in currentSubtitles) {
                 val audioFile = File(audioDirectoryPath, entry.audioFile)
@@ -204,12 +199,10 @@ class MediaPlayerService : Service() {
                 }
 
                 val mediaItem = MediaItem.fromUri(audioFile.toUri())
-                val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(mediaItem)
-                concatenatingMediaSource.addMediaSource(mediaSource)
+                mediaItems.add(mediaItem)
             }
 
-            player.setMediaSource(concatenatingMediaSource)
+            player.setMediaItems(mediaItems)
             player.prepare()
             play()
             setPlaybackSpeed(1.0f)
@@ -359,25 +352,25 @@ class MediaPlayerService : Service() {
         val isPlaying = player.isPlaying
         val playPauseAction = if (isPlaying) {
             NotificationCompat.Action(
-                R.drawable.ic_media_pause,
+                android.R.drawable.ic_media_pause,
                 "Pause",
                 createPendingIntent(ACTION_PAUSE)
             )
         } else {
             NotificationCompat.Action(
-                R.drawable.ic_media_play,
+                android.R.drawable.ic_media_play,
                 "Play",
                 createPendingIntent(ACTION_PLAY)
             )
         }
 
         val prevAction = NotificationCompat.Action(
-            R.drawable.ic_media_previous,
+            android.R.drawable.ic_media_previous,
             "Previous",
             createPendingIntent(ACTION_PREVIOUS)
         )
         val nextAction = NotificationCompat.Action(
-            R.drawable.ic_media_next,
+            android.R.drawable.ic_media_next,
             "Next",
             createPendingIntent(ACTION_NEXT)
         )
@@ -403,7 +396,7 @@ class MediaPlayerService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(_playerStateFlow.value.fileName.ifEmpty { "Аудиоплеер" })
             .setContentText("BookWeaver")
-            .setSmallIcon(R.drawable.ic_media_play)
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .setLargeIcon(placeholderBitmap)
             .setContentIntent(mediaSession.controller.sessionActivity)
             .setDeleteIntent(createPendingIntent(ACTION_STOP))
@@ -423,21 +416,15 @@ class MediaPlayerService : Service() {
 
     private fun createPendingIntent(action: String): PendingIntent {
         val intent = Intent(this, MediaPlayerService::class.java).setAction(action)
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
+        val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         return PendingIntent.getService(this, 0, intent, flags)
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, "Воспроизведение аудио", NotificationManager.IMPORTANCE_LOW
-            )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL_ID, "Воспроизведение аудио", NotificationManager.IMPORTANCE_LOW
+        )
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     override fun onDestroy() {
@@ -447,4 +434,3 @@ class MediaPlayerService : Service() {
         mediaSession.release()
     }
 }
-

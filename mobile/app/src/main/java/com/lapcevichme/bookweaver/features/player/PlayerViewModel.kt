@@ -3,7 +3,6 @@ package com.lapcevichme.bookweaver.features.player
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
@@ -49,18 +48,29 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
                 .collectLatest { result ->
-                    if (result is PlayerUiState) {
-                        _uiState.value = result
-                        return@collectLatest
-                    }
+                    when (result) {
+                        is PlayerUiState -> {
+                            _uiState.value = result
+                        }
 
-                    val (bookId, chapterId) = result as Pair<String, String?>
+                        is Pair<*, *> -> {
+                            val bookId = result.first as? String
+                            val chapterId = result.second as? String?
 
-                    if (chapterId == null) {
-                        _uiState.value = PlayerUiState(error = "Глава не выбрана")
-                    } else {
-                        // У нас есть все, загружаем медиа
-                        loadChapterInfo(bookId, chapterId)
+                            if (bookId == null) {
+                                _uiState.value =
+                                    PlayerUiState(error = "Внутренняя ошибка: неверный ID книги")
+                            } else if (chapterId == null) {
+                                _uiState.value = PlayerUiState(error = "Глава не выбрана")
+                            } else {
+                                loadChapterInfo(bookId, chapterId)
+                            }
+                        }
+
+                        else -> {
+                            Log.w("PlayerViewModel", "Неизвестный тип в потоке: $result")
+                            _uiState.value = PlayerUiState(error = "Неизвестная ошибка")
+                        }
                     }
                 }
         }

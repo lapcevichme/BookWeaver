@@ -20,7 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import com.lapcevichme.bookweaver.presentation.ui.navigation.AppNavHost
+import com.lapcevichme.bookweaver.core.navigation.AppNavHost
 import com.lapcevichme.bookweaver.core.ui.theme.BookWeaverTheme
 import dagger.hilt.android.AndroidEntryPoint
 

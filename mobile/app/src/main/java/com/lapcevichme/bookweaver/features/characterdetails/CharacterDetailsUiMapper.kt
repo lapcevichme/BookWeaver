@@ -42,7 +42,7 @@ private fun formatChapterIdToTitle(chapterId: String): String {
     return try {
         val parts = chapterId.split("_")
         "Том ${parts[1]}, Глава ${parts[3]}"
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         chapterId
     }
 }

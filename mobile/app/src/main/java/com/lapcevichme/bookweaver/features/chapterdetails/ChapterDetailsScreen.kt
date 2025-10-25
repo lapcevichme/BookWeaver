@@ -45,9 +45,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -72,8 +72,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
+import com.lapcevichme.bookweaver.features.main.MainViewModel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -180,7 +180,7 @@ fun ChapterDetailsScreen(
 
             // Это старый UI, он лежит "снизу"
             Column(modifier = Modifier.padding(padding)) {
-                TabRow(selectedTabIndex = pagerState.currentPage) {
+                PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
                     tabTitles.forEachIndexed { index, title ->
                         Tab(
                             selected = pagerState.currentPage == index,

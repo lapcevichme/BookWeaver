@@ -1,7 +1,6 @@
 package com.lapcevichme.bookweaver.data.repository
 
 import android.app.Application
-import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences

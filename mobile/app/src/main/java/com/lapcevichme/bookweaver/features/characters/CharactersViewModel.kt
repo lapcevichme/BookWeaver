@@ -31,7 +31,7 @@ class CharactersViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
             getCharactersUseCase(bookId)
                 .onSuccess { characters ->
-                    _uiState.update {
+                    _uiState.update { it ->
                         it.copy(
                             isLoading = false,
                             characters = characters.map { it.toUiCharacter() }

@@ -10,5 +10,6 @@ data class PlayerState(
     val albumArt: Bitmap? = null,
     val playbackSpeed: Float = 1.0f,
     val currentSubtitle: CharSequence = "",
-    val subtitlesEnabled: Boolean = true
+    val subtitlesEnabled: Boolean = true,
+    val error: String? = null
 )

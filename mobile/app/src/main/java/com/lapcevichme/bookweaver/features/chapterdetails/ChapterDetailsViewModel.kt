@@ -27,7 +27,9 @@ class ChapterDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val TAG = "ChapterDetailsVM_Log"
+    companion object {
+        private const val TAG = "ChapterDetailsViewModel"
+    }
 
     private val bookId: String = checkNotNull(savedStateHandle["bookId"])
     private val chapterId: String = checkNotNull(savedStateHandle["chapterId"])
@@ -147,7 +149,7 @@ class ChapterDetailsViewModel @Inject constructor(
         return try {
             val parts = chapterId.split("_")
             "Том ${parts[1]}, Глава ${parts[3]}"
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             chapterId
         }
     }

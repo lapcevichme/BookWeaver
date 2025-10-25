@@ -13,7 +13,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 
-
 @HiltViewModel
 class BookSettingsViewModel @Inject constructor(
     private val deleteBookUseCase: DeleteBookUseCase,

@@ -1,10 +1,10 @@
-package com.lapcevichme.bookweaver.presentation.ui.navigation
+package com.lapcevichme.bookweaver.core.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Book
-import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material3.Button
@@ -34,13 +34,13 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.lapcevichme.bookweaver.features.bookhub.BookHubScreen
-import com.lapcevichme.bookweaver.features.bookinstall.InstallBookScreen
 import com.lapcevichme.bookweaver.features.bookhub.BookHubViewModel
 import com.lapcevichme.bookweaver.features.bookinstall.BookInstallationViewModel
+import com.lapcevichme.bookweaver.features.bookinstall.InstallBookScreen
 import com.lapcevichme.bookweaver.features.chapterdetails.ChapterDetailsScreen
 import com.lapcevichme.bookweaver.features.chapterdetails.ChapterDetailsViewModel
-import com.lapcevichme.bookweaver.features.characters.CharactersScreen
 import com.lapcevichme.bookweaver.features.characterdetails.CharacterDetailsScreen
+import com.lapcevichme.bookweaver.features.characters.CharactersScreen
 import com.lapcevichme.bookweaver.features.library.LibraryScreen
 import com.lapcevichme.bookweaver.features.library.LibraryViewModel
 import com.lapcevichme.bookweaver.features.main.MainViewModel
@@ -104,7 +104,8 @@ sealed class Screen(val route: String) {
         object BookHub : Bottom("bottom_book_hub", "Книга", Icons.Default.Book)
         object Player : Bottom("bottom_player", "Плеер", Icons.Default.PlayArrow)
         object LoreHelper : Bottom("bottom_lore_helper", "Помощник", Icons.Default.QuestionAnswer)
-        object Library : Bottom("bottom_library", "Библиотека", Icons.Default.LibraryBooks)
+        object Library :
+            Bottom("bottom_library", "Библиотека", Icons.AutoMirrored.Filled.LibraryBooks)
     }
 }
 
@@ -307,7 +308,10 @@ fun MainScaffold(
             val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
             if (navBackStackEntry?.destination?.route == Screen.Bottom.Library.route) {
                 FloatingActionButton(onClick = { rootNavController.navigate(Screen.InstallBook.route) }) {
-                    Icon(Icons.Default.LibraryBooks, contentDescription = "Добавить книгу")
+                    Icon(
+                        Icons.AutoMirrored.Filled.LibraryBooks,
+                        contentDescription = "Добавить книгу"
+                    )
                 }
             }
         }

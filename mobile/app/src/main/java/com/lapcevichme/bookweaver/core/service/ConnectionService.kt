@@ -5,7 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.lapcevichme.bookweaver.R
@@ -54,16 +53,14 @@ class ConnectionService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                CHANNEL_ID,
-                "Connection Status",
-                NotificationManager.IMPORTANCE_LOW // LOW, чтобы не было звука при появлении
-            ).apply {
-                description = "Shows the current server connection status"
-            }
-            notificationManager.createNotificationChannel(serviceChannel)
+        val serviceChannel = NotificationChannel(
+            CHANNEL_ID,
+            "Connection Status",
+            NotificationManager.IMPORTANCE_LOW // LOW, чтобы не было звука при появлении
+        ).apply {
+            description = "Shows the current server connection status"
         }
+        notificationManager.createNotificationChannel(serviceChannel)
     }
 
     private fun createNotification(status: String) = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -79,11 +76,8 @@ class ConnectionService : Service() {
         val disconnectIntent = Intent(this, DisconnectReceiver::class.java).apply {
             action = ACTION_DISCONNECT
         }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val flags =
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
         val disconnectPendingIntent = PendingIntent.getBroadcast(this, 0, disconnectIntent, flags)
         return NotificationCompat.Action(0, "Disconnect", disconnectPendingIntent)
     }

@@ -28,7 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Headphones
@@ -73,11 +73,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.service.PlayerState
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 @Composable
 fun PlayerScreen(
@@ -128,6 +129,8 @@ fun PlayerScreen(
         }
     }
 
+    val effectiveError = uiState.error ?: playerState.error
+
     when {
         uiState.isLoading -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -135,10 +138,10 @@ fun PlayerScreen(
             }
         }
 
-        uiState.error != null -> {
+        effectiveError != null -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = "Ошибка: ${uiState.error}",
+                    text = "Ошибка: $effectiveError",
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(16.dp)
                 )
@@ -172,7 +175,7 @@ private fun AudioPlayerScreenUI(
         val totalSeconds = (millis / 1000).toInt()
         val minutes = totalSeconds / 60
         val seconds = totalSeconds % 60
-        return String.format("%02d:%02d", minutes, seconds)
+        return String.format(Locale.US, "%02d:%02d", minutes, seconds)
     }
 
     Scaffold(
@@ -187,7 +190,7 @@ private fun AudioPlayerScreenUI(
                 },
                 navigationIcon = {
                     IconButton(onClick = { /* TODO: Handle back */ }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 },
                 actions = {
@@ -223,7 +226,7 @@ private fun AudioPlayerScreenUI(
             ) {
                 if (playerState.albumArt != null) {
                     Image(
-                        bitmap = playerState.albumArt!!.asImageBitmap(),
+                        bitmap = playerState.albumArt.asImageBitmap(),
                         contentDescription = "Обложка альбома",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
