@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -202,16 +203,17 @@ private fun AudioPlayerScreenUI(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 24.dp),
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
-            Spacer(modifier = Modifier.height(32.dp))
 
             // Блок обложки
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.7f)
+                    .fillMaxWidth(0.8f)
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(24.dp))
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
@@ -233,8 +235,6 @@ private fun AudioPlayerScreenUI(
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
 
             // Блок субтитров
             Box(
@@ -269,106 +269,112 @@ private fun AudioPlayerScreenUI(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Блок кнопок управления
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                IconButton(onClick = {
-                    mediaPlayerService?.seekTo(
-                        (playerState.currentPosition - 10000).coerceAtLeast(
-                            0L
-                        )
-                    )
-                }) {
-                    Icon(
-                        Icons.Default.Replay10,
-                        contentDescription = "Назад на 10 сек",
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-                IconButton(
-                    onClick = { mediaPlayerService?.togglePlayPause() },
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(
-                        modifier = Modifier.size(48.dp),
-                        imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (playerState.isPlaying) "Пауза" else "Воспроизвести",
-                        tint = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-                IconButton(onClick = {
-                    mediaPlayerService?.seekTo(
-                        (playerState.currentPosition + 10000).coerceAtMost(
-                            playerState.duration
-                        )
-                    )
-                }) {
-                    Icon(
-                        Icons.Default.Forward10,
-                        contentDescription = "Вперед на 10 сек",
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Нижний ряд кнопок
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                IconButton(onClick = { mediaPlayerService?.toggleSubtitles(!playerState.subtitlesEnabled) }) {
-                    Icon(
-                        Icons.Default.ClosedCaption,
-                        contentDescription = "Субтитры",
-                        tint = if (playerState.subtitlesEnabled) MaterialTheme.colorScheme.primary else Color.White
-                    )
-                }
-
-                TextButton(onClick = { showSpeedSheet = true }) {
+                // Блок слайдера
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "${playerState.playbackSpeed}x",
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 16.sp
+                        "${formatTime(playerState.currentPosition)} / ${formatTime(playerState.duration)}",
+                        modifier = Modifier.align(Alignment.End),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Slider(
+                        value = playerState.currentPosition.toFloat(),
+                        onValueChange = { position -> mediaPlayerService?.seekTo(position.toLong()) },
+                        valueRange = 0f..playerState.duration.toFloat().coerceAtLeast(1f),
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
-                IconButton(onClick = { /* TODO: Settings */ }) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "Настройки",
-                        tint = Color.White
-                    )
-                }
-            }
 
-            // Блок слайдера
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "${formatTime(playerState.currentPosition)} / ${formatTime(playerState.duration)}",
-                    modifier = Modifier.align(Alignment.End),
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Slider(
-                    value = playerState.currentPosition.toFloat(),
-                    onValueChange = { position -> mediaPlayerService?.seekTo(position.toLong()) },
-                    valueRange = 0f..playerState.duration.toFloat().coerceAtLeast(1f),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Блок кнопок управления
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    IconButton(onClick = {
+                        mediaPlayerService?.seekTo(
+                            (playerState.currentPosition - 10000).coerceAtLeast(
+                                0L
+                            )
+                        )
+                    }) {
+                        Icon(
+                            Icons.Default.Replay10,
+                            contentDescription = "Назад на 10 сек",
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { mediaPlayerService?.togglePlayPause() },
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(
+                            modifier = Modifier.size(48.dp),
+                            imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (playerState.isPlaying) "Пауза" else "Воспроизвести",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    IconButton(onClick = {
+                        mediaPlayerService?.seekTo(
+                            (playerState.currentPosition + 10000).coerceAtMost(
+                                playerState.duration
+                            )
+                        )
+                    }) {
+                        Icon(
+                            Icons.Default.Forward10,
+                            contentDescription = "Вперед на 10 сек",
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Нижний ряд кнопок
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    IconButton(onClick = { mediaPlayerService?.toggleSubtitles(!playerState.subtitlesEnabled) }) {
+                        Icon(
+                            Icons.Default.ClosedCaption,
+                            contentDescription = "Субтитры",
+                            tint = if (playerState.subtitlesEnabled) MaterialTheme.colorScheme.primary else Color.White
+                        )
+                    }
+
+                    TextButton(onClick = { showSpeedSheet = true }) {
+                        Text(
+                            text = "${playerState.playbackSpeed}x",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 16.sp
+                        )
+                    }
+                    IconButton(onClick = { /* TODO: Settings */ }) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Настройки",
+                            tint = Color.White
+                        )
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 

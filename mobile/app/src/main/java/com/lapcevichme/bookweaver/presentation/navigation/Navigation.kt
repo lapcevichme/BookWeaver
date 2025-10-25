@@ -2,7 +2,6 @@ package com.lapcevichme.bookweaver.presentation.ui.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.LibraryBooks
@@ -223,7 +222,8 @@ fun AppNavHost() {
                     navController.navigate(
                         Screen.CharacterDetails.createRoute(bookId, characterId)
                     )
-                }
+                },
+                onNavigateBack = { navController.popBackStack() }
             )
         }
         composable(
@@ -253,7 +253,7 @@ fun AppNavHost() {
 }
 
 
-// --- SCAFFOLD С BOTTOMNAV И ВЛОЖЕННЫМ NAVHOST ---
+// SCAFFOLD С BOTTOMNAV И ВЛОЖЕННЫМ NAVHOST
 
 @Composable
 fun MainScaffold(
@@ -315,7 +315,7 @@ fun MainScaffold(
         NavHost(
             navController = bottomNavController,
             startDestination = startBottomRoute,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier
         ) {
             composable(Screen.Bottom.BookHub.route) {
                 val viewModel: BookDetailsViewModel = hiltViewModel()
@@ -393,7 +393,7 @@ fun MainScaffold(
     }
 }
 
-// --- Заглушки для недостающих экранов ---
+// Заглушки для недостающих экранов
 
 @Composable
 fun OnboardingLibraryScreen(onBookInstalled: () -> Unit) {
