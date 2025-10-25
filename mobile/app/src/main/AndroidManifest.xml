@@ -35,7 +35,7 @@
         android:theme="@style/Theme.BookWeaver">
 
         <activity
-            android:name=".presentation.ui.main.MainActivity"
+            android:name=".features.main.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.BookWeaver">
             <intent-filter>
@@ -46,14 +46,14 @@
 
         <!-- Сервис для показа уведомления о статусе -->
         <service
-            android:name=".presentation.service.ConnectionService"
+            android:name=".core.service.ConnectionService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
         <!-- Ресивер для кнопки "Отключиться" в уведомлении -->
         <receiver
-            android:name=".presentation.service.DisconnectReceiver"
+            android:name=".core.service.DisconnectReceiver"
             android:enabled="true"
             android:exported="false" />
 
@@ -75,7 +75,7 @@
             tools:replace="screenOrientation" />
 
         <service
-            android:name=".presentation.ui.player.MediaPlayerService"
+            android:name=".features.player.MediaPlayerService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback"
             tools:ignore="ForegroundServicePermission" />
