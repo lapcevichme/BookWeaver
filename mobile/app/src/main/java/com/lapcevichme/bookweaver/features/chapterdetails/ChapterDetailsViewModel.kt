@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterDetails
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
@@ -14,54 +15,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import javax.inject.Inject
 
-@Serializable
-data class WordEntry(
-    val word: String,
-    val start: Long,
-    val end: Long
-)
-
-@Serializable
-data class SubtitleEntry(
-    @SerialName("audio_file") val audioFile: String,
-    val text: String,
-    @SerialName("start_ms") val startMs: Long,
-    @SerialName("end_ms") val endMs: Long,
-    val words: List<WordEntry> = emptyList()
-)
-
-// --- UI Models and State ---
-
-data class UiScenarioEntry(
-    val id: String,
-    val speaker: String,
-    val text: String,
-    val startMs: Long,
-    val endMs: Long,
-    val words: List<WordEntry>
-)
-
-data class UiChapterDetails(
-    val teaser: String,
-    val synopsis: String,
-    val scenario: List<UiScenarioEntry>,
-    val originalText: String
-)
-
-data class ChapterDetailsUiState(
-    val isLoading: Boolean = true,
-    val chapterTitle: String = "Загрузка...",
-    val details: UiChapterDetails? = null,
-    val error: String? = null
-)
-
-// --- ViewModel ---
 
 @HiltViewModel
 class ChapterDetailsViewModel @Inject constructor(

@@ -75,6 +75,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lapcevichme.bookweaver.core.service.MediaPlayerService
+import com.lapcevichme.bookweaver.core.service.PlayerState
 import kotlinx.coroutines.launch
 
 @Composable

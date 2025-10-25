@@ -11,11 +11,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class CharacterDetailsUiState(
-    val isLoading: Boolean = true,
-    val characterDetails: UiCharacterDetails? = null,
-    val error: String? = null
-)
 
 @HiltViewModel
 class CharacterDetailsViewModel @Inject constructor(

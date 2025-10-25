@@ -35,7 +35,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.lapcevichme.bookweaver.features.bookhub.BookHubScreen
 import com.lapcevichme.bookweaver.features.bookinstall.InstallBookScreen
-import com.lapcevichme.bookweaver.features.bookdetails.BookDetailsViewModel
+import com.lapcevichme.bookweaver.features.bookhub.BookHubViewModel
 import com.lapcevichme.bookweaver.features.bookinstall.BookInstallationViewModel
 import com.lapcevichme.bookweaver.features.chapterdetails.ChapterDetailsScreen
 import com.lapcevichme.bookweaver.features.chapterdetails.ChapterDetailsViewModel
@@ -318,7 +318,7 @@ fun MainScaffold(
             modifier = Modifier
         ) {
             composable(Screen.Bottom.BookHub.route) {
-                val viewModel: BookDetailsViewModel = hiltViewModel()
+                val viewModel: BookHubViewModel = hiltViewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
                 BookHubScreen(

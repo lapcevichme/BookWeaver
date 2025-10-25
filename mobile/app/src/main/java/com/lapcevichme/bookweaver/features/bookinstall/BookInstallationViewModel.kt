@@ -15,22 +15,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 
-// UI State: Содержит все данные, необходимые для отрисовки экрана
-data class BookInstallationUiState(
-    val isLoading: Boolean = false,
-    val urlInput: String = "",
-    val installationResult: Result<Unit>? = null
-)
-
-// Events: Определяет все возможные действия пользователя на экране
-sealed class InstallationEvent {
-    data class UrlChanged(val url: String) : InstallationEvent()
-    object InstallFromUrlClicked : InstallationEvent()
-    data class InstallFromFile(val uri: Uri?) : InstallationEvent()
-    object ResultHandled : InstallationEvent()
-}
-
-
 @HiltViewModel
 class BookInstallationViewModel @Inject constructor(
     private val downloadAndInstallBookUseCase: DownloadAndInstallBookUseCase,

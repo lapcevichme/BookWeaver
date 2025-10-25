@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.features.player
+package com.lapcevichme.bookweaver.core.service
 
 import android.R
 import android.app.NotificationChannel
@@ -29,6 +29,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ConcatenatingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,40 +41,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
 // --- DTO ДЛЯ ПАРСИНГА JSON СУБТИТРОВ ---
 
 // --- ДОБАВЛЕНО: DTO для слова ---
-@Serializable
-data class WordEntry(
-    val word: String,
-    val start: Long,
-    val end: Long
-)
 
-@Serializable
-data class SubtitleEntry(
-    @SerialName("audio_file") val audioFile: String,
-    val text: String,
-    @SerialName("start_ms") val startMs: Long,
-    @SerialName("end_ms") val endMs: Long,
-    val words: List<WordEntry> = emptyList()
-)
-
-data class PlayerState(
-    val isPlaying: Boolean = false,
-    val currentPosition: Long = 0L,
-    val duration: Long = 0L,
-    val fileName: String = "",
-    val albumArt: Bitmap? = null,
-    val playbackSpeed: Float = 1.0f,
-    val currentSubtitle: CharSequence = "",
-    val subtitlesEnabled: Boolean = true
-)
 
 class MediaPlayerService : Service() {
 

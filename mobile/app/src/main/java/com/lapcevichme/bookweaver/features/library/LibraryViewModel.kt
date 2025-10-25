@@ -14,21 +14,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// UiState and Events remain the same
-data class LibraryUiState(
-    val isLoading: Boolean = true,
-    val books: List<UiBook> = emptyList()
-)
-
-sealed class LibraryEvent {
-    data class BookSelected(val bookId: String) : LibraryEvent()
-    object Refresh : LibraryEvent()
-}
-
-sealed class NavigationEvent {
-    object NavigateToBookHub : NavigationEvent()
-}
-
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(

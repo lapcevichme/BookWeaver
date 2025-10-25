@@ -19,11 +19,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class PlayerUiState(
-    val isLoading: Boolean = false,
-    val chapterInfo: PlayerChapterInfo? = null,
-    val error: String? = null
-)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel

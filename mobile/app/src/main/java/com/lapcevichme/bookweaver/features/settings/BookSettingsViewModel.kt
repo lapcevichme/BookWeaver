@@ -12,18 +12,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class BookSettingsUiState(
-    val bookTitle: String = "Загрузка...",
-    val showDeleteConfirmDialog: Boolean = false,
-    val deletionResult: Result<Unit>? = null
-)
 
-sealed class BookSettingsEvent {
-    object DeleteClicked : BookSettingsEvent()
-    object DeleteConfirmed : BookSettingsEvent()
-    object DeleteCancelled : BookSettingsEvent()
-    object DeletionResultHandled : BookSettingsEvent()
-}
 
 @HiltViewModel
 class BookSettingsViewModel @Inject constructor(
@@ -48,6 +37,7 @@ class BookSettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(showDeleteConfirmDialog = false) }
                 deleteBook()
             }
+
             BookSettingsEvent.DeletionResultHandled -> _uiState.update { it.copy(deletionResult = null) }
         }
     }

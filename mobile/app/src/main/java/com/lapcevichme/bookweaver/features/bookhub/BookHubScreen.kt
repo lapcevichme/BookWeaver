@@ -15,8 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.lapcevichme.bookweaver.features.bookdetails.BookDetailsUiState
-import com.lapcevichme.bookweaver.features.bookdetails.UiChapter
 
 /**
  * Этот экран теперь является "Хабом" для активной книги.

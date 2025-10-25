@@ -75,7 +75,7 @@
             tools:replace="screenOrientation" />
 
         <service
-            android:name=".features.player.MediaPlayerService"
+            android:name=".core.service.MediaPlayerService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback"
             tools:ignore="ForegroundServicePermission" />

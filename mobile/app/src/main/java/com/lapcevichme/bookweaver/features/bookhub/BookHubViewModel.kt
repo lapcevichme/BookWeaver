@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.features.bookdetails
+package com.lapcevichme.bookweaver.features.bookhub
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,17 +19,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class BookDetailsUiState(
-    val isLoading: Boolean = true,
-    val bookId: String? = null,
-    val bookDetails: UiBookDetails? = null,
-    val activeChapterId: String? = null,
-    val error: String? = null
-)
 
 @HiltViewModel
 @OptIn(ExperimentalCoroutinesApi::class)
-class BookDetailsViewModel @Inject constructor(
+class BookHubViewModel @Inject constructor(
     private val getBookDetailsUseCase: GetBookDetailsUseCase,
     private val getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
     private val getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase,
