@@ -9,6 +9,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 internal data class BookManifestDto(
     @SerialName("book_name") val bookName: String,
+    @SerialName("author") val author: String? = null,
     @SerialName("character_voices") val characterVoices: Map<String, String> = emptyMap(),
     @SerialName("default_narrator_voice") val defaultNarratorVoice: String
 )

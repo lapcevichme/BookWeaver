@@ -14,6 +14,7 @@ import java.util.UUID
 
 internal fun BookManifestDto.toDomain(): BookManifest = BookManifest(
     bookName = this.bookName,
+    author = this.author,
     characterVoices = this.characterVoices,
     defaultNarratorVoice = this.defaultNarratorVoice
 )

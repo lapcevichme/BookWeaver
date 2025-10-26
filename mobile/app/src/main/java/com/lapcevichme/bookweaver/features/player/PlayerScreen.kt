@@ -125,7 +125,7 @@ fun PlayerScreen(
         val service = mediaService
 
         if (chapterInfo != null && service != null) {
-            service.setMedia(chapterInfo.media, chapterInfo.chapterTitle)
+            service.setMedia(chapterInfo.media, chapterInfo.chapterTitle, chapterInfo.coverPath)
         }
     }
 

@@ -78,6 +78,7 @@ class BookRepositoryImpl @Inject constructor(
                         Book(
                             id = bookDir.name,
                             title = manifestDto.bookName,
+                            author = manifestDto.author,
                             localPath = bookDir.absolutePath,
                             coverPath = if (coverFile.exists()) coverFile.absolutePath else null
                         )
@@ -329,6 +330,9 @@ class BookRepositoryImpl @Inject constructor(
                 throw Exception("Папка 'audio' не найдена для главы $chapterId")
             }
 
+            val coverFile = File(booksDir, "$bookId/cover.jpg")
+            val coverPath = coverFile.takeIf { it.exists() }?.absolutePath
+
             // Создаем новую ChapterMedia, передавая пути к ПАПКЕ и JSON
             val media = ChapterMedia(
                 subtitlesPath = chapter.subtitlesPath,
@@ -339,6 +343,7 @@ class BookRepositoryImpl @Inject constructor(
             val info = PlayerChapterInfo(
                 bookTitle = bookDetails.manifest.bookName,
                 chapterTitle = chapter.title,
+                coverPath = coverPath,
                 media = media
             )
             Result.success(info)

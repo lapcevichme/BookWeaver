@@ -20,8 +20,7 @@ fun Book.toUiBook(): UiBook {
     return UiBook(
         id = this.id,
         title = this.title,
-        // TODO: Добавить автора в BookManifest на бэкенде
-        author = "Автор неизвестен",
+        author = this.author ?: "Автор неизвестен",
         coverPath = this.coverPath
     )
 }

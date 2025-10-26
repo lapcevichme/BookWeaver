@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.os.Binder
 import android.os.IBinder
@@ -152,7 +153,7 @@ class MediaPlayerService : Service() {
     }
 
     @OptIn(UnstableApi::class)
-    fun setMedia(media: ChapterMedia, chapterTitle: String) {
+    fun setMedia(media: ChapterMedia, chapterTitle: String, coverPath: String?) {
         val subtitlesPath = media.subtitlesPath
         val audioDirectoryPath = media.audioDirectoryPath
 
@@ -207,9 +208,19 @@ class MediaPlayerService : Service() {
             play()
             setPlaybackSpeed(1.0f)
 
+            var loadedBitmap: Bitmap? = null
+            if (coverPath != null) {
+                try {
+                    loadedBitmap = BitmapFactory.decodeFile(coverPath)
+                    placeholderBitmap = loadedBitmap // Сохраняем для уведомлений
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to load cover image", e)
+                }
+            }
+
             _playerStateFlow.value = PlayerState(
                 fileName = chapterTitle,
-                albumArt = null,
+                albumArt = loadedBitmap,
                 subtitlesEnabled = true,
                 duration = totalChapterDurationMs
             )
@@ -379,7 +390,7 @@ class MediaPlayerService : Service() {
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, _playerStateFlow.value.fileName)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "BookWeaver")
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, totalChapterDurationMs)
-            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, null)
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, placeholderBitmap)
             .build()
         mediaSession.setMetadata(metadata)
 

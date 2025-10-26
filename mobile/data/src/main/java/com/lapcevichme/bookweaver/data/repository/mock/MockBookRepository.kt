@@ -32,19 +32,22 @@ class MockBookRepository @Inject constructor() : BookRepository {
             id = "mock-book-1",
             title = "Монолог фармацевта: Приключения Маомао",
             localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-1",
-            coverPath = null // Обложки пока нет
+            coverPath = null,
+            author = null
         ),
         Book(
             id = "mock-book-2",
             title = "Стальной Алхимик: Философский камень",
             localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-2",
-            coverPath = null
+            coverPath = null,
+            author = null
         ),
         Book(
             id = "mock-book-3",
             title = "Атака Титанов: Падение Шиганшины",
             localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-3",
-            coverPath = null
+            coverPath = null,
+            author = null
         )
     )
 
@@ -63,6 +66,7 @@ class MockBookRepository @Inject constructor() : BookRepository {
 
         val mockManifest = BookManifest(
             bookName = book.title,
+            author = "Неизвестный автор",
             characterVoices = emptyMap(),
             defaultNarratorVoice = "narrator_default"
         )
@@ -156,7 +160,8 @@ class MockBookRepository @Inject constructor() : BookRepository {
             PlayerChapterInfo(
                 bookTitle = book?.title ?: "Моковая Книга",
                 chapterTitle = chapterTitle,
-                media = mockMedia
+                media = mockMedia,
+                coverPath = null
             )
         )
     }
@@ -183,7 +188,8 @@ class MockBookRepository @Inject constructor() : BookRepository {
             id = "downloaded_${UUID.randomUUID()}",
             title = "Скачанная книга",
             localPath = "/mock/downloaded",
-            coverPath = null
+            coverPath = null,
+            author = null
         )
         mockBooks.add(newBook)
         return Result.success(File(newBook.localPath))
@@ -197,7 +203,8 @@ class MockBookRepository @Inject constructor() : BookRepository {
             id = "installed_${UUID.randomUUID()}",
             title = "Установленная из файла книга",
             localPath = "/mock/installed",
-            coverPath = null
+            coverPath = null,
+            author = null
         )
         mockBooks.add(newBook)
         return Result.success(File(newBook.localPath))

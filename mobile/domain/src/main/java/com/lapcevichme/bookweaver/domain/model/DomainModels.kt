@@ -2,17 +2,21 @@ package com.lapcevichme.bookweaver.domain.model
 
 import java.util.UUID
 
+// TODO: подумать насчет nullability всех полей.
+
 /**
  * Упрощенная модель книги для отображения в библиотеке.
  *
  * @param id Уникальный идентификатор книги (например, название папки "kusuriya-no-hitorigoto-ln-novel").
  * @param title Человекочитаемое название книги.
+ * @param author Автор книги.
  * @param coverPath Локальный путь к файлу обложки.
  * @param localPath Путь к корневой папке распакованной книги на устройстве.
  */
 data class Book(
     val id: String,
     val title: String,
+    val author: String?,
     val coverPath: String?,
     val localPath: String
 )
@@ -32,11 +36,13 @@ data class BookDetails(
  * Метаданные всей книги. Аналог BookManifest из бэкенда.
  *
  * @param bookName Название проекта книги.
+ * @param author Автор книги.
  * @param characterVoices Сопоставление ID персонажа и ID голоса.
  * @param defaultNarratorVoice Голос рассказчика по умолчанию.
  */
 data class BookManifest(
     val bookName: String,
+    val author: String?,
     val characterVoices: Map<String, String> = emptyMap(),
     val defaultNarratorVoice: String
 )
@@ -116,5 +122,6 @@ data class ChapterMedia(
 data class PlayerChapterInfo(
     val bookTitle: String,
     val chapterTitle: String,
+    val coverPath: String?,
     val media: ChapterMedia
 )
