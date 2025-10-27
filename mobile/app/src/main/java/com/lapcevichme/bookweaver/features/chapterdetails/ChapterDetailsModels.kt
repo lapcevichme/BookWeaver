@@ -15,5 +15,6 @@ data class UiChapterDetails(
     val teaser: String,
     val synopsis: String,
     val scenario: List<UiScenarioEntry>,
-    val originalText: String
+    val originalText: String,
+    val subtitlesPath: String = ""
 )

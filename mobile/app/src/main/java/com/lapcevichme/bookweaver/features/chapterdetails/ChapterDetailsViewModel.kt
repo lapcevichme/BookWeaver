@@ -57,10 +57,15 @@ class ChapterDetailsViewModel @Inject constructor(
                         .onSuccess { mediaInfo ->
                             try {
                                 val scenarioModel = mergeScenarios(detailsModel, mediaInfo)
+                                val subtitlesPath = mediaInfo.media.subtitlesPath ?: ""
+
                                 _uiState.update {
                                     it.copy(
                                         isLoading = false,
-                                        details = detailsModel.toUiModel(scenarioModel),
+                                        details = detailsModel.toUiModel(
+                                            scenarioModel,
+                                            subtitlesPath
+                                        ),
                                         error = null
                                     )
                                 }
@@ -157,11 +162,15 @@ class ChapterDetailsViewModel @Inject constructor(
 
 // --- Mapper ---
 
-private fun ChapterDetails.toUiModel(mergedScenario: List<UiScenarioEntry>): UiChapterDetails {
+private fun ChapterDetails.toUiModel(
+    mergedScenario: List<UiScenarioEntry>,
+    subtitlesPath: String
+): UiChapterDetails {
     return UiChapterDetails(
         teaser = this.summary?.teaser ?: "Тизер недоступен",
         synopsis = this.summary?.synopsis ?: "Синопсис недоступен",
         scenario = mergedScenario,
-        originalText = this.originalText
+        originalText = this.originalText,
+        subtitlesPath = subtitlesPath
     )
 }

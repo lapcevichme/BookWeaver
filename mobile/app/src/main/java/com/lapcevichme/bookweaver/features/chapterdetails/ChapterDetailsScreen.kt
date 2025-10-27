@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
+import com.lapcevichme.bookweaver.core.service.PlayerState
 import com.lapcevichme.bookweaver.features.main.MainViewModel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -100,9 +101,8 @@ fun ChapterDetailsScreen(
     val isServiceBound = mediaService != null
 
     val playerState by mediaService?.playerStateFlow
-        ?.map { it.currentPosition }
-        ?.collectAsStateWithLifecycle(initialValue = 0L)
-        ?: remember { mutableLongStateOf(0L) }
+        ?.collectAsStateWithLifecycle(initialValue = PlayerState())
+        ?: remember { mutableStateOf(PlayerState()) }
 
     val serviceConnection = remember {
         object : ServiceConnection {
@@ -214,14 +214,27 @@ fun ChapterDetailsScreen(
                                     state.details?.synopsis ?: ""
                                 )
 
-                                1 -> ScenarioContent(
-                                    scenario = state.details?.scenario ?: emptyList(),
-                                    currentPosition = playerState,
-                                    onEntryClick = { entry ->
-                                        mediaService?.seekTo(entry.startMs)
-                                        mainViewModel.navigateToPlayerTab()
+                                1 -> {
+                                    val isThisChapterPlaying =
+                                        !state.details?.subtitlesPath.isNullOrEmpty() &&
+                                                state.details.subtitlesPath == playerState.loadedChapterId
+
+                                    // Передаем позицию, только если ID совпадают
+                                    val positionForThisChapter = if (isThisChapterPlaying) {
+                                        playerState.currentPosition
+                                    } else {
+                                        -1L // Если играет другая глава, считаем, что позиция 0
                                     }
-                                )
+
+                                    ScenarioContent(
+                                        scenario = state.details?.scenario ?: emptyList(),
+                                        currentPosition = positionForThisChapter,
+                                        onEntryClick = { entry ->
+                                            mediaService?.seekTo(entry.startMs)
+                                            mainViewModel.navigateToPlayerTab()
+                                        }
+                                    )
+                                }
 
                                 2 -> OriginalTextContent(state.details?.originalText ?: "")
                             }

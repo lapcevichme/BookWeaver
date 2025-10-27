@@ -222,11 +222,18 @@ class MediaPlayerService : Service() {
                 fileName = chapterTitle,
                 albumArt = loadedBitmap,
                 subtitlesEnabled = true,
-                duration = totalChapterDurationMs
+                duration = totalChapterDurationMs,
+                loadedChapterId = currentSubtitlesPath ?: ""
             )
 
         } catch (e: Exception) {
             Log.e(TAG, "Error setting media source", e)
+            currentSubtitlesPath = null
+            _playerStateFlow.value = _playerStateFlow.value.copy(
+                error = "Ошибка установки медиа: ${e.message}",
+                loadedChapterId = ""
+            )
+
         }
     }
 
@@ -299,7 +306,8 @@ class MediaPlayerService : Service() {
             duration = totalChapterDurationMs,
             currentPosition = absolutePosition,
             playbackSpeed = player.playbackParameters.speed,
-            currentSubtitle = currentSubtitleText
+            currentSubtitle = currentSubtitleText,
+            loadedChapterId = currentSubtitlesPath ?: ""
         )
     }
 
