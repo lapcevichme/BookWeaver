@@ -1,5 +1,6 @@
 package com.lapcevichme.bookweaver.core.navigation
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -39,6 +41,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapper
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapperViewModel
+import com.lapcevichme.bookweaver.core.ui.theme.getLocalActivity
 import com.lapcevichme.bookweaver.features.bookhub.BookHubScreen
 import com.lapcevichme.bookweaver.features.bookhub.BookHubViewModel
 import com.lapcevichme.bookweaver.features.bookinstall.BookInstallationViewModel
@@ -282,7 +285,8 @@ fun MainScaffold(
     val bottomNavController = rememberNavController()
 
     // ЛОГИКА ТЕМЫ
-    val themeViewModel: BookThemeWrapperViewModel = hiltViewModel()
+    val activity = getLocalActivity()
+    val themeViewModel: BookThemeWrapperViewModel = hiltViewModel(activity)
     val bookSeedColor by themeViewModel.themeSeedColor.collectAsStateWithLifecycle()
 
     // Следим за текущим маршрутом в нижнем баре
@@ -291,7 +295,9 @@ fun MainScaffold(
 
     val defaultSeedColor = Color(0xFF00668B)
 
-    val finalSeedColor = when (currentRoute) {
+    val routeToCheck = currentRoute ?: startBottomRoute
+
+    val finalSeedColor = when (routeToCheck) {
         Screen.Bottom.Library.route -> defaultSeedColor // Если Библиотека - синий
         else -> bookSeedColor // Для всех остальных (Хаб, Плеер, Лор) - цвет книги
     }

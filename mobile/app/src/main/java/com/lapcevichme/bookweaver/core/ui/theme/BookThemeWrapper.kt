@@ -16,7 +16,7 @@ import com.materialkolor.DynamicMaterialExpressiveTheme
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BookThemeWrapper(
-    viewModel: BookThemeWrapperViewModel = hiltViewModel(),
+    viewModel: BookThemeWrapperViewModel = hiltViewModel(getLocalActivity()),
     content: @Composable () -> Unit
 ) {
     val seedColor by viewModel.themeSeedColor.collectAsStateWithLifecycle()
