@@ -73,7 +73,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.service.PlayerState
@@ -82,7 +81,7 @@ import java.util.Locale
 
 @Composable
 fun PlayerScreen(
-    viewModel: PlayerViewModel = hiltViewModel()
+    viewModel: PlayerViewModel
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -125,7 +124,31 @@ fun PlayerScreen(
         val service = mediaService
 
         if (chapterInfo != null && service != null) {
-            service.setMedia(chapterInfo.media, chapterInfo.chapterTitle, chapterInfo.coverPath)
+            val playNow = uiState.playWhenLoaded
+            service.setMedia(
+                chapterInfo.media,
+                chapterInfo.chapterTitle,
+                chapterInfo.coverPath,
+                playWhenReady = playNow
+            )
+        }
+    }
+
+    // Обработка команды "Play"
+    // Срабатывает ТОЛЬКО когда playWhenLoaded становится true
+    LaunchedEffect(uiState.playWhenLoaded, mediaService) {
+        val service = mediaService
+
+        // Если ViewModel дал команду "Играть" и Service готов
+        if (uiState.playWhenLoaded && service != null) {
+            // Проверяем, что в плеере уже загружена нужная глава
+            val isCorrectChapterLoaded = playerState.loadedChapterId.isNotEmpty() &&
+                    playerState.loadedChapterId == uiState.chapterInfo?.media?.subtitlesPath
+
+            if (isCorrectChapterLoaded) {
+                service.play()
+            }
+            viewModel.onMediaSet()
         }
     }
 

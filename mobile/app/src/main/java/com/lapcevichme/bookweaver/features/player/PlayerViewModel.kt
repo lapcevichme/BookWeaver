@@ -63,7 +63,7 @@ class PlayerViewModel @Inject constructor(
                             } else if (chapterId == null) {
                                 _uiState.value = PlayerUiState(error = "Глава не выбрана")
                             } else {
-                                loadChapterInfo(bookId, chapterId)
+                                loadChapterInfo(bookId, chapterId, playWhenReady = false)
                             }
                         }
 
@@ -76,13 +76,27 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    private fun loadChapterInfo(bookId: String, chapterId: String) {
+    fun playChapter(bookId: String, chapterId: String) {
+        Log.d("PlayerViewModel", "PlayChapter: $bookId / $chapterId")
+        // Вызываем загрузку с флагом "играть"
+        loadChapterInfo(bookId, chapterId, playWhenReady = true)
+    }
+
+    // Эта функция сбрасывает флаг после того, как Service получил команду
+    fun onMediaSet() {
+        _uiState.update { it.copy(playWhenLoaded = false) }
+    }
+
+
+    private fun loadChapterInfo(
+        bookId: String, chapterId: String, playWhenReady: Boolean = false
+    ) {
         if (_uiState.value.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true) {
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _uiState.update { it.copy(isLoading = true, error = null, playWhenLoaded = playWhenReady) }
             Log.d("PlayerViewModel", "Загрузка информации для $bookId / $chapterId")
             getPlayerChapterInfoUseCase(bookId, chapterId)
                 .onSuccess { info ->
@@ -92,7 +106,7 @@ class PlayerViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        it.copy(isLoading = false, error = error.message)
+                        it.copy(isLoading = false, error = error.message, playWhenLoaded = false)
                     }
                     error.printStackTrace()
                 }

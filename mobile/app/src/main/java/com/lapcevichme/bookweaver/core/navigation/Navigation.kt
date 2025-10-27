@@ -56,6 +56,7 @@ import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.features.main.NavigationEvent
 import com.lapcevichme.bookweaver.features.main.StartupState
 import com.lapcevichme.bookweaver.features.player.PlayerScreen
+import com.lapcevichme.bookweaver.features.player.PlayerViewModel
 import com.lapcevichme.bookweaver.features.settings.BookSettingsScreen
 import com.materialkolor.DynamicMaterialExpressiveTheme
 import kotlinx.coroutines.flow.collectLatest
@@ -302,6 +303,7 @@ fun MainScaffold(
         else -> bookSeedColor // Для всех остальных (Хаб, Плеер, Лор) - цвет книги
     }
 
+    val playerViewModel: PlayerViewModel = hiltViewModel(activity)
 
     LaunchedEffect(Unit) {
         mainViewModel.navigationEvent.collect { event ->
@@ -394,6 +396,11 @@ fun MainScaffold(
                         // Этот коллбэк ЗАПУСКАЕТ главу и переходит в плеер
                         onChapterPlayClick = { chapterId ->
                             viewModel.onPlayChapter(chapterId)
+                            // Явно даем команду "Играть" общему PlayerViewModel
+
+                            uiState.bookId?.let { bookId ->
+                                playerViewModel.playChapter(bookId, chapterId)
+                            }
 
                             bottomNavController.navigate(Screen.Bottom.Player.route) {
                                 popUpTo(bottomNavController.graph.findStartDestination().id) {
@@ -435,7 +442,7 @@ fun MainScaffold(
                 }
 
                 composable(Screen.Bottom.Player.route) {
-                    PlayerScreen()
+                    PlayerScreen(viewModel = playerViewModel)
 
                 }
 

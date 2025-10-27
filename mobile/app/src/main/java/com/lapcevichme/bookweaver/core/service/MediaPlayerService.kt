@@ -153,7 +153,12 @@ class MediaPlayerService : Service() {
     }
 
     @OptIn(UnstableApi::class)
-    fun setMedia(media: ChapterMedia, chapterTitle: String, coverPath: String?) {
+    fun setMedia(
+        media: ChapterMedia,
+        chapterTitle: String,
+        coverPath: String?,
+        playWhenReady: Boolean
+    ) {
         val subtitlesPath = media.subtitlesPath
         val audioDirectoryPath = media.audioDirectoryPath
 
@@ -205,7 +210,9 @@ class MediaPlayerService : Service() {
 
             player.setMediaItems(mediaItems)
             player.prepare()
-            play()
+            if (playWhenReady) {
+                play()
+            }
             setPlaybackSpeed(1.0f)
 
             var loadedBitmap: Bitmap? = null
