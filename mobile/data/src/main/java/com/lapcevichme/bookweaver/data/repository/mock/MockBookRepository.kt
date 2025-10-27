@@ -178,6 +178,17 @@ class MockBookRepository @Inject constructor() : BookRepository {
         return _activeChapterId.value
     }
 
+    override fun getBookThemeColorFlow(bookId: String): Flow<Int?> {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun generateAndCacheThemeColor(
+        bookId: String,
+        coverPath: String?
+    ) {
+        TODO("Not yet implemented")
+    }
+
     override suspend fun downloadAndInstallBook(url: String): Result<File> {
         delay(2000) // Симуляция долгой загрузки
         if (url.contains("fail")) {

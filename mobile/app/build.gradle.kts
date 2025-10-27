@@ -81,4 +81,7 @@ dependencies {
 
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media)
+
+    implementation("com.materialkolor:material-kolor:4.0.0")
+
 }

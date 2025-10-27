@@ -36,7 +36,7 @@ interface BookRepository {
 
     suspend fun getChapterOriginalText(bookId: String, chapterId: String): Result<String>
 
-        /**
+    /**
      * Удалить все файлы, связанные с книгой, с устройства.
      * @param bookId Уникальный идентификатор книги для удаления.
      */
@@ -45,7 +45,10 @@ interface BookRepository {
     /**
      * Распарсить сценарий для конкретной главы.
      */
-    suspend fun getScenarioForChapter(bookId: String, chapterId: String): Result<List<ScenarioEntry>>
+    suspend fun getScenarioForChapter(
+        bookId: String,
+        chapterId: String
+    ): Result<List<ScenarioEntry>>
 
     fun getActiveBookIdFlow(): Flow<String?>
     suspend fun setActiveBookId(bookId: String)
@@ -70,5 +73,9 @@ interface BookRepository {
      * Получает ID активной главы один раз.
      */
     suspend fun getActiveChapterId(): String?
+
+    fun getBookThemeColorFlow(bookId: String): Flow<Int?>
+
+    suspend fun generateAndCacheThemeColor(bookId: String, coverPath: String?)
 
 }

@@ -1,11 +1,13 @@
 package com.lapcevichme.bookweaver.data.repository
 
 import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import com.lapcevichme.bookweaver.data.dataStore
 import com.lapcevichme.bookweaver.data.network.dto.BookManifestDto
 import com.lapcevichme.bookweaver.data.network.dto.ChapterSummaryDto
 import com.lapcevichme.bookweaver.data.network.dto.CharacterDto
@@ -18,6 +20,7 @@ import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
+import com.materialkolor.ktx.themeColor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -40,8 +43,6 @@ import javax.inject.Singleton
  * Основная реализация репозитория. Работает с файловой системой устройства.
  */
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
-
 @Singleton
 class BookRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -51,6 +52,7 @@ class BookRepositoryImpl @Inject constructor(
     private object PreferencesKeys {
         val ACTIVE_BOOK_ID = stringPreferencesKey("active_book_id")
         val ACTIVE_CHAPTER_ID = stringPreferencesKey("active_chapter_id")
+        val BOOK_THEME_COLORS_JSON = stringPreferencesKey("book_theme_colors")
     }
 
     // Создаем экземпляр парсера JSON.
@@ -121,14 +123,15 @@ class BookRepositoryImpl @Inject constructor(
                     ?.filter { it.isDirectory && it.name.startsWith("vol_") }
                     ?.sortedWith(
                         compareBy(
-                        { file ->
-                            file.name.substringAfter("vol_").substringBefore("_chap").toIntOrNull()
-                                ?: Int.MAX_VALUE
-                        },
-                        { file ->
-                            file.name.substringAfter("chap_").toIntOrNull() ?: Int.MAX_VALUE
-                        }
-                    ))
+                            { file ->
+                                file.name.substringAfter("vol_").substringBefore("_chap")
+                                    .toIntOrNull()
+                                    ?: Int.MAX_VALUE
+                            },
+                            { file ->
+                                file.name.substringAfter("chap_").toIntOrNull() ?: Int.MAX_VALUE
+                            }
+                        ))
                     ?.mapNotNull { chapterDir ->
                         Chapter(
                             id = chapterDir.name,
@@ -370,5 +373,73 @@ class BookRepositoryImpl @Inject constructor(
 
     override suspend fun getActiveChapterId(): String? {
         return context.dataStore.data.first()[PreferencesKeys.ACTIVE_CHAPTER_ID]
+    }
+
+    // Цвет по умолчанию
+    private val fallbackColor = Color(0xFF00668B)
+
+    /**
+     * Получает Flow с цветом для конкретной книги из кэша.
+     */
+    override fun getBookThemeColorFlow(bookId: String): Flow<Int?> {
+        return context.dataStore.data
+            .map { preferences ->
+                val jsonString = preferences[PreferencesKeys.BOOK_THEME_COLORS_JSON] ?: "{}"
+
+                val colorMap = try {
+                    json.decodeFromString<Map<String, Int>>(jsonString)
+                } catch (e: Exception) {
+                    emptyMap<String, Int>()
+                }
+
+                colorMap[bookId]
+            }
+    }
+
+    /**
+     * Генерирует и кэширует цвет для книги.
+     */
+    override suspend fun generateAndCacheThemeColor(bookId: String, coverPath: String?) {
+        withContext(Dispatchers.IO) {
+            try {
+                // Проверяем, есть ли цвет в кэше
+                val currentJson =
+                    context.dataStore.data.first()[PreferencesKeys.BOOK_THEME_COLORS_JSON] ?: "{}"
+                val currentMap = try {
+                    json.decodeFromString<Map<String, Int>>(currentJson)
+                } catch (e: Exception) {
+                    emptyMap()
+                }
+
+                if (currentMap.containsKey(bookId)) {
+                    // Цвет уже сгенерирован, ничего не делаем
+                    return@withContext
+                }
+
+                // Цвета нет. Генерируем "грязным" способом
+                if (coverPath == null) return@withContext
+                val coverFile = File(coverPath)
+                if (!coverFile.exists()) return@withContext
+
+                val androidBitmap = BitmapFactory.decodeFile(coverFile.absolutePath)
+                if (androidBitmap == null) return@withContext
+
+                val bitmap = androidBitmap.asImageBitmap()
+                val seedColor = bitmap.themeColor(fallback = fallbackColor)
+                val newColorInt = seedColor.toArgb()
+
+                // Сохраняем в кэш
+                val newMap = currentMap.toMutableMap()
+                newMap[bookId] = newColorInt
+
+                // Записываем обновленную карту обратно в DataStore
+                context.dataStore.edit { settings ->
+                    settings[PreferencesKeys.BOOK_THEME_COLORS_JSON] = json.encodeToString(newMap)
+                }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 }

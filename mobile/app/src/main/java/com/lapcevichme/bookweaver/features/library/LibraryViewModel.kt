@@ -4,7 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetLocalBooksUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.SetActiveBookUseCase
+// --- 1. ЗАМЕНЯЕМ ИМПОРТ ---
+// import com.lapcevichme.bookweaver.domain.usecase.theme.UpdateThemeFromCoverUseCase // <-- УДАЛЕНО
+import com.lapcevichme.bookweaver.domain.usecase.theme.GenerateBookThemeUseCase // <-- ДОБАВЛЕНО
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +22,8 @@ import javax.inject.Inject
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     getLocalBooksUseCase: GetLocalBooksUseCase,
-    private val setActiveBookUseCase: SetActiveBookUseCase
+    private val setActiveBookUseCase: SetActiveBookUseCase,
+    private val generateBookThemeUseCase: GenerateBookThemeUseCase
 ) : ViewModel() {
 
     val uiState: StateFlow<LibraryUiState> = getLocalBooksUseCase()
@@ -41,10 +46,17 @@ class LibraryViewModel @Inject constructor(
         when (event) {
             is LibraryEvent.BookSelected -> {
                 viewModelScope.launch {
-                    // Используем UseCase для сохранения ID активной книги
+                    // Сначала БЫСТРЫЕ операции: установить активную книгу и перейти
                     setActiveBookUseCase(event.bookId)
-                    // И только после этого отправляем событие навигации
                     _navigationEvent.send(NavigationEvent.NavigateToBookHub)
+                    // "Тяжелую" (5 сек) генерацию запускаем в ОТДЕЛЬНОМ
+                    // фоновом потоке, чтобы не блокировать навигацию
+                    launch(Dispatchers.IO) {
+                        // Находим путь к обложке
+                        val coverPath = uiState.value.books.find { it.id == event.bookId }?.coverPath
+                        // Запускаем НОВЫЙ use case
+                        generateBookThemeUseCase(event.bookId, coverPath)
+                    }
                 }
             }
 
