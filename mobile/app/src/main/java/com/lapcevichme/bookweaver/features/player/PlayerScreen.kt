@@ -240,7 +240,7 @@ private fun AudioPlayerScreenUI(
                 .padding(paddingValues)
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 96.dp),
+                .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
@@ -301,8 +301,6 @@ private fun AudioPlayerScreenUI(
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.weight(1f))
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -453,4 +451,3 @@ private fun AudioPlayerScreenUI(
         }
     }
 }
-

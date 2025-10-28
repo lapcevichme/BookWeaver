@@ -1,8 +1,15 @@
 package com.lapcevichme.bookweaver.core.navigation
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Book
@@ -20,12 +27,17 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -37,6 +49,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.lapcevichme.bookweaver.core.service.MediaPlayerService
+import com.lapcevichme.bookweaver.core.service.PlayerState
+import com.lapcevichme.bookweaver.core.ui.components.MiniPlayerBar
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapper
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapperViewModel
 import com.lapcevichme.bookweaver.core.ui.theme.getLocalActivity
@@ -134,7 +149,7 @@ fun AppNavHost() {
 
     NavHost(
         navController = navController,
-        startDestination = "app_root" // Новый стартовый маршрут-диспетчер
+        startDestination = "app_root"
     ) {
         // Маршрут-диспетчер для определения, куда направить пользователя
         composable("app_root") {
@@ -155,14 +170,12 @@ fun AppNavHost() {
                     }
 
                     StartupState.GoToLibrary -> {
-                        // Передаем маршрут библиотеки как стартовый для MainScaffold
                         navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
                             popUpTo("app_root") { inclusive = true }
                         }
                     }
 
                     StartupState.GoToBookHub -> {
-                        // Передаем маршрут хаба как стартовый для MainScaffold
                         navController.navigate("main_scaffold/${Screen.Bottom.BookHub.route}") {
                             popUpTo("app_root") { inclusive = true }
                         }
@@ -174,7 +187,6 @@ fun AppNavHost() {
             }
         }
 
-        // --- Главный экран с нижней навигацией. Теперь он принимает стартовую вкладку ---
         composable(
             "main_scaffold/{start_route}",
             arguments = listOf(navArgument("start_route") { type = NavType.StringType })
@@ -188,11 +200,9 @@ fun AppNavHost() {
             )
         }
 
-        // --- Экраны, которые открываются поверх всего ---
         composable(Screen.OnboardingLibrary.route) {
             OnboardingLibraryScreen(
                 onBookInstalled = {
-                    // После установки первой книги переходим в библиотеку
                     navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
                         popUpTo(Screen.OnboardingLibrary.route) { inclusive = true }
                     }
@@ -260,7 +270,6 @@ fun AppNavHost() {
                 BookSettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onBookDeleted = {
-                        // После удаления книги возвращаемся в библиотеку
                         navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
                             popUpTo("app_root") { inclusive = true }
                         }
@@ -283,25 +292,49 @@ fun MainScaffold(
 ) {
     val bottomNavController = rememberNavController()
 
-    // ЛОГИКА ТЕМЫ
     val activity = getLocalActivity()
     val themeViewModel: BookThemeWrapperViewModel = hiltViewModel(activity)
     val bookSeedColor by themeViewModel.themeSeedColor.collectAsStateWithLifecycle()
 
-    // Следим за текущим маршрутом в нижнем баре
     val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
     val defaultSeedColor = Color(0xFF00668B)
-
     val routeToCheck = currentRoute ?: startBottomRoute
-
     val finalSeedColor = when (routeToCheck) {
-        Screen.Bottom.Library.route -> defaultSeedColor // Если Библиотека - синий
-        else -> bookSeedColor // Для всех остальных (Хаб, Плеер, Лор) - цвет книги
+        Screen.Bottom.Library.route -> defaultSeedColor
+        else -> bookSeedColor
     }
 
+    val context = LocalContext.current
     val playerViewModel: PlayerViewModel = hiltViewModel(activity)
+    val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
+
+    var mediaService by remember { mutableStateOf<MediaPlayerService?>(null) }
+    val playerState by mediaService?.playerStateFlow
+        ?.collectAsStateWithLifecycle(initialValue = PlayerState())
+        ?: remember { mutableStateOf(PlayerState()) }
+
+    val serviceConnection = remember {
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                val binder = service as MediaPlayerService.LocalBinder
+                mediaService = binder.getService()
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                mediaService = null
+            }
+        }
+    }
+
+    DisposableEffect(context) {
+        val serviceIntent = Intent(context, MediaPlayerService::class.java)
+        context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+        onDispose {
+            context.unbindService(serviceConnection)
+        }
+    }
 
     LaunchedEffect(Unit) {
         mainViewModel.navigationEvent.collect { event ->
@@ -326,28 +359,53 @@ fun MainScaffold(
     ) {
         Scaffold(
             bottomBar = {
-                NavigationBar {
+                Column {
                     val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
                     val currentDestination = navBackStackEntry?.destination
 
-                    bottomNavItems.forEach { screen ->
-                        NavigationBarItem(
-                            icon = { Icon(screen.icon, contentDescription = screen.label) },
-                            label = { Text(screen.label) },
-                            selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                            onClick = {
-                                bottomNavController.navigate(screen.route) {
+                    val isPlayerScreenActive =
+                        currentDestination?.route == Screen.Bottom.Player.route
+                    val isSomethingLoaded = playerState.loadedChapterId.isNotEmpty()
+                    val showMiniPlayer = isSomethingLoaded && !isPlayerScreenActive
+
+                    if (showMiniPlayer) {
+                        MiniPlayerBar(
+                            playerState = playerState,
+                            chapterTitle = playerUiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
+                            onPlayPauseClick = { mediaService?.togglePlayPause() },
+                            onBarClick = {
+                                bottomNavController.navigate(Screen.Bottom.Player.route) {
                                     popUpTo(bottomNavController.graph.findStartDestination().id) {
                                         saveState = true
                                     }
                                     launchSingleTop = true
-                                    // Восстанавливаем состояние для всех, КРОМЕ ПЛЕЕРА
-                                    if (screen.route != Screen.Bottom.Player.route) {
-                                        restoreState = true
-                                    }
                                 }
                             }
                         )
+                    }
+
+                    NavigationBar {
+                        val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
+                        val currentDestination = navBackStackEntry?.destination
+
+                        bottomNavItems.forEach { screen ->
+                            NavigationBarItem(
+                                icon = { Icon(screen.icon, contentDescription = screen.label) },
+                                label = { Text(screen.label) },
+                                selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                                onClick = {
+                                    bottomNavController.navigate(screen.route) {
+                                        popUpTo(bottomNavController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        if (screen.route != Screen.Bottom.Player.route) {
+                                            restoreState = true
+                                        }
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             },
@@ -363,10 +421,12 @@ fun MainScaffold(
                 }
             }
         ) { innerPadding ->
+
+            // NavHost всегда занимает 100% места.
             NavHost(
                 navController = bottomNavController,
                 startDestination = startBottomRoute,
-                modifier = Modifier
+                modifier = Modifier.fillMaxSize() // NavHost всегда во весь экран
             ) {
                 composable(Screen.Bottom.BookHub.route) {
                     val viewModel: BookHubViewModel = hiltViewModel()
@@ -374,6 +434,9 @@ fun MainScaffold(
 
                     BookHubScreen(
                         uiState = uiState,
+                        // Передаем нижний отступ, чтобы LazyColumn в BookHubScreen
+                        // мог добавить его в contentPadding.
+                        bottomContentPadding = innerPadding.calculateBottomPadding(),
                         onNavigateToCharacters = {
                             uiState.bookId?.let { bookId ->
                                 rootNavController.navigate(Screen.Characters.createRoute(bookId))
@@ -405,7 +468,6 @@ fun MainScaffold(
                             }
                         }
                     )
-
                 }
 
                 composable(Screen.Bottom.Library.route) {
@@ -421,8 +483,7 @@ fun MainScaffold(
                                             saveState = true
                                         }
                                         launchSingleTop = true
-                                        restoreState =
-                                            true // <-- Здесь ОК, это как переключение таба
+                                        restoreState = true
                                     }
                                 }
                             }
@@ -431,6 +492,7 @@ fun MainScaffold(
 
                     LibraryScreen(
                         uiState = uiState,
+                        bottomContentPadding = innerPadding.calculateBottomPadding(),
                         onEvent = viewModel::onEvent,
                         onNavigateToSettings = { rootNavController.navigate(Screen.AppSettings.route) }
                     )
@@ -438,14 +500,18 @@ fun MainScaffold(
 
                 composable(Screen.Bottom.Player.route) {
                     PlayerScreen(viewModel = playerViewModel)
-
                 }
 
-                composable(Screen.Bottom.LoreHelper.route) { LoreHelperScreenPlaceholder() }
+                composable(Screen.Bottom.LoreHelper.route) {
+                    Box(modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())) {
+                        LoreHelperScreenPlaceholder()
+                    }
+                }
             }
         }
     }
 }
+
 
 // Заглушки для недостающих экранов
 

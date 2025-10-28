@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun BookHubScreen(
     uiState: BookDetailsUiState,
+    bottomContentPadding: Dp,
     onNavigateToCharacters: () -> Unit,
     onNavigateToSettings: (bookId: String) -> Unit,
     onChapterViewDetailsClick: (chapterId: String) -> Unit,
@@ -39,7 +41,10 @@ fun BookHubScreen(
                         Icon(Icons.Default.AccountCircle, contentDescription = "Персонажи")
                     }
                     // Кнопка для перехода в настройки книги
-                    IconButton(onClick = { uiState.bookId?.let { onNavigateToSettings(it) } }, enabled = uiState.bookId != null) {
+                    IconButton(
+                        onClick = { uiState.bookId?.let { onNavigateToSettings(it) } },
+                        enabled = uiState.bookId != null
+                    ) {
                         Icon(Icons.Default.Settings, contentDescription = "Настройки книги")
                     }
                 }
@@ -48,26 +53,39 @@ fun BookHubScreen(
     ) { padding ->
         when {
             uiState.isLoading && uiState.bookDetails == null -> { // Показываем индикатор только при первой загрузке
-                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Box(Modifier
+                    .fillMaxSize()
+                    .padding(padding), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             }
+
             uiState.error != null -> {
-                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Box(Modifier
+                    .fillMaxSize()
+                    .padding(padding), contentAlignment = Alignment.Center) {
                     Text("Ошибка: ${uiState.error}")
                 }
             }
+
             uiState.bookDetails != null -> {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = bottomContentPadding
+                    ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     uiState.bookDetails.volumes.forEach { volume ->
                         stickyHeader {
-                            Surface(modifier = Modifier.fillParentMaxWidth(), shadowElevation = 2.dp) {
+                            Surface(
+                                modifier = Modifier.fillParentMaxWidth(),
+                                shadowElevation = 2.dp
+                            ) {
                                 Text(
                                     text = volume.title,
                                     style = MaterialTheme.typography.titleLarge,
@@ -88,7 +106,9 @@ fun BookHubScreen(
             }
             // Случай, когда книга не выбрана (bookId == null), но ошибки нет
             else -> {
-                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Box(Modifier
+                    .fillMaxSize()
+                    .padding(padding), contentAlignment = Alignment.Center) {
                     Text("Активная книга не выбрана")
                 }
             }

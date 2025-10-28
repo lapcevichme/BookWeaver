@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import java.io.File
@@ -50,6 +51,7 @@ import java.io.File
 @Composable
 fun LibraryScreen(
     uiState: LibraryUiState,
+    bottomContentPadding: Dp,
     onEvent: (LibraryEvent) -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
@@ -83,6 +85,7 @@ fun LibraryScreen(
             } else {
                 LibraryContent(
                     books = uiState.books,
+                    bottomContentPadding = bottomContentPadding,
                     onBookClick = { bookId ->
                         onEvent(LibraryEvent.BookSelected(bookId))
                     }
@@ -95,6 +98,7 @@ fun LibraryScreen(
 @Composable
 private fun LibraryContent(
     books: List<UiBook>,
+    bottomContentPadding: Dp,
     onBookClick: (bookId: String) -> Unit
 ) {
     if (books.isEmpty()) {
@@ -113,7 +117,12 @@ private fun LibraryContent(
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 16.dp + bottomContentPadding
+            ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(books, key = { it.id }) { book ->
@@ -169,4 +178,3 @@ private fun BookItem(
         }
     }
 }
-
