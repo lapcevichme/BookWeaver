@@ -372,6 +372,7 @@ fun MainScaffold(
                         MiniPlayerBar(
                             playerState = playerState,
                             chapterTitle = playerUiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
+                            bookTitle = playerUiState.chapterInfo?.bookTitle ?: "",
                             onPlayPauseClick = { mediaService?.togglePlayPause() },
                             onBarClick = {
                                 bottomNavController.navigate(Screen.Bottom.Player.route) {

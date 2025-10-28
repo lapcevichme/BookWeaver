@@ -37,6 +37,7 @@ import com.lapcevichme.bookweaver.core.service.PlayerState
 fun MiniPlayerBar(
     playerState: PlayerState,
     chapterTitle: String,
+    bookTitle: String,
     onPlayPauseClick: () -> Unit,
     onBarClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -53,7 +54,7 @@ fun MiniPlayerBar(
             .height(64.dp)
             .clickable(onClick = onBarClick),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 2.dp
+        tonalElevation = 2.dp,
     ) {
         Column {
             LinearProgressIndicator(
@@ -68,7 +69,8 @@ fun MiniPlayerBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 8.dp)
+                    .padding(top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -109,7 +111,7 @@ fun MiniPlayerBar(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = playerState.currentSubtitle.toString().ifEmpty { " " }, // Пустая строка, чтобы сохранить высоту
+                        text = bookTitle.ifEmpty { " " },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         maxLines = 1,
@@ -130,3 +132,4 @@ fun MiniPlayerBar(
         }
     }
 }
+
