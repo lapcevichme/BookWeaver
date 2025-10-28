@@ -157,7 +157,8 @@ class MediaPlayerService : Service() {
         media: ChapterMedia,
         chapterTitle: String,
         coverPath: String?,
-        playWhenReady: Boolean
+        playWhenReady: Boolean,
+        seekToPositionMs: Long? = null
     ) {
         val subtitlesPath = media.subtitlesPath
         val audioDirectoryPath = media.audioDirectoryPath
@@ -168,12 +169,7 @@ class MediaPlayerService : Service() {
             return
         }
 
-        if (subtitlesPath == currentSubtitlesPath) {
-            Log.d(TAG, "Media is already set. Skipping.")
-            return
-        }
-
-        Log.d(TAG, "setMedia called. Subtitles: $subtitlesPath, AudioDir: $audioDirectoryPath")
+        Log.d(TAG, "setMedia called. Subtitles: $subtitlesPath, Play: $playWhenReady, Seek: $seekToPositionMs")
         currentSubtitlesPath = subtitlesPath
 
         player.stop()
@@ -209,17 +205,23 @@ class MediaPlayerService : Service() {
             }
 
             player.setMediaItems(mediaItems)
-            player.prepare()
-            if (playWhenReady) {
-                play()
+
+            if (seekToPositionMs != null) {
+                Log.d(TAG, "setMedia: Перемотка (до prepare) на $seekToPositionMs")
+                seekTo(seekToPositionMs)
             }
+
+            player.playWhenReady = playWhenReady
+
+            player.prepare()
+
             setPlaybackSpeed(1.0f)
 
             var loadedBitmap: Bitmap? = null
             if (coverPath != null) {
                 try {
                     loadedBitmap = BitmapFactory.decodeFile(coverPath)
-                    placeholderBitmap = loadedBitmap // Сохраняем для уведомлений
+                    placeholderBitmap = loadedBitmap
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to load cover image", e)
                 }
@@ -230,8 +232,11 @@ class MediaPlayerService : Service() {
                 albumArt = loadedBitmap,
                 subtitlesEnabled = true,
                 duration = totalChapterDurationMs,
+                currentPosition = seekToPositionMs ?: 0L,
                 loadedChapterId = currentSubtitlesPath ?: ""
             )
+
+            updatePlayerState()
 
         } catch (e: Exception) {
             Log.e(TAG, "Error setting media source", e)
@@ -240,7 +245,6 @@ class MediaPlayerService : Service() {
                 error = "Ошибка установки медиа: ${e.message}",
                 loadedChapterId = ""
             )
-
         }
     }
 
@@ -263,62 +267,74 @@ class MediaPlayerService : Service() {
     fun seekTo(position: Long) {
         if (currentSubtitles.isEmpty()) return
 
-        val targetItemIndex = currentSubtitles.indexOfLast { position >= it.startMs }
+        val clampedPosition = position.coerceIn(0L, totalChapterDurationMs)
+
+        val targetItemIndex = currentSubtitles.indexOfLast { clampedPosition >= it.startMs }
             .coerceAtLeast(0)
+
         val targetItem = currentSubtitles.getOrNull(targetItemIndex) ?: currentSubtitles.first()
-        val relativePosition = (position - targetItem.startMs).coerceAtLeast(0L)
+
+        val relativePosition = (clampedPosition - targetItem.startMs).coerceAtLeast(0L)
+
+        Log.d(TAG, "seekTo: pos=$clampedPosition, targetIndex=$targetItemIndex, relativePos=$relativePosition")
+
+        basePositionOffsetMs = targetItem.startMs
+        currentMediaItemIndex = targetItemIndex
+
         player.seekTo(targetItemIndex, relativePosition)
-        updatePlayerState()
+
+        if (player.playbackState != Player.STATE_IDLE) {
+            updatePlayerState()
+        }
     }
 
     fun setPlaybackSpeed(speed: Float) {
         player.playbackParameters = PlaybackParameters(speed)
     }
 
-    // вкл/выкл субтитров
     fun toggleSubtitles(enabled: Boolean) {
         _playerStateFlow.value = _playerStateFlow.value.copy(subtitlesEnabled = enabled)
-        // Немедленно обновляем, чтобы скрыть/показать субтитры
         updatePlayerState()
     }
 
     private fun updatePlayerState() {
         if (player.playbackState == Player.STATE_IDLE || currentSubtitles.isEmpty()) return
 
+        val currentItemOffset = currentSubtitles.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
+        basePositionOffsetMs = currentItemOffset
+
         val absolutePosition = basePositionOffsetMs + player.currentPosition
 
-        // Логика "Караоке" субтитров
         val currentSubtitleText: CharSequence =
-            // Проверяем, включены ли субтитры
             if (_playerStateFlow.value.subtitlesEnabled) {
-                // Находим текущую реплику
                 val currentEntry = currentSubtitles.firstOrNull {
                     absolutePosition >= it.startMs && absolutePosition < it.endMs
+                } ?: currentSubtitles.lastOrNull {
+                    it == currentSubtitles.last() && absolutePosition >= it.startMs && absolutePosition <= it.endMs
                 }
 
+
                 if (currentEntry == null) {
-                    "" // Пустая строка, если сейчас тишина
+                    ""
                 } else if (currentEntry.words.isEmpty()) {
-                    currentEntry.text // Показываем весь текст, если нет таймингов слов
+                    currentEntry.text
                 } else {
-                    // Собираем SpannableString с подсветкой
                     buildKaraokeSubtitle(currentEntry, absolutePosition)
                 }
             } else {
-                "" // Пустая строка, если субтитры выключены
+                ""
             }
 
         _playerStateFlow.value = _playerStateFlow.value.copy(
             isPlaying = player.isPlaying,
             duration = totalChapterDurationMs,
-            currentPosition = absolutePosition,
+            currentPosition = absolutePosition.coerceAtMost(totalChapterDurationMs),
             playbackSpeed = player.playbackParameters.speed,
             currentSubtitle = currentSubtitleText,
             loadedChapterId = currentSubtitlesPath ?: ""
         )
     }
 
-    // Хелпер для создания "Караоке" строки
     private fun buildKaraokeSubtitle(entry: SubtitleEntry, absolutePosition: Long): CharSequence {
         try {
             val spannable = SpannableString(entry.text)
@@ -328,10 +344,8 @@ class MediaPlayerService : Service() {
                 val startChar = charIndex
                 val endChar = (startChar + word.word.length).coerceAtMost(spannable.length)
 
-                // Проверяем, что endChar не выходит за пределы (на случай ошибок в JSON)
                 if (startChar >= endChar) continue
 
-                // Если текущее слово активно, подсвечиваем его
                 if (absolutePosition >= word.start && absolutePosition <= word.end) {
                     spannable.setSpan(
                         StyleSpan(Typeface.BOLD),
@@ -339,13 +353,6 @@ class MediaPlayerService : Service() {
                         endChar,
                         SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE
                     )
-                    // Todo: подумать про цвет
-                    // spannable.setSpan(
-                    //    ForegroundColorSpan(Color.YELLOW),
-                    //    startChar,
-                    //    endChar,
-                    //    SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE
-                    // )
                 }
 
                 charIndex = endChar

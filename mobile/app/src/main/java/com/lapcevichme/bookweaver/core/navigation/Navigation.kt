@@ -1,6 +1,5 @@
 package com.lapcevichme.bookweaver.core.navigation
 
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -314,7 +312,6 @@ fun MainScaffold(
                             saveState = true
                         }
                         launchSingleTop = true
-                        restoreState = true
                     }
                 }
             }
@@ -344,7 +341,10 @@ fun MainScaffold(
                                         saveState = true
                                     }
                                     launchSingleTop = true
-                                    restoreState = true
+                                    // Восстанавливаем состояние для всех, КРОМЕ ПЛЕЕРА
+                                    if (screen.route != Screen.Bottom.Player.route) {
+                                        restoreState = true
+                                    }
                                 }
                             }
                         )
@@ -382,7 +382,6 @@ fun MainScaffold(
                         onNavigateToSettings = { bookId ->
                             rootNavController.navigate(Screen.BookSettings.createRoute(bookId))
                         },
-                        // Этот коллбэк открывает ДЕТАЛИ главы
                         onChapterViewDetailsClick = { chapterId ->
                             uiState.bookId?.let { bookId ->
                                 rootNavController.navigate(
@@ -393,11 +392,7 @@ fun MainScaffold(
                                 )
                             }
                         },
-                        // Этот коллбэк ЗАПУСКАЕТ главу и переходит в плеер
                         onChapterPlayClick = { chapterId ->
-                            viewModel.onPlayChapter(chapterId)
-                            // Явно даем команду "Играть" общему PlayerViewModel
-
                             uiState.bookId?.let { bookId ->
                                 playerViewModel.playChapter(bookId, chapterId)
                             }
@@ -407,7 +402,6 @@ fun MainScaffold(
                                     saveState = true
                                 }
                                 launchSingleTop = true
-                                restoreState = true
                             }
                         }
                     )
@@ -427,7 +421,8 @@ fun MainScaffold(
                                             saveState = true
                                         }
                                         launchSingleTop = true
-                                        restoreState = true
+                                        restoreState =
+                                            true // <-- Здесь ОК, это как переключение таба
                                     }
                                 }
                             }
@@ -469,3 +464,4 @@ fun LoreHelperScreenPlaceholder() {
         Text("Помощник по лору", style = MaterialTheme.typography.headlineMedium)
     }
 }
+

@@ -40,7 +40,13 @@ class ChapterDetailsViewModel @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true }
 
     init {
-        _uiState.update { it.copy(chapterTitle = formatChapterIdToTitle(chapterId)) }
+        _uiState.update {
+            it.copy(
+                chapterTitle = formatChapterIdToTitle(chapterId),
+                bookId = this.bookId,
+                chapterId = this.chapterId
+            )
+        }
         loadDetails()
     }
 
@@ -107,15 +113,12 @@ class ChapterDetailsViewModel @Inject constructor(
             ?: throw Exception("Файл сценария (subtitles.json) не найден.")
 
         val subtitlesJson = File(subtitlesPath).readText()
-        // Загружаем timingsList
         val timingsList = json.decodeFromString<List<SubtitleEntry>>(subtitlesJson)
         Log.d(TAG, "mergeScenarios: timingsList loaded. Size: ${timingsList.size}")
 
-        // Загружаем domainScenario
         val domainScenario: List<ScenarioEntry> = detailsModel.scenario
         Log.d(TAG, "mergeScenarios: domainScenario loaded. Size: ${domainScenario.size}")
 
-        // Создаем speakerMap, используя UUID.toString() как ключ
         val speakerMap = domainScenario.associateBy(
             keySelector = { it.id.toString() },
             valueTransform = { it.speaker }
@@ -125,10 +128,7 @@ class ChapterDetailsViewModel @Inject constructor(
             Log.d(TAG, "mergeScenarios: speakerMap keys: ${speakerMap.keys.take(5).joinToString()}")
         }
 
-
-        // Итерируем timingsList и "обогащаем" его
         return timingsList.map { timingEntry ->
-            // "b93d026a-79a9-45d6-979f-19488b02b2e8.wav" -> "b93d026a-79a9-45d6-979f-19488b02b2e8"
             val key = timingEntry.audioFile.removeSuffix(".wav")
             val speaker = speakerMap[key] ?: "Рассказчик"
 
@@ -174,3 +174,4 @@ private fun ChapterDetails.toUiModel(
         subtitlesPath = subtitlesPath
     )
 }
+

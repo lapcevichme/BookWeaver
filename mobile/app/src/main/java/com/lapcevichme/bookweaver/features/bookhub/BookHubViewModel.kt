@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetBookDetailsUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
-import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,8 +24,7 @@ import javax.inject.Inject
 class BookHubViewModel @Inject constructor(
     private val getBookDetailsUseCase: GetBookDetailsUseCase,
     private val getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
-    private val getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase,
-    private val setActiveChapterUseCase: SetActiveChapterUseCase
+    private val getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BookDetailsUiState())
@@ -110,14 +108,5 @@ class BookHubViewModel @Inject constructor(
                 }
         }
     }
-
-    /**
-     * Вызывается, когда пользователь нажимает "Play" на главе.
-     * Устанавливает эту главу как активную.
-     */
-    fun onPlayChapter(chapterId: String) {
-        viewModelScope.launch {
-            setActiveChapterUseCase(chapterId)
-        }
-    }
 }
+

@@ -56,7 +56,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,7 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.service.PlayerState
 import com.lapcevichme.bookweaver.features.main.MainViewModel
-import kotlinx.coroutines.flow.map
+import com.lapcevichme.bookweaver.features.player.PlayerViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -94,6 +93,7 @@ fun ChapterDetailsScreen(
             ?: throw IllegalStateException("Context is not a ComponentActivity")
     }
     val mainViewModel: MainViewModel = hiltViewModel(activity)
+    val playerViewModel: PlayerViewModel = hiltViewModel(activity)
 
 
     // Логика привязки к MediaPlayerService
@@ -119,6 +119,45 @@ fun ChapterDetailsScreen(
         }
     }
 
+    val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(playerUiState.chapterInfo, playerUiState.loadCommand, mediaService) {
+        val chapterInfo = playerUiState.chapterInfo
+        val service = mediaService
+        val command = playerUiState.loadCommand
+
+        // Если этот экран активен, он ПЕРЕХВАТИТ команду
+        if (chapterInfo != null && service != null && command != null) {
+
+            val isCorrectChapterLoaded = playerState.loadedChapterId.isNotEmpty() &&
+                    playerState.loadedChapterId == chapterInfo.media.subtitlesPath
+
+            if (isCorrectChapterLoaded) {
+                // Глава уже загружена
+                Log.d("ChapterDetailsScreen", "LaunchedEffect: Глава уже загружена. Выполняем команду.")
+                if (command.seekToPositionMs != null) {
+                    service.seekTo(command.seekToPositionMs)
+                }
+                if (command.playWhenReady) {
+                    service.play()
+                }
+            } else {
+                // Новая глава
+                Log.d("ChapterDetailsScreen", "LaunchedEffect: Новая глава. Вызываем setMedia.")
+                service.setMedia(
+                    chapterInfo.media,
+                    chapterInfo.chapterTitle,
+                    chapterInfo.coverPath,
+                    playWhenReady = command.playWhenReady,
+                    seekToPositionMs = command.seekToPositionMs
+                )
+            }
+
+            playerViewModel.onMediaSet()
+        }
+    }
+
+
     DisposableEffect(Unit) {
         val serviceIntent = Intent(context, MediaPlayerService::class.java)
         context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
@@ -129,16 +168,12 @@ fun ChapterDetailsScreen(
         }
     }
 
-    // 1. Состояние для скопированного текста
     var copiedText by remember { mutableStateOf<String?>(null) }
-    // 2. Получаем системный ClipboardManager
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    // 3. Слушатель буфера обмена
     DisposableEffect(clipboardManager) {
         val listener = ClipboardManager.OnPrimaryClipChangedListener {
             try {
-                // Проверяем, что в буфере есть ТЕКСТ
                 if (clipboardManager.hasPrimaryClip() &&
                     clipboardManager.primaryClipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true
                 ) {
@@ -150,13 +185,10 @@ fun ChapterDetailsScreen(
                     }
                 }
             } catch (e: Exception) {
-                // Обработка ошибки чтения буфера (может быть занят)
                 Log.e("ChapterDetailsScreen", "Error reading clipboard", e)
             }
         }
-
         clipboardManager.addPrimaryClipChangedListener(listener)
-
         onDispose {
             clipboardManager.removePrimaryClipChangedListener(listener)
         }
@@ -175,10 +207,8 @@ fun ChapterDetailsScreen(
             )
         }
     ) { padding ->
-        // Оборачиваем все в Box, чтобы показать карточку поверх контента
         Box(modifier = Modifier.fillMaxSize()) {
 
-            // Это старый UI, он лежит "снизу"
             Column(modifier = Modifier.padding(padding)) {
                 PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
                     tabTitles.forEachIndexed { index, title ->
@@ -219,18 +249,36 @@ fun ChapterDetailsScreen(
                                         !state.details?.subtitlesPath.isNullOrEmpty() &&
                                                 state.details.subtitlesPath == playerState.loadedChapterId
 
-                                    // Передаем позицию, только если ID совпадают
                                     val positionForThisChapter = if (isThisChapterPlaying) {
                                         playerState.currentPosition
                                     } else {
-                                        -1L // Если играет другая глава, считаем, что позиция 0
+                                        -1L
                                     }
 
                                     ScenarioContent(
                                         scenario = state.details?.scenario ?: emptyList(),
                                         currentPosition = positionForThisChapter,
                                         onEntryClick = { entry ->
-                                            mediaService?.seekTo(entry.startMs)
+                                            if (isThisChapterPlaying) {
+                                                // Та же глава, просто мотаем
+                                                Log.d("ChapterDetailsScreen", "onEntryClick: Та же глава. Перемотка на ${entry.startMs}")
+                                                mediaService?.seekTo(entry.startMs)
+
+                                                // Если была пауза, а мы кликнули - начинаем играть
+                                                if (!playerState.isPlaying) {
+                                                    mediaService?.play()
+                                                }
+
+                                            } else {
+                                                // Другая глава, даем команду PlayerViewModel
+                                                Log.d("ChapterDetailsScreen", "onEntryClick: Другая глава. Вызов playChapter(${state.bookId}, ${state.chapterId}, ${entry.startMs})")
+                                                playerViewModel.playChapter(
+                                                    bookId = state.bookId,
+                                                    chapterId = state.chapterId,
+                                                    seekToPositionMs = entry.startMs
+                                                )
+                                            }
+                                            // В любом случае переходим на таб плеера
                                             mainViewModel.navigateToPlayerTab()
                                         }
                                     )
@@ -243,7 +291,6 @@ fun ChapterDetailsScreen(
                 }
             }
 
-            // Оно лежит "сверху" в Box и выровнено по низу
             CopiedTextActionsCard(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 copiedText = copiedText ?: "",
@@ -299,7 +346,6 @@ private fun CopiedTextActionsCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                // Ряд с нашими кнопками
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
@@ -349,14 +395,9 @@ private fun ScenarioContent(
 ) {
     val lazyListState = rememberLazyListState()
 
-    // ВАЖНО: Это определение currentPlayingEntryId тоже должно
-    // использовать НЕ-включающую логику, чтобы LaunchedEffect
-    // не срабатывал "на границе" для двух реплик.
     val currentPlayingEntryId by remember(currentPosition) {
         derivedStateOf {
             scenario.firstOrNull { entry ->
-                // Находим реплику, которая либо последняя (<= endMs),
-                // либо не последняя (< endMs)
                 val isLastEntry = scenario.lastOrNull()?.id == entry.id
                 if (isLastEntry) {
                     currentPosition >= entry.startMs && currentPosition <= entry.endMs
@@ -371,25 +412,16 @@ private fun ScenarioContent(
         if (currentPlayingEntryId != null) {
             val targetIndex = scenario.indexOfFirst { it.id == currentPlayingEntryId }
             if (targetIndex != -1) {
-
-                // 1. Получаем список видимых элементов
                 val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
-
-                // 2. Проверяем, виден ли наш целевой элемент
                 val isTargetVisible = visibleItems.any { it.index == targetIndex }
-
-                // 3. Если элемент виден, плавно скроллим к нему, чтобы он был в фокусе.
-                //    Если нет - ничего не делаем, чтобы не мешать пользователю.
                 if (isTargetVisible) {
                     Log.d("ScenarioContent", "Item $targetIndex is visible. Scrolling to focus.")
-                    // Плавно скроллим, чтобы элемент был примерно вверху экрана
                     lazyListState.animateScrollToItem(targetIndex, scrollOffset = -100)
                 } else {
                     Log.d(
                         "ScenarioContent",
                         "Item $targetIndex is NOT visible. User is reading. No scroll."
                     )
-                    // Пользователь смотрит на другую часть списка, не мешаем ему.
                 }
             }
         }
@@ -403,16 +435,10 @@ private fun ScenarioContent(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(scenario, key = { _, entry -> entry.id }) { index, entry ->
-
-                // Проверяем, последняя ли это реплика в списке
                 val isLastEntry = index == scenario.lastIndex
-
                 val isPlaying = if (isLastEntry) {
-                    // Для ПОСЛЕДНЕЙ реплики, endMs ДОЛЖЕН быть включен
                     currentPosition >= entry.startMs && currentPosition <= entry.endMs
                 } else {
-                    // Для всех ОСТАЛЬНЫХ, endMs НЕ включается ( [start, end) )
-                    // Это решает проблему "двойной" подсветки
                     currentPosition >= entry.startMs && currentPosition < entry.endMs
                 }
 
@@ -434,12 +460,10 @@ private fun ScenarioContent(
                     }
 
                     if (entry.words.isEmpty()) {
-                        // Fallback, если 'words' нет
                         withStyle(style = SpanStyle(color = if (isPlaying) playingTextColor else defaultTextColor)) {
                             append(entry.text)
                         }
                     } else {
-                        // Логика "Караоке"
                         entry.words.forEach { word ->
                             val isCurrentWord = isPlaying &&
                                     currentPosition >= word.start && currentPosition <= word.end

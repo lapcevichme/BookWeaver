@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
+import android.util.Log
 import android.widget.TextView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -119,43 +120,49 @@ fun PlayerScreen(
     val playerState by mediaService?.playerStateFlow?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(PlayerState()) }
 
-    LaunchedEffect(uiState.chapterInfo, mediaService) {
-        val chapterInfo = uiState.chapterInfo
+    val playerUiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Этот LaunchedEffect теперь слушает playerUiState
+    LaunchedEffect(playerUiState.chapterInfo, playerUiState.loadCommand, mediaService) {
+        val chapterInfo = playerUiState.chapterInfo
         val service = mediaService
+        val command = playerUiState.loadCommand
 
-        if (chapterInfo != null && service != null) {
-            val playNow = uiState.playWhenLoaded
-            service.setMedia(
-                chapterInfo.media,
-                chapterInfo.chapterTitle,
-                chapterInfo.coverPath,
-                playWhenReady = playNow
-            )
-        }
-    }
+        // Если у нас есть вся информация (глава, команда, сервис)
+        if (chapterInfo != null && service != null && command != null) {
 
-    // Обработка команды "Play"
-    // Срабатывает ТОЛЬКО когда playWhenLoaded становится true
-    LaunchedEffect(uiState.playWhenLoaded, mediaService) {
-        val service = mediaService
-
-        // Если ViewModel дал команду "Играть" и Service готов
-        if (uiState.playWhenLoaded && service != null) {
-            // Проверяем, что в плеере уже загружена нужная глава
             val isCorrectChapterLoaded = playerState.loadedChapterId.isNotEmpty() &&
-                    playerState.loadedChapterId == uiState.chapterInfo?.media?.subtitlesPath
+                    playerState.loadedChapterId == chapterInfo.media.subtitlesPath
 
             if (isCorrectChapterLoaded) {
-                service.play()
+                // Глава уже загружена (это был клик из той же главы)
+                Log.d("PlayerScreen", "LaunchedEffect: Глава уже загружена. Выполняем команду.")
+                if (command.seekToPositionMs != null) {
+                    service.seekTo(command.seekToPositionMs)
+                }
+                // Всегда вызываем play(), если команда это предписывает
+                if (command.playWhenReady) {
+                    service.play()
+                }
+            } else {
+                // Новая глава (клик из другой главы или первая загрузка)
+                Log.d("PlayerScreen", "LaunchedEffect: Новая глава. Вызываем setMedia.")
+                service.setMedia(
+                    chapterInfo.media,
+                    chapterInfo.chapterTitle,
+                    chapterInfo.coverPath,
+                    playWhenReady = command.playWhenReady,
+                    seekToPositionMs = command.seekToPositionMs
+                )
             }
             viewModel.onMediaSet()
         }
     }
 
-    val effectiveError = uiState.error ?: playerState.error
+    val effectiveError = playerUiState.error ?: playerState.error
 
     when {
-        uiState.isLoading -> {
+        playerUiState.isLoading -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
@@ -174,7 +181,7 @@ fun PlayerScreen(
         else -> {
             AudioPlayerScreenUI(
                 playerState = playerState,
-                chapterTitle = uiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
+                chapterTitle = playerUiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
                 mediaPlayerService = mediaService
             )
         }
