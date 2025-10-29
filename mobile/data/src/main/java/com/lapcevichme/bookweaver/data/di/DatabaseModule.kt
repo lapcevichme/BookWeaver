@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.lapcevichme.bookweaver.data.database.BookDao
 import com.lapcevichme.bookweaver.data.database.BookDatabase
+import com.lapcevichme.bookweaver.data.database.MIGRATION_1_2
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -26,7 +27,7 @@ object DatabaseModule {
             BookDatabase::class.java,
             "bookweaver_db"
         )
-            // .addMigrations(...) // Сюда добавляются миграции при изменении версии
+            .addMigrations(MIGRATION_1_2)
             .build()
     }
 

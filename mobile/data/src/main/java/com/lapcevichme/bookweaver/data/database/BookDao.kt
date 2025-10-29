@@ -29,4 +29,16 @@ interface BookDao {
      */
     @Query("DELETE FROM books WHERE id = :bookId")
     suspend fun deleteBook(bookId: String)
+
+    /**
+     * Возвращает Flow только с цветом темы для конкретной книги.
+     */
+    @Query("SELECT themeColor FROM books WHERE id = :bookId")
+    fun getBookThemeColor(bookId: String): Flow<Int?>
+
+    /**
+     * Обновляет цвет темы для конкретной книги.
+     */
+    @Query("UPDATE books SET themeColor = :color WHERE id = :bookId")
+    suspend fun updateThemeColor(bookId: String, color: Int)
 }

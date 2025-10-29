@@ -55,7 +55,6 @@ class BookRepositoryImpl @Inject constructor(
     private object PreferencesKeys {
         val ACTIVE_BOOK_ID = stringPreferencesKey("active_book_id")
         val ACTIVE_CHAPTER_ID = stringPreferencesKey("active_chapter_id")
-        val BOOK_THEME_COLORS_JSON = stringPreferencesKey("book_theme_colors")
     }
 
     // Создаем экземпляр парсера JSON.
@@ -408,44 +407,29 @@ class BookRepositoryImpl @Inject constructor(
     private val fallbackColor = Color(0xFF00668B)
 
     /**
-     * Получает Flow с цветом для конкретной книги из кэша.
+     * Получает Flow с цветом для конкретной книги из БАЗЫ ДАННЫХ.
      */
     override fun getBookThemeColorFlow(bookId: String): Flow<Int?> {
-        return context.dataStore.data
-            .map { preferences ->
-                val jsonString = preferences[PreferencesKeys.BOOK_THEME_COLORS_JSON] ?: "{}"
-
-                val colorMap = try {
-                    json.decodeFromString<Map<String, Int>>(jsonString)
-                } catch (e: Exception) {
-                    emptyMap<String, Int>()
-                }
-
-                colorMap[bookId]
-            }
+        // Просто возвращаем Flow напрямую из DAO.
+        // Room сам позаботится об обновлениях.
+        return bookDao.getBookThemeColor(bookId)
     }
 
     /**
-     * Генерирует и кэширует цвет для книги.
+     * Генерирует и кэширует цвет для книги в БАЗУ ДАННЫХ.
      */
     override suspend fun generateAndCacheThemeColor(bookId: String, coverPath: String?) {
         withContext(Dispatchers.IO) {
             try {
                 // Проверяем, есть ли цвет в кэше
-                val currentJson =
-                    context.dataStore.data.first()[PreferencesKeys.BOOK_THEME_COLORS_JSON] ?: "{}"
-                val currentMap = try {
-                    json.decodeFromString<Map<String, Int>>(currentJson)
-                } catch (e: Exception) {
-                    emptyMap()
-                }
+                val currentColor = bookDao.getBookThemeColor(bookId).first()
 
-                if (currentMap.containsKey(bookId)) {
+                if (currentColor != null) {
                     // Цвет уже сгенерирован, ничего не делаем
                     return@withContext
                 }
 
-                // Цвета нет. Генерируем "грязным" способом
+                // Цвета нет. Генерируем
                 if (coverPath == null) return@withContext
                 val coverFile = File(coverPath)
                 if (!coverFile.exists()) return@withContext
@@ -457,18 +441,13 @@ class BookRepositoryImpl @Inject constructor(
                 val seedColor = bitmap.themeColor(fallback = fallbackColor)
                 val newColorInt = seedColor.toArgb()
 
-                // Сохраняем в кэш
-                val newMap = currentMap.toMutableMap()
-                newMap[bookId] = newColorInt
-
-                // Записываем обновленную карту обратно в DataStore
-                context.dataStore.edit { settings ->
-                    settings[PreferencesKeys.BOOK_THEME_COLORS_JSON] = json.encodeToString(newMap)
-                }
+                // Сохраняем в кэш (БД)
+                bookDao.updateThemeColor(bookId, newColorInt)
 
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
     }
+
 }

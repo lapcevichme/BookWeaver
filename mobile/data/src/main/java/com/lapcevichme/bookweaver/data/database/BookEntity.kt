@@ -14,5 +14,6 @@ data class BookEntity(
     val title: String,
     val author: String?,
     val localPath: String, // Путь к папке книги: /data/.../files/books/bookId
-    val coverPath: String? // Путь к обложке: /data/.../files/books/bookId/cover.jpg
+    val coverPath: String?, // Путь к обложке: /data/.../files/books/bookId/cover.jpg
+    val themeColor: Int? = null // Сгенерированный цвет обложки
 )
