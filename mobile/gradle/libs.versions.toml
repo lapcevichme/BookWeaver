@@ -30,6 +30,7 @@ okhttp = "5.2.1"
 zxingAndroidEmbedded = "4.3.0"
 jetbrainsKotlinJvm = "2.2.20"
 uiGraphics = "1.9.4"
+roomKtx = "2.8.3"
 
 [libraries]
 androidx-compose-material-icons-core = { module = "androidx.compose.material:material-icons-core", version.ref = "materialIconsCore" }
@@ -68,6 +69,7 @@ hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hil
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxingAndroidEmbedded" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "uiGraphics" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "roomKtx" }
 
 
 [plugins]

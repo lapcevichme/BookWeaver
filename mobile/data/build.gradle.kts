@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.room.ktx)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -57,5 +58,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     implementation("com.materialkolor:material-kolor:4.0.0")
+
+    ksp("androidx.room:room-compiler:2.8.3") // <-- ВОТ ОНА! Это самая важная строка
 
 }

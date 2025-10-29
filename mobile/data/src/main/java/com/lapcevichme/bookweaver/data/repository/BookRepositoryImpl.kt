@@ -8,6 +8,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lapcevichme.bookweaver.data.dataStore
+import com.lapcevichme.bookweaver.data.database.BookDao
+import com.lapcevichme.bookweaver.data.database.toDomain
+import com.lapcevichme.bookweaver.data.database.toEntity
 import com.lapcevichme.bookweaver.data.network.dto.BookManifestDto
 import com.lapcevichme.bookweaver.data.network.dto.ChapterSummaryDto
 import com.lapcevichme.bookweaver.data.network.dto.CharacterDto
@@ -25,7 +28,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -46,7 +48,8 @@ import javax.inject.Singleton
 @Singleton
 class BookRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val bookDao: BookDao
 ) : BookRepository {
 
     private object PreferencesKeys {
@@ -66,35 +69,42 @@ class BookRepositoryImpl @Inject constructor(
             booksDir.mkdirs()
         }
     }
+    /*
+        override fun getLocalBooks(): Flow<List<Book>> = flow {
+            val books = withContext(Dispatchers.IO) {
+                booksDir.listFiles()?.filter { it.isDirectory }?.mapNotNull { bookDir ->
+                    val manifestFile = File(bookDir, "manifest.json")
+                    if (manifestFile.exists()) {
+                        try {
+                            val manifestDto =
+                                json.decodeFromString<BookManifestDto>(manifestFile.readText())
+                            val coverFile = File(bookDir, "cover.jpg")
 
-    override fun getLocalBooks(): Flow<List<Book>> = flow {
-        val books = withContext(Dispatchers.IO) {
-            booksDir.listFiles()?.filter { it.isDirectory }?.mapNotNull { bookDir ->
-                val manifestFile = File(bookDir, "manifest.json")
-                if (manifestFile.exists()) {
-                    try {
-                        val manifestDto =
-                            json.decodeFromString<BookManifestDto>(manifestFile.readText())
-                        val coverFile = File(bookDir, "cover.jpg")
-
-                        Book(
-                            id = bookDir.name,
-                            title = manifestDto.bookName,
-                            author = manifestDto.author,
-                            localPath = bookDir.absolutePath,
-                            coverPath = if (coverFile.exists()) coverFile.absolutePath else null
-                        )
-                    } catch (e: Exception) {
-                        e.printStackTrace()
+                            Book(
+                                id = bookDir.name,
+                                title = manifestDto.bookName,
+                                author = manifestDto.author,
+                                localPath = bookDir.absolutePath,
+                                coverPath = if (coverFile.exists()) coverFile.absolutePath else null
+                            )
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            null
+                        }
+                    } else {
                         null
                     }
-                } else {
-                    null
-                }
-            } ?: emptyList()
+                } ?: emptyList()
+            }
+            emit(books)
         }
-        emit(books)
-    }
+     */
+
+    override fun getLocalBooks(): Flow<List<Book>> = bookDao.getAllBooks()
+        .map { entities ->
+            // Маппим List<BookEntity> (из БД) в List<Book> (домен)
+            entities.map { it.toDomain() }
+        }
 
     override suspend fun getBookDetails(bookId: String): Result<BookDetails> =
         withContext(Dispatchers.IO) {
@@ -207,6 +217,7 @@ class BookRepositoryImpl @Inject constructor(
 
             try {
                 var bookId: String?
+                lateinit var manifest: BookManifestDto
 
                 // Первый проход: Ищем manifest.json и определяем ID книги (имя папки).
                 ZipFile(tempFile).use { zipFile ->
@@ -215,7 +226,7 @@ class BookRepositoryImpl @Inject constructor(
 
                     val manifestContent =
                         zipFile.getInputStream(manifestEntry).bufferedReader().readText()
-                    val manifest = json.decodeFromString<BookManifestDto>(manifestContent)
+                    manifest = json.decodeFromString<BookManifestDto>(manifestContent)
                     bookId = manifest.bookName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").lowercase()
                 }
 
@@ -243,6 +254,22 @@ class BookRepositoryImpl @Inject constructor(
                         }
                     }
                 }
+
+                // Нам нужен путь к обложке
+                val coverFile = File(bookDir, "cover.jpg")
+
+                // Создаем доменную модель Book, используя `manifest` из первого прохода
+                val domainBook = Book(
+                    id = bookId,
+                    title = manifest.bookName,
+                    author = manifest.author,
+                    localPath = bookDir.absolutePath,
+                    coverPath = if (coverFile.exists()) coverFile.absolutePath else null
+                )
+
+                // Сохраняем ее в базу данных
+                bookDao.insertBook(domainBook.toEntity())
+
 
                 return@withContext Result.success(bookDir)
             } catch (e: Exception) {
@@ -291,6 +318,8 @@ class BookRepositoryImpl @Inject constructor(
                     throw Exception("Failed to delete book directory.")
                 }
             }
+            bookDao.deleteBook(bookId)
+
             Result.success(Unit)
         } catch (e: Exception) {
             e.printStackTrace()
