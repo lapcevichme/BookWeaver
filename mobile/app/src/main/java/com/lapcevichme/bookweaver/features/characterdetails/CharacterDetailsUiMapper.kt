@@ -16,6 +16,7 @@ data class UiChapterMention(
 data class UiCharacterDetails(
     val name: String,
     val description: String, // Полное описание со спойлерами
+    val spoilerFreeDescription: String, // Описание БЕЗ спойлеров
     val aliases: List<String>,
     val chapterMentions: List<UiChapterMention>
 )
@@ -26,13 +27,14 @@ data class UiCharacterDetails(
 fun BookCharacter.toUiCharacterDetails(): UiCharacterDetails {
     val mentions = this.chapterMentions.map { (chapterId, summary) ->
         UiChapterMention(
-            chapterTitle = formatChapterIdToTitle(chapterId),
+            chapterTitle = formatChapterIdToTitle(chapterId), // "Том X, Глава Y"
             summary = summary
         )
     }
     return UiCharacterDetails(
         name = this.name,
         description = this.description,
+        spoilerFreeDescription = this.spoilerFreeDescription,
         aliases = this.aliases,
         chapterMentions = mentions
     )
