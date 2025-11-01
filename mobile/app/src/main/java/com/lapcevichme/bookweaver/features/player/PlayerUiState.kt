@@ -7,10 +7,14 @@ data class LoadCommand(
     val seekToPositionMs: Long? = null
 )
 
+
 data class PlayerUiState(
     val isLoading: Boolean = false,
+    val bookId: String? = null,
+    val chapterId: String? = null,
     val chapterInfo: PlayerChapterInfo? = null,
     val error: String? = null,
     val loadCommand: LoadCommand? = null
 )
+
 

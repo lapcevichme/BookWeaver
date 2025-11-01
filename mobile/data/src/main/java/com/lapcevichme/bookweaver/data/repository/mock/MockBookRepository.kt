@@ -161,7 +161,8 @@ class MockBookRepository @Inject constructor() : BookRepository {
                 bookTitle = book?.title ?: "Моковая Книга",
                 chapterTitle = chapterTitle,
                 media = mockMedia,
-                coverPath = null
+                coverPath = null,
+                lastListenedPosition = TODO()
             )
         )
     }
@@ -185,6 +186,14 @@ class MockBookRepository @Inject constructor() : BookRepository {
     override suspend fun generateAndCacheThemeColor(
         bookId: String,
         coverPath: String?
+    ) {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun saveListenProgress(
+        bookId: String,
+        chapterId: String,
+        position: Long
     ) {
         TODO("Not yet implemented")
     }

@@ -41,4 +41,16 @@ interface BookDao {
      */
     @Query("UPDATE books SET themeColor = :color WHERE id = :bookId")
     suspend fun updateThemeColor(bookId: String, color: Int)
+
+    /**
+     * Обновляет прогресс прослушивания для конкретной книги.
+     */
+    @Query("UPDATE books SET lastListenedChapterId = :chapterId, lastListenedPosition = :position WHERE id = :bookId")
+    suspend fun updateListenProgress(bookId: String, chapterId: String, position: Long)
+
+    /**
+     * Возвращает одну книгу по ID.
+     */
+    @Query("SELECT * FROM books WHERE id = :bookId LIMIT 1")
+    suspend fun getBookById(bookId: String): BookEntity?
 }

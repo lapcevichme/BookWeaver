@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.util.Log
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -330,11 +332,89 @@ fun MainScaffold(
 
     DisposableEffect(context) {
         val serviceIntent = Intent(context, MediaPlayerService::class.java)
+        // 1. Запускаем сервис (чтобы он жил)
+        ContextCompat.startForegroundService(context, serviceIntent)
+        // 2. Привязываемся к нему (чтобы им управлять)
         context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+
         onDispose {
+            Log.d("MainScaffold", "onDispose: Unbinding from MediaPlayerService")
             context.unbindService(serviceConnection)
         }
     }
+
+    /**
+     * Этот LaunchedEffect отвечает за "пассивное восстановление" состояния
+     * при холодном старте приложения И за ОЧИСТКУ при смене книги.
+     */
+    LaunchedEffect(playerUiState, mediaService) {
+        val service = mediaService
+        val chapterInfo = playerUiState.chapterInfo
+        val command = playerUiState.loadCommand
+
+        val bookId = playerUiState.bookId
+        val chapterId = playerUiState.chapterId
+
+        // --- ДОБАВЛЯЕМ ЛОГИ ---
+        Log.d("MainScaffold_Sync", "Checking sync logic...")
+        Log.d("MainScaffold_Sync", "  service != null: ${service != null}")
+        Log.d("MainScaffold_Sync", "  chapterInfo == null: ${chapterInfo == null}")
+        Log.d("MainScaffold_Sync", "  command == null: ${command == null}")
+        Log.d("MainScaffold_Sync", "  bookId: $bookId, chapterId: $chapterId")
+        // ---
+
+        // Сценарий 1: Пассивное восстановление (ViewModel хочет играть главу)
+        if (service != null && chapterInfo != null && command == null && bookId != null && chapterId != null) {
+            Log.d("MainScaffold_Sync", "Entering SCENARIO 1: Passive Restore")
+
+            val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
+
+            val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
+                    currentServiceChapterId == chapterInfo.media.subtitlesPath
+
+            val isServiceEmpty = currentServiceChapterId.isEmpty()
+
+            if (!isCorrectChapterLoaded && isServiceEmpty) {
+                // Сервис пуст. Загружаем нужную главу пассивно (без авто-воспроизведения).
+                Log.d("MainScaffold", "Triggering passive restore from MainScaffold (Service was empty).")
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    media = chapterInfo.media,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = false, // Никогда не авто-воспроизводим
+                    seekToPositionMs = chapterInfo.lastListenedPosition // Восстанавливаем позицию
+                )
+            } else if (!isCorrectChapterLoaded && !isServiceEmpty) {
+                Log.d("MainScaffold", "Passive restore skipped: Service has a different chapter loaded. UI will sync.")
+            } else {
+                Log.d("MainScaffold", "Passive restore skipped: Correct chapter already loaded.")
+            }
+        }
+
+        // Сценарий 2: Смена книги (ViewModel НЕ хочет играть главу)
+        else if (service != null && chapterInfo == null && command == null) {
+            Log.d("MainScaffold_Sync", "Entering SCENARIO 2: Stop and Clear")
+            // UI "не хочет" главу (chapterInfo == null),
+            // например, при смене книги (bookId поменялся, chapterId/Info сбросились).
+
+            val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
+            val isServiceEmpty = currentServiceChapterId.isEmpty()
+            Log.d("MainScaffold_Sync", "  isServiceEmpty: $isServiceEmpty")
+
+            if (!isServiceEmpty) {
+                // В сервисе что-то есть, а UI говорит, что ничего не должно быть.
+                // Это значит, что мы сменили книгу.
+                Log.d("MainScaffold", "Sync: UI state has no chapter, but service is not empty. Stopping and clearing service.")
+                service.stopAndClear()
+            }
+            // Если сервис и так пуст, то все в порядке.
+        } else {
+            Log.d("MainScaffold_Sync", "SKIPPING BOTH scenarios.")
+        }
+    }
+
 
     LaunchedEffect(Unit) {
         mainViewModel.navigationEvent.collect { event ->
@@ -365,7 +445,12 @@ fun MainScaffold(
 
                     val isPlayerScreenActive =
                         currentDestination?.route == Screen.Bottom.Player.route
-                    val isSomethingLoaded = playerState.loadedChapterId.isNotEmpty()
+
+                    // MiniPlayerBar должен появляться, если ИЛИ в сервисе что-то загружено,
+                    // ИЛИ ViewModel знает, что что-то ДОЛЖНО быть загружено (после перезапуска).
+                    val isSomethingLoaded =
+                        playerState.loadedChapterId.isNotEmpty() || playerUiState.chapterId != null
+
                     val showMiniPlayer = isSomethingLoaded && !isPlayerScreenActive
 
                     if (showMiniPlayer) {
@@ -500,7 +585,11 @@ fun MainScaffold(
                 }
 
                 composable(Screen.Bottom.Player.route) {
-                    PlayerScreen(viewModel = playerViewModel)
+                    PlayerScreen(
+                        viewModel = playerViewModel,
+                        playerState = playerState,
+                        mediaService = mediaService
+                    )
                 }
 
                 composable(Screen.Bottom.LoreHelper.route) {

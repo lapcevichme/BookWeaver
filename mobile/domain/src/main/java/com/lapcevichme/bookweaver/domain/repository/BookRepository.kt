@@ -78,4 +78,5 @@ interface BookRepository {
 
     suspend fun generateAndCacheThemeColor(bookId: String, coverPath: String?)
 
+    suspend fun saveListenProgress(bookId: String, chapterId: String, position: Long)
 }

@@ -364,6 +364,16 @@ class BookRepositoryImpl @Inject constructor(
             val coverFile = File(booksDir, "$bookId/cover.jpg")
             val coverPath = coverFile.takeIf { it.exists() }?.absolutePath
 
+            val bookEntity = bookDao.getBookById(bookId)
+                ?: throw Exception("Книга $bookId не найдена в базе данных")
+
+            // Получаем позицию. Если глава не совпадает, начинаем с 0.
+            val lastPosition = if (bookEntity.lastListenedChapterId == chapterId) {
+                bookEntity.lastListenedPosition
+            } else {
+                0L
+            }
+
             // Создаем новую ChapterMedia, передавая пути к ПАПКЕ и JSON
             val media = ChapterMedia(
                 subtitlesPath = chapter.subtitlesPath,
@@ -375,7 +385,8 @@ class BookRepositoryImpl @Inject constructor(
                 bookTitle = bookDetails.manifest.bookName,
                 chapterTitle = chapter.title,
                 coverPath = coverPath,
-                media = media
+                media = media,
+                lastListenedPosition = lastPosition
             )
             Result.success(info)
 
@@ -450,4 +461,12 @@ class BookRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Сохраняет прогресс прослушивания для книги в БД.
+     */
+    override suspend fun saveListenProgress(bookId: String, chapterId: String, position: Long) {
+        withContext(Dispatchers.IO) {
+            bookDao.updateListenProgress(bookId, chapterId, position)
+        }
+    }
 }

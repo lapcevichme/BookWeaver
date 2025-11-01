@@ -1,10 +1,5 @@
 package com.lapcevichme.bookweaver.features.player
 
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
-import android.os.IBinder
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
 import android.widget.TextView
@@ -53,7 +48,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +67,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.service.PlayerState
@@ -82,82 +75,77 @@ import java.util.Locale
 
 @Composable
 fun PlayerScreen(
-    viewModel: PlayerViewModel
+    viewModel: PlayerViewModel,
+    playerState: PlayerState,
+    mediaService: MediaPlayerService?
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var mediaService by remember { mutableStateOf<MediaPlayerService?>(null) }
-    var isServiceBound by remember { mutableStateOf(false) }
-
-    val serviceConnection = remember {
-        object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                val binder = service as MediaPlayerService.LocalBinder
-                mediaService = binder.getService()
-                isServiceBound = true
-            }
-
-            override fun onServiceDisconnected(name: ComponentName?) {
-                mediaService = null
-                isServiceBound = false
-            }
-        }
-    }
-
-    DisposableEffect(Unit) {
-        val serviceIntent = Intent(context, MediaPlayerService::class.java)
-        ContextCompat.startForegroundService(context, serviceIntent)
-        context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
-
-        onDispose {
-            if (isServiceBound) {
-                context.unbindService(serviceConnection)
-            }
-        }
-    }
-
-    val playerState by mediaService?.playerStateFlow?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(PlayerState()) }
-
     val playerUiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Этот LaunchedEffect теперь слушает playerUiState
     LaunchedEffect(playerUiState.chapterInfo, playerUiState.loadCommand, mediaService) {
         val chapterInfo = playerUiState.chapterInfo
         val service = mediaService
         val command = playerUiState.loadCommand
 
-        // Если у нас есть вся информация (глава, команда, сервис)
-        if (chapterInfo != null && service != null && command != null) {
+        val bookId = playerUiState.bookId
+        val chapterId = playerUiState.chapterId
 
-            val isCorrectChapterLoaded = playerState.loadedChapterId.isNotEmpty() &&
-                    playerState.loadedChapterId == chapterInfo.media.subtitlesPath
+        // Мы должны иметь сервис, инфо о главе И ID
+        if (service == null || chapterInfo == null || bookId == null || chapterId == null) {
+            return@LaunchedEffect
+        }
+
+        val serviceChapterId = service.playerStateFlow.value.loadedChapterId
+        val isCorrectChapterLoaded = serviceChapterId.isNotEmpty() &&
+                serviceChapterId == chapterInfo.media.subtitlesPath
+
+        if (command != null) {
+            // --- СЦЕНАРИЙ 1: АКТИВНАЯ КОМАНДА ---
+            Log.d("PlayerScreen", "LaunchedEffect: Обработка LoadCommand.")
 
             if (isCorrectChapterLoaded) {
-                // Глава уже загружена (это был клик из той же главы)
-                Log.d("PlayerScreen", "LaunchedEffect: Глава уже загружена. Выполняем команду.")
+                // Глава уже загружена.
                 if (command.seekToPositionMs != null) {
                     service.seekTo(command.seekToPositionMs)
                 }
-                // Всегда вызываем play(), если команда это предписывает
                 if (command.playWhenReady) {
                     service.play()
                 }
             } else {
-                // Новая глава (клик из другой главы или первая загрузка)
-                Log.d("PlayerScreen", "LaunchedEffect: Новая глава. Вызываем setMedia.")
+                // Новая глава. Загружаем.
                 service.setMedia(
-                    chapterInfo.media,
-                    chapterInfo.chapterTitle,
-                    chapterInfo.coverPath,
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    media = chapterInfo.media,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
                     playWhenReady = command.playWhenReady,
-                    seekToPositionMs = command.seekToPositionMs
+                    seekToPositionMs = command.seekToPositionMs ?: chapterInfo.lastListenedPosition
                 )
             }
             viewModel.onMediaSet()
+
+        } else {
+            // --- СЦЕНАРИЙ 2: ПАССИВНОЕ ВОССТАНОВЛЕНИЕ ---
+            if (!isCorrectChapterLoaded) {
+                Log.d("PlayerScreen", "LaunchedEffect: Пассивное восстановление.")
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    media = chapterInfo.media,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = false,
+                    seekToPositionMs = chapterInfo.lastListenedPosition
+                )
+            } else {
+                Log.d("PlayerScreen", "LaunchedEffect: Состояние корректно.")
+            }
         }
     }
+
 
     val effectiveError = playerUiState.error ?: playerState.error
 
@@ -181,7 +169,9 @@ fun PlayerScreen(
         else -> {
             AudioPlayerScreenUI(
                 playerState = playerState,
-                chapterTitle = playerUiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
+                chapterTitle = playerState.fileName.takeIf { it.isNotEmpty() }
+                    ?: playerUiState.chapterInfo?.chapterTitle
+                    ?: "Аудиоплеер",
                 mediaPlayerService = mediaService
             )
         }

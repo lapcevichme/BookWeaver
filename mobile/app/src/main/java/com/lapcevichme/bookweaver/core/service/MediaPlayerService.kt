@@ -27,6 +27,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
+import com.lapcevichme.bookweaver.domain.usecase.player.SaveListenProgressUseCase
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,15 +41,27 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.io.File
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MediaPlayerService : Service() {
 
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    // --- 1. Внедряем UseCase для сохранения ---
+    @Inject
+    lateinit var saveListenProgressUseCase: SaveListenProgressUseCase
+    // ---
+
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSessionCompat
     private var placeholderBitmap: Bitmap? = null
+
+    // --- 2. Добавляем ID для сохранения ---
+    private var currentBookId: String? = null
+    private var currentChapterId: String? = null
+    // ---
 
     private var currentSubtitlesPath: String? = null
     private var currentSubtitles: List<SubtitleEntry> = emptyList()
@@ -59,6 +73,11 @@ class MediaPlayerService : Service() {
 
     private val _playerStateFlow = MutableStateFlow(PlayerState())
     val playerStateFlow = _playerStateFlow.asStateFlow()
+
+    private var saveProgressJob: Job? = null
+    private var lastSaveTimeMs: Long = 0
+    private val SAVE_THROTTLE_MS = 10_000L // 10 секунд
+    private val SAVE_DEBOUNCE_MS = 1_000L // 1 секунда
 
     companion object {
         private const val TAG = "AudioPlayerServiceLog"
@@ -107,7 +126,18 @@ class MediaPlayerService : Service() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updatePlayerState()
                 updateNotification()
-                if (isPlaying) startPositionUpdates() else stopPositionUpdates()
+                if (isPlaying) {
+                    startPositionUpdates()
+                } else {
+                    stopPositionUpdates()
+                    // Принудительное сохранение на ПАУЗУ
+                    Log.d(TAG, "Player is PAUSED. Forcing debounced save.")
+                    triggerSave(
+                        position = _playerStateFlow.value.currentPosition,
+                        isDebounce = true, // Сохраняем с задержкой (на случай, если это seek)
+                        isFinalSave = false
+                    )
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -147,13 +177,38 @@ class MediaPlayerService : Service() {
             ACTION_PAUSE -> pause()
             ACTION_PREVIOUS -> player.seekToPreviousMediaItem()
             ACTION_NEXT -> player.seekToNextMediaItem()
-            ACTION_STOP -> stopSelf()
+            ACTION_STOP -> {
+                // --- 4. Обновляем ACTION_STOP ---
+                // Принудительно сохраняем, прежде чем убить сервис
+                Log.d(TAG, "ACTION_STOP received. Forcing final save and stopping.")
+                triggerSave(
+                    position = _playerStateFlow.value.currentPosition,
+                    isDebounce = false,
+                    isFinalSave = true
+                )
+                stopSelf() // Останавливаем сервис
+            }
         }
         return START_NOT_STICKY
     }
 
+    // --- 5. Перехватываем "убийство" приложения свайпом ---
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "onTaskRemoved: App swiped away. Forcing final save.")
+        // Принудительное, немедленное сохранение
+        triggerSave(
+            position = _playerStateFlow.value.currentPosition,
+            isDebounce = false,
+            isFinalSave = true // Флаг немедленного сохранения
+        )
+    }
+
+
     @OptIn(UnstableApi::class)
     fun setMedia(
+        bookId: String,
+        chapterId: String,
         media: ChapterMedia,
         chapterTitle: String,
         coverPath: String?,
@@ -169,7 +224,23 @@ class MediaPlayerService : Service() {
             return
         }
 
-        Log.d(TAG, "setMedia called. Subtitles: $subtitlesPath, Play: $playWhenReady, Seek: $seekToPositionMs")
+        // --- 6. Сохраняем ID ---
+        Log.d(
+            TAG,
+            "setMedia called for $bookId / $chapterId. Play: $playWhenReady, Seek: $seekToPositionMs"
+        )
+        // Принудительно сохраняем прогресс СТАРОЙ главы, прежде чем загрузить новую
+        if (currentChapterId != null && _playerStateFlow.value.currentPosition > 0) {
+            Log.d(TAG, "setMedia: Saving progress for old chapter $currentChapterId")
+            triggerSave(
+                position = _playerStateFlow.value.currentPosition,
+                isDebounce = false,
+                isFinalSave = true
+            )
+        }
+
+        currentBookId = bookId
+        currentChapterId = chapterId
         currentSubtitlesPath = subtitlesPath
 
         player.stop()
@@ -237,9 +308,12 @@ class MediaPlayerService : Service() {
             )
 
             updatePlayerState()
+            updateNotification()
 
         } catch (e: Exception) {
             Log.e(TAG, "Error setting media source", e)
+            currentBookId = null
+            currentChapterId = null
             currentSubtitlesPath = null
             _playerStateFlow.value = _playerStateFlow.value.copy(
                 error = "Ошибка установки медиа: ${e.message}",
@@ -276,7 +350,10 @@ class MediaPlayerService : Service() {
 
         val relativePosition = (clampedPosition - targetItem.startMs).coerceAtLeast(0L)
 
-        Log.d(TAG, "seekTo: pos=$clampedPosition, targetIndex=$targetItemIndex, relativePos=$relativePosition")
+        Log.d(
+            TAG,
+            "seekTo: pos=$clampedPosition, targetIndex=$targetItemIndex, relativePos=$relativePosition"
+        )
 
         basePositionOffsetMs = targetItem.startMs
         currentMediaItemIndex = targetItemIndex
@@ -285,6 +362,12 @@ class MediaPlayerService : Service() {
 
         if (player.playbackState != Player.STATE_IDLE) {
             updatePlayerState()
+            // Сохраняем на seek
+            triggerSave(
+                position = clampedPosition,
+                isDebounce = true, // С задержкой
+                isFinalSave = false
+            )
         }
     }
 
@@ -297,10 +380,51 @@ class MediaPlayerService : Service() {
         updatePlayerState()
     }
 
+    /**
+     * Останавливает воспроизведение, очищает плейлист,
+     * принудительно сохраняет прогресс и сбрасывает состояние сервиса.
+     * Используется при смене книги.
+     */
+    fun stopAndClear() {
+        Log.d(TAG, "stopAndClear: Stopping player, clearing media, and resetting state.")
+
+        // 1. Финальное сохранение (использует старое состояние, поэтому делаем в первую очередь)
+        triggerSave(
+            position = _playerStateFlow.value.currentPosition,
+            isDebounce = false,
+            isFinalSave = true
+        )
+
+        // 2. НЕМЕДЛЕННО сбрасываем публичное состояние.
+        // Это гарантирует, что любые коллбэки (onIsPlayingChanged, onPlaybackStateChanged)
+        // увидят, что loadedChapterId пуст, и не вызовут startForeground() в updateNotification.
+        _playerStateFlow.value = PlayerState()
+
+        // 3. Остановка плеера
+        player.pause() // Теперь onIsPlayingChanged(false) -> updateNotification() -> if("") -> false
+        player.stop() // Теперь onPlaybackStateChanged -> updateNotification() -> if("") -> false
+        player.clearMediaItems() // Очищаем
+
+        // 4. Сброс внутреннего состояния
+        currentBookId = null
+        currentChapterId = null
+        currentSubtitlesPath = null
+        currentSubtitles = emptyList()
+        totalChapterDurationMs = 0L
+        basePositionOffsetMs = 0L
+        currentMediaItemIndex = 0
+
+        // 5. Убираем нотификацию и сервис из foreground
+        stopForeground(STOP_FOREGROUND_REMOVE) // true
+        Log.d(TAG, "stopAndClear: State has been cleared.")
+    }
+    // --- КОНЕЦ НОВОГО МЕТОДА ---
+
     private fun updatePlayerState() {
         if (player.playbackState == Player.STATE_IDLE || currentSubtitles.isEmpty()) return
 
-        val currentItemOffset = currentSubtitles.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
+        val currentItemOffset =
+            currentSubtitles.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
         basePositionOffsetMs = currentItemOffset
 
         val absolutePosition = basePositionOffsetMs + player.currentPosition
@@ -371,7 +495,13 @@ class MediaPlayerService : Service() {
         positionUpdateJob = serviceScope.launch {
             while (isActive) {
                 updatePlayerState()
-                delay(100)
+                // --- 7. Запускаем сохранение (throttle) ---
+                triggerSave(
+                    position = _playerStateFlow.value.currentPosition,
+                    isDebounce = false, // Это throttle
+                    isFinalSave = false
+                )
+                delay(100) // Обновление UI
             }
         }
     }
@@ -379,6 +509,74 @@ class MediaPlayerService : Service() {
     private fun stopPositionUpdates() {
         positionUpdateJob?.cancel()
     }
+
+    // --- 8. Новая функция сохранения ---
+    /**
+     * Запускает сохранение прогресса с логикой throttle/debounce
+     * @param position Текущая позиция
+     * @param isDebounce true - если это "отложенное" сохранение (на паузу, seek),
+     * false - если это "мгновенное" (throttle, раз в 10 сек)
+     * @param isFinalSave true - если это *немедленное* сохранение (выход, смена главы).
+     * Игнорирует все задержки.
+     */
+    private fun triggerSave(position: Long, isDebounce: Boolean, isFinalSave: Boolean) {
+        val bookId = currentBookId
+        val chapterId = currentChapterId
+        if (bookId == null || chapterId == null || position == 0L) {
+            return // Нечего сохранять
+        }
+
+        // Отменяем предыдущую *запланированную* (debounce) задачу
+        saveProgressJob?.cancel()
+
+        val currentTimeMs = System.currentTimeMillis()
+
+        // --- 1. Немедленное сохранение (высший приоритет) ---
+        if (isFinalSave) {
+            Log.d(TAG, "SaveProgress (Final): $position")
+            // Запускаем реальное сохранение
+            serviceScope.launch {
+                try {
+                    saveListenProgressUseCase(bookId, chapterId, position)
+                    lastSaveTimeMs = System.currentTimeMillis() // Обновляем время
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            return
+        }
+
+        // --- 2. Throttle (раз в 10 сек) ---
+        if (!isDebounce && currentTimeMs - lastSaveTimeMs > SAVE_THROTTLE_MS) {
+            Log.d(TAG, "SaveProgress (Throttled): $position")
+            lastSaveTimeMs = currentTimeMs // Обновляем время
+            // Запускаем реальное сохранение
+            saveProgressJob = serviceScope.launch {
+                try {
+                    saveListenProgressUseCase(bookId, chapterId, position)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+        // --- 3. Debounce (на паузу / seek) ---
+        else if (isDebounce) {
+            // 10 секунд не прошло. Просто планируем сохранение
+            // (оно выполнится, если 1 сек не будет новых вызовов)
+            saveProgressJob = serviceScope.launch {
+                delay(10000)
+                Log.d(TAG, "SaveProgress (Debounced): $position")
+                // Проверяем, что ID не изменились, пока мы ждали
+                if (currentBookId == bookId && currentChapterId == chapterId) {
+                    saveListenProgressUseCase(bookId, chapterId, position)
+                    // Также обновляем время, т.к. debounce-сохранение тоже считается
+                    lastSaveTimeMs = System.currentTimeMillis()
+                }
+            }
+        }
+        // else - (Throttle, но 10 сек не прошло) -> просто ничего не делаем.
+    }
+
 
     @OptIn(UnstableApi::class)
     private fun updateNotification() {
@@ -444,7 +642,11 @@ class MediaPlayerService : Service() {
             )
             .setOngoing(isPlaying)
             .build()
-        startForeground(NOTIFICATION_ID, notification)
+
+        // Не вызываем startForeground, если мы очистили сервис
+        if (_playerStateFlow.value.loadedChapterId.isNotEmpty()) {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun createPendingIntent(action: String): PendingIntent {
@@ -462,8 +664,16 @@ class MediaPlayerService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy: Service destroyed. Forcing final save.")
+        // --- 9. Финальное сохранение при уничтожении ---
+        triggerSave(
+            position = _playerStateFlow.value.currentPosition,
+            isDebounce = false,
+            isFinalSave = true
+        )
         serviceScope.cancel()
         player.release()
         mediaSession.release()
     }
 }
+

@@ -123,5 +123,6 @@ data class PlayerChapterInfo(
     val bookTitle: String,
     val chapterTitle: String,
     val coverPath: String?,
-    val media: ChapterMedia
+    val media: ChapterMedia,
+    val lastListenedPosition: Long
 )

@@ -6,9 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.SaveListenProgressUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -26,11 +29,17 @@ class PlayerViewModel @Inject constructor(
     getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
     getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase,
     private val getPlayerChapterInfoUseCase: GetPlayerChapterInfoUseCase,
-    private val setActiveChapterUseCase: SetActiveChapterUseCase
+    private val setActiveChapterUseCase: SetActiveChapterUseCase,
+    private val saveListenProgressUseCase: SaveListenProgressUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState = _uiState.asStateFlow()
+
+    private var saveProgressJob: Job? = null // Для дебаунса
+    private var lastSaveTimeMs: Long = 0 // Время последнего *реального* сохранения
+    private val SAVE_THROTTLE_MS = 10_000L // 10 секунд (по желанию пользователя)
+    private val SAVE_DEBOUNCE_MS = 1_000L // 1 секунда (для сохранения на паузе)
 
     init {
         viewModelScope.launch {
@@ -48,12 +57,18 @@ class PlayerViewModel @Inject constructor(
                 .collectLatest { (bookId, chapterId) ->
                     val currentState = _uiState.value
 
+                    val isChapterInfoStale =
+                        currentState.chapterInfo != null && currentState.bookId != bookId
+
+
                     if (bookId == null) {
                         _uiState.update {
                             it.copy(
                                 error = "Книга не выбрана",
                                 chapterInfo = null,
-                                isLoading = false
+                                isLoading = false,
+                                bookId = null,
+                                chapterId = null
                             )
                         }
                         return@collectLatest
@@ -63,36 +78,59 @@ class PlayerViewModel @Inject constructor(
                             it.copy(
                                 error = "Глава не выбрана",
                                 chapterInfo = null,
-                                isLoading = false
+                                isLoading = false,
+                                bookId = bookId,
+                                chapterId = null
+
                             )
                         }
                         return@collectLatest
                     }
 
-                    // 2. Проверяем, нужно ли ГРУЗИТЬ информацию.
-                    // Мы не грузим, если:
-                    // - Глава уже загружена (ID тот же)
-                    // - И мы НЕ в процессе загрузки (чтобы избежать двойной загрузки)
                     val isChapterAlreadyLoaded =
-                        currentState.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true
+                        !isChapterInfoStale &&
+                                currentState.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true
+
                     if (isChapterAlreadyLoaded || (currentState.isLoading && currentState.loadCommand == null)) {
+                        _uiState.update { it.copy(bookId = bookId, chapterId = chapterId) }
                         return@collectLatest
                     }
 
                     Log.d(
                         "PlayerViewModel",
-                        "INIT: Активная глава изменилась на $chapterId. Пассивная загрузка информации."
+                        "INIT: Активная пара (книга/глава) изменилась. Пассивная загрузка. Stale: $isChapterInfoStale"
                     )
-                    _uiState.update { it.copy(isLoading = true, error = null) }
+
+                    val infoToUpdate = if (isChapterInfoStale) null else currentState.chapterInfo
+
+                    _uiState.update {
+                        it.copy(
+                            isLoading = true,
+                            error = null,
+                            bookId = bookId,
+                            chapterId = chapterId,
+                            chapterInfo = infoToUpdate
+                        )
+                    }
+
                     getPlayerChapterInfoUseCase(bookId, chapterId)
                         .onSuccess { info ->
                             _uiState.update {
-                                it.copy(isLoading = false, chapterInfo = info)
+                                it.copy(
+                                    isLoading = false, chapterInfo = info, bookId = bookId,
+                                    chapterId = chapterId
+                                )
                             }
                         }
                         .onFailure { error ->
                             _uiState.update {
-                                it.copy(isLoading = false, error = error.message)
+                                it.copy(
+                                    isLoading = false,
+                                    error = error.message,
+                                    bookId = bookId,
+                                    chapterId = chapterId,
+                                    chapterInfo = null
+                                )
                             }
                             error.printStackTrace()
                         }
@@ -104,24 +142,17 @@ class PlayerViewModel @Inject constructor(
         Log.d("PlayerViewModel", "PlayChapter: $bookId / $chapterId / seek: $seekToPositionMs")
         val newCommand = LoadCommand(playWhenReady = true, seekToPositionMs = seekToPositionMs)
 
-        // Немедленно устанавливаем эту главу как активную.
         viewModelScope.launch {
             setActiveChapterUseCase(chapterId)
         }
 
-        // Проверяем, та же ли это глава
         val isSameChapter =
             _uiState.value.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true
 
         if (isSameChapter) {
-            // Та же глава: информация уже есть. Просто обновляем команду.
             Log.d("PlayerViewModel", "playChapter: Та же глава, просто обновляем команду")
             _uiState.update { it.copy(loadCommand = newCommand) }
         } else {
-            // Другая глава:
-            // `setActiveChapterUseCase` уже вызван. `init` блок начнет пассивную загрузку info.
-            // Нам нужно принудительно запустить активную загрузку (с командой),
-            // которая также установит `chapterInfo`.
             Log.d(
                 "PlayerViewModel",
                 "playChapter: Другая глава. Принудительная загрузка с командой play."
@@ -130,9 +161,65 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    // Эта функция сбрасывает флаг после того, как Service получил команду
     fun onMediaSet() {
         _uiState.update { it.copy(loadCommand = null) }
+    }
+
+    /**
+     * Сохраняет прогресс прослушивания.
+     * Использует гибридную логику:
+     * 1. Throttle: Сохраняет не чаще, чем раз в SAVE_THROTTLE_MS.
+     * 2. Debounce: Сохраняет, если вызовы прекратились на SAVE_DEBOUNCE_MS (т.е. на паузе).
+     */
+    fun saveProgress(position: Long) {
+        // Получаем ID
+        val currentBookId = _uiState.value.bookId
+        val currentChapterId = _uiState.value.chapterId
+        if (currentBookId == null || currentChapterId == null || position == 0L) {
+            return
+        }
+
+        // Отменяем предыдущую *запланированную* (debounce) задачу
+        saveProgressJob?.cancel()
+
+        val currentTimeMs = System.currentTimeMillis()
+
+        // --- Логика Throttling ---
+        if (currentTimeMs - lastSaveTimeMs > SAVE_THROTTLE_MS) {
+            // Прошло 10 секунд, можно сохранять немедленно
+            Log.d("PlayerViewModel", "SaveProgress (Throttled): $position")
+            lastSaveTimeMs = currentTimeMs // Обновляем время
+            // Запускаем реальное сохранение
+            saveProgressJob = viewModelScope.launch {
+                try {
+                    saveListenProgressUseCase(currentBookId, currentChapterId, position)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } else {
+            // --- Логика Debounce ---
+            // 10 секунд не прошло. Просто планируем сохранение
+            // (оно выполнится, если 1 сек не будет новых вызовов, т.е. на паузе)
+            saveProgressJob = viewModelScope.launch {
+                delay(SAVE_DEBOUNCE_MS)
+                Log.d("PlayerViewModel", "SaveProgress (Debounced): $position")
+                // Проверяем, что ID не изменились, пока мы ждали
+                if (_uiState.value.bookId == currentBookId && _uiState.value.chapterId == currentChapterId) {
+                    saveListenProgressUseCase(currentBookId, currentChapterId, position)
+                    // Также обновляем время, т.к. debounce-сохранение тоже считается
+                    lastSaveTimeMs = System.currentTimeMillis()
+                }
+            }
+        }
+    }
+
+
+    override fun onCleared() {
+        Log.d("PlayerViewModel", "onCleared")
+        // Отменяем *запланированное* сохранение, если ViewModel уничтожается
+        saveProgressJob?.cancel()
+        super.onCleared()
     }
 
     private fun loadChapterInfoForPlay(
@@ -140,7 +227,12 @@ class PlayerViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             // Устанавливаем isLoading и loadCommand.
-            _uiState.update { it.copy(isLoading = true, error = null, loadCommand = loadCommand) }
+            _uiState.update {
+                it.copy(
+                    isLoading = true, error = null, loadCommand = loadCommand, bookId = bookId,
+                    chapterId = chapterId
+                )
+            }
             Log.d(
                 "PlayerViewModel",
                 "loadChapterInfoForPlay: Загрузка информации для $bookId / $chapterId"
@@ -149,16 +241,29 @@ class PlayerViewModel @Inject constructor(
                 .onSuccess { info ->
                     _uiState.update {
                         // Cохраняем команду И chapterInfo, когда данные успешно загружены
-                        it.copy(isLoading = false, chapterInfo = info, loadCommand = loadCommand)
+                        it.copy(
+                            isLoading = false,
+                            chapterInfo = info,
+                            loadCommand = loadCommand,
+                            bookId = bookId,
+                            chapterId = chapterId
+                        )
                     }
                 }
                 .onFailure { error ->
                     _uiState.update {
                         // При ошибке сбрасываем команду
-                        it.copy(isLoading = false, error = error.message, loadCommand = null)
+                        it.copy(
+                            isLoading = false,
+                            error = error.message,
+                            loadCommand = null,
+                            bookId = bookId,
+                            chapterId = chapterId
+                        )
                     }
                     error.printStackTrace()
                 }
         }
     }
 }
+

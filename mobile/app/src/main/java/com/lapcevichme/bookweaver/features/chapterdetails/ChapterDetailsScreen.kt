@@ -129,12 +129,29 @@ fun ChapterDetailsScreen(
         // Если этот экран активен, он ПЕРЕХВАТИТ команду
         if (chapterInfo != null && service != null && command != null) {
 
+            // Получаем ID из playerUiState
+            val bookId = playerUiState.bookId
+            val chapterId = playerUiState.chapterId
+
+            // Проверяем, что ID существуют
+            if (bookId == null || chapterId == null) {
+                Log.e(
+                    "ChapterDetailsScreen",
+                    "Cannot set media, bookId or chapterId is null in playerUiState"
+                )
+                playerViewModel.onMediaSet() // Сбрасываем команду
+                return@LaunchedEffect
+            }
+
             val isCorrectChapterLoaded = playerState.loadedChapterId.isNotEmpty() &&
                     playerState.loadedChapterId == chapterInfo.media.subtitlesPath
 
             if (isCorrectChapterLoaded) {
                 // Глава уже загружена
-                Log.d("ChapterDetailsScreen", "LaunchedEffect: Глава уже загружена. Выполняем команду.")
+                Log.d(
+                    "ChapterDetailsScreen",
+                    "LaunchedEffect: Глава уже загружена. Выполняем команду."
+                )
                 if (command.seekToPositionMs != null) {
                     service.seekTo(command.seekToPositionMs)
                 }
@@ -145,9 +162,11 @@ fun ChapterDetailsScreen(
                 // Новая глава
                 Log.d("ChapterDetailsScreen", "LaunchedEffect: Новая глава. Вызываем setMedia.")
                 service.setMedia(
-                    chapterInfo.media,
-                    chapterInfo.chapterTitle,
-                    chapterInfo.coverPath,
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    media = chapterInfo.media,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
                     playWhenReady = command.playWhenReady,
                     seekToPositionMs = command.seekToPositionMs
                 )
@@ -261,7 +280,10 @@ fun ChapterDetailsScreen(
                                         onEntryClick = { entry ->
                                             if (isThisChapterPlaying) {
                                                 // Та же глава, просто мотаем
-                                                Log.d("ChapterDetailsScreen", "onEntryClick: Та же глава. Перемотка на ${entry.startMs}")
+                                                Log.d(
+                                                    "ChapterDetailsScreen",
+                                                    "onEntryClick: Та же глава. Перемотка на ${entry.startMs}"
+                                                )
                                                 mediaService?.seekTo(entry.startMs)
 
                                                 // Если была пауза, а мы кликнули - начинаем играть
@@ -271,7 +293,10 @@ fun ChapterDetailsScreen(
 
                                             } else {
                                                 // Другая глава, даем команду PlayerViewModel
-                                                Log.d("ChapterDetailsScreen", "onEntryClick: Другая глава. Вызов playChapter(${state.bookId}, ${state.chapterId}, ${entry.startMs})")
+                                                Log.d(
+                                                    "ChapterDetailsScreen",
+                                                    "onEntryClick: Другая глава. Вызов playChapter(${state.bookId}, ${state.chapterId}, ${entry.startMs})"
+                                                )
                                                 playerViewModel.playChapter(
                                                     bookId = state.bookId,
                                                     chapterId = state.chapterId,
@@ -394,7 +419,6 @@ private fun ScenarioContent(
     onEntryClick: (UiScenarioEntry) -> Unit
 ) {
     val lazyListState = rememberLazyListState()
-
     val currentPlayingEntryId by remember(currentPosition) {
         derivedStateOf {
             scenario.firstOrNull { entry ->
@@ -520,4 +544,3 @@ private fun OriginalTextContent(text: String) {
         }
     }
 }
-
