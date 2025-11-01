@@ -1,7 +1,6 @@
 package com.lapcevichme.bookweaver.features.player
 
 import android.text.method.ScrollingMovementMethod
-import android.util.Log
 import android.widget.TextView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -48,7 +47,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,7 +59,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,72 +76,8 @@ fun PlayerScreen(
     playerState: PlayerState,
     mediaService: MediaPlayerService?
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
     val playerUiState by viewModel.uiState.collectAsStateWithLifecycle()
-
-    LaunchedEffect(playerUiState.chapterInfo, playerUiState.loadCommand, mediaService) {
-        val chapterInfo = playerUiState.chapterInfo
-        val service = mediaService
-        val command = playerUiState.loadCommand
-
-        val bookId = playerUiState.bookId
-        val chapterId = playerUiState.chapterId
-
-        // Мы должны иметь сервис, инфо о главе И ID
-        if (service == null || chapterInfo == null || bookId == null || chapterId == null) {
-            return@LaunchedEffect
-        }
-
-        val serviceChapterId = service.playerStateFlow.value.loadedChapterId
-        val isCorrectChapterLoaded = serviceChapterId.isNotEmpty() &&
-                serviceChapterId == chapterInfo.media.subtitlesPath
-
-        if (command != null) {
-            // --- СЦЕНАРИЙ 1: АКТИВНАЯ КОМАНДА ---
-            Log.d("PlayerScreen", "LaunchedEffect: Обработка LoadCommand.")
-
-            if (isCorrectChapterLoaded) {
-                // Глава уже загружена.
-                if (command.seekToPositionMs != null) {
-                    service.seekTo(command.seekToPositionMs)
-                }
-                if (command.playWhenReady) {
-                    service.play()
-                }
-            } else {
-                // Новая глава. Загружаем.
-                service.setMedia(
-                    bookId = bookId,
-                    chapterId = chapterId,
-                    media = chapterInfo.media,
-                    chapterTitle = chapterInfo.chapterTitle,
-                    coverPath = chapterInfo.coverPath,
-                    playWhenReady = command.playWhenReady,
-                    seekToPositionMs = command.seekToPositionMs ?: chapterInfo.lastListenedPosition
-                )
-            }
-            viewModel.onMediaSet()
-
-        } else {
-            // --- СЦЕНАРИЙ 2: ПАССИВНОЕ ВОССТАНОВЛЕНИЕ ---
-            if (!isCorrectChapterLoaded) {
-                Log.d("PlayerScreen", "LaunchedEffect: Пассивное восстановление.")
-                service.setMedia(
-                    bookId = bookId,
-                    chapterId = chapterId,
-                    media = chapterInfo.media,
-                    chapterTitle = chapterInfo.chapterTitle,
-                    coverPath = chapterInfo.coverPath,
-                    playWhenReady = false,
-                    seekToPositionMs = chapterInfo.lastListenedPosition
-                )
-            } else {
-                Log.d("PlayerScreen", "LaunchedEffect: Состояние корректно.")
-            }
-        }
-    }
 
 
     val effectiveError = playerUiState.error ?: playerState.error

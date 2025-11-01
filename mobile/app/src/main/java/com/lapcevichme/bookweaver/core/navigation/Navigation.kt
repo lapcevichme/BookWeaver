@@ -348,72 +348,97 @@ fun MainScaffold(
      * при холодном старте приложения И за ОЧИСТКУ при смене книги.
      */
     LaunchedEffect(playerUiState, mediaService) {
-        val service = mediaService
-        val chapterInfo = playerUiState.chapterInfo
+        val service = mediaService ?: return@LaunchedEffect
         val command = playerUiState.loadCommand
-
+        val chapterInfo = playerUiState.chapterInfo
         val bookId = playerUiState.bookId
         val chapterId = playerUiState.chapterId
 
-        // --- ДОБАВЛЯЕМ ЛОГИ ---
-        Log.d("MainScaffold_Sync", "Checking sync logic...")
-        Log.d("MainScaffold_Sync", "  service != null: ${service != null}")
-        Log.d("MainScaffold_Sync", "  chapterInfo == null: ${chapterInfo == null}")
-        Log.d("MainScaffold_Sync", "  command == null: ${command == null}")
-        Log.d("MainScaffold_Sync", "  bookId: $bookId, chapterId: $chapterId")
-        // ---
+        val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
+        val isServiceEmpty = currentServiceChapterId.isEmpty()
 
-        // Сценарий 1: Пассивное восстановление (ViewModel хочет играть главу)
-        if (service != null && chapterInfo != null && command == null && bookId != null && chapterId != null) {
-            Log.d("MainScaffold_Sync", "Entering SCENARIO 1: Passive Restore")
-
-            val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
+        if (command != null) {
+            // --- СЦЕНАРИЙ 1: АКТИВНАЯ КОМАНДА (нажали Play) ---
+            Log.d("MainScaffold_Sync", "SCENARIO 1: Active LoadCommand")
+            if (chapterInfo == null || bookId == null || chapterId == null) {
+                Log.e("MainScaffold_Sync", "LoadCommand failed: chapterInfo or IDs are null")
+                playerViewModel.onMediaSet() // Сбрасываем сбойную команду
+                return@LaunchedEffect
+            }
 
             val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
                     currentServiceChapterId == chapterInfo.media.subtitlesPath
 
-            val isServiceEmpty = currentServiceChapterId.isEmpty()
-
-            if (!isCorrectChapterLoaded && isServiceEmpty) {
-                // Сервис пуст. Загружаем нужную главу пассивно (без авто-воспроизведения).
-                Log.d("MainScaffold", "Triggering passive restore from MainScaffold (Service was empty).")
+            if (isCorrectChapterLoaded) {
+                // Глава уже та, что нужна. Просто выполняем команду.
+                if (command.seekToPositionMs != null) {
+                    service.seekTo(command.seekToPositionMs)
+                }
+                if (command.playWhenReady) {
+                    service.play()
+                }
+            } else {
+                // Новая глава. Загружаем.
                 service.setMedia(
                     bookId = bookId,
                     chapterId = chapterId,
                     media = chapterInfo.media,
                     chapterTitle = chapterInfo.chapterTitle,
                     coverPath = chapterInfo.coverPath,
-                    playWhenReady = false, // Никогда не авто-воспроизводим
-                    seekToPositionMs = chapterInfo.lastListenedPosition // Восстанавливаем позицию
+                    playWhenReady = command.playWhenReady,
+                    // Приоритет у команды, затем у сохраненной позиции
+                    seekToPositionMs = command.seekToPositionMs ?: chapterInfo.lastListenedPosition
                 )
-            } else if (!isCorrectChapterLoaded && !isServiceEmpty) {
-                Log.d("MainScaffold", "Passive restore skipped: Service has a different chapter loaded. UI will sync.")
-            } else {
-                Log.d("MainScaffold", "Passive restore skipped: Correct chapter already loaded.")
             }
-        }
+            // Сообщаем ViewModel, что команда выполнена
+            playerViewModel.onMediaSet()
 
-        // Сценарий 2: Смена книги (ViewModel НЕ хочет играть главу)
-        else if (service != null && chapterInfo == null && command == null) {
-            Log.d("MainScaffold_Sync", "Entering SCENARIO 2: Stop and Clear")
-            // UI "не хочет" главу (chapterInfo == null),
-            // например, при смене книги (bookId поменялся, chapterId/Info сбросились).
+        } else if (chapterInfo != null && bookId != null && chapterId != null) {
+            // --- СЦЕНАРИЙ 2: ПАССИВНОЕ ВОССТАНОВЛЕНИЕ (команды нет, но глава должна быть) ---
+            Log.d("MainScaffold_Sync", "SCENARIO 2: Passive Restore Check")
+            val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
+                    currentServiceChapterId == chapterInfo.media.subtitlesPath
 
-            val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
-            val isServiceEmpty = currentServiceChapterId.isEmpty()
-            Log.d("MainScaffold_Sync", "  isServiceEmpty: $isServiceEmpty")
+            // Восстанавливаем состояние *только* если сервис был полностью пуст.
+            // Если в нем играет *другая* глава, мы не должны ее прерывать.
+            if (!isCorrectChapterLoaded && isServiceEmpty) {
+                Log.d("MainScaffold_Sync", "Triggering passive restore (Service was empty).")
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    media = chapterInfo.media,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = false, // Никогда не авто-воспроизводим пассивно
+                    seekToPositionMs = chapterInfo.lastListenedPosition
+                )
+            }
 
-            if (!isServiceEmpty) {
-                // В сервисе что-то есть, а UI говорит, что ничего не должно быть.
-                // Это значит, что мы сменили книгу.
-                Log.d("MainScaffold", "Sync: UI state has no chapter, but service is not empty. Stopping and clearing service.")
+        } else if (chapterInfo == null) {
+            // --- СЦЕНАРИЙ 3: ОЧИСТКА (ViewModel говорит, что глав не должно быть) ---
+            Log.d("MainScaffold_Sync", "SCENARIO 3: Stop and Clear Check")
+
+            // Мы должны останавливать сервис, ТОЛЬКО если VM явно
+            // говорит, что книги нет (bookId == null).
+            // Если bookId есть, а chapterInfo = null, VM просто грузится.
+            if (bookId == null && !isServiceEmpty) {
+                Log.d(
+                    "MainScaffold",
+                    "Sync: UI state has NO book (bookId is null), but service is not empty. Stopping and clearing service."
+                )
                 service.stopAndClear()
+            } else if (bookId != null && !isServiceEmpty) {
+                Log.d(
+                    "MainScaffold",
+                    "Sync: UI state has bookId but chapterInfo is null. VM is likely loading. Waiting."
+                )
+                // Ничего не делаем, ждем пока VM загрузит chapterInfo
             }
-            // Если сервис и так пуст, то все в порядке.
-        } else {
-            Log.d("MainScaffold_Sync", "SKIPPING BOTH scenarios.")
         }
     }
+
+
+
 
 
     LaunchedEffect(Unit) {

@@ -6,18 +6,15 @@ import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
-import com.lapcevichme.bookweaver.domain.usecase.player.SaveListenProgressUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -29,78 +26,60 @@ class PlayerViewModel @Inject constructor(
     getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
     getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase,
     private val getPlayerChapterInfoUseCase: GetPlayerChapterInfoUseCase,
-    private val setActiveChapterUseCase: SetActiveChapterUseCase,
-    private val saveListenProgressUseCase: SaveListenProgressUseCase
+    private val setActiveChapterUseCase: SetActiveChapterUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState = _uiState.asStateFlow()
 
-    private var saveProgressJob: Job? = null // Для дебаунса
-    private var lastSaveTimeMs: Long = 0 // Время последнего *реального* сохранения
-    private val SAVE_THROTTLE_MS = 10_000L // 10 секунд (по желанию пользователя)
-    private val SAVE_DEBOUNCE_MS = 1_000L // 1 секунда (для сохранения на паузе)
-
     init {
         viewModelScope.launch {
-            // Комбинируем потоки, чтобы знать, какая глава сейчас активна
-            getActiveBookFlowUseCase()
-                .flatMapLatest { bookId ->
-                    if (bookId == null) {
-                        flowOf(Pair<String?, String?>(null, null)) // No book
-                    } else {
-                        getActiveChapterFlowUseCase().map { chapterId ->
-                            Pair(bookId, chapterId) // Book and chapter
-                        }
-                    }
+            combine(
+                getActiveBookFlowUseCase(),
+                getActiveChapterFlowUseCase()
+            ) { bookId, chapterId ->
+                Pair(bookId, chapterId)
+            }
+                // Игнорируем состояние (book, null), но пропускаем (book, chapter) и (null, ...)
+                .filter { (bookId, chapterId) ->
+                    (bookId != null && chapterId != null) || bookId == null
                 }
-                .collectLatest { (bookId, chapterId) ->
+                .distinctUntilChanged() // Игнорируем повторные эмиссии
+                .collectLatest { (bookId, chapterId) -> // Оставляем collectLatest
                     val currentState = _uiState.value
+
+                    // Сценарий 1: Книга или глава не выбраны (null)
+                    if (bookId == null || chapterId == null) {
+                        // Если VM и так пуст, ничего не делаем (избегаем лишних апдейтов)
+                        if (currentState.chapterInfo == null && currentState.bookId == null) {
+                            return@collectLatest
+                        }
+
+                        // Иначе, очищаем состояние VM.
+                        Log.d(
+                            "PlayerViewModel",
+                            "INIT: Active book/chapter is null. Clearing VM state."
+                        )
+                        _uiState.update {
+                            it.copy(
+                                error = if (bookId == null) "Книга не выбрана" else "Глава не выбрана",
+                                chapterInfo = null,
+                                isLoading = false,
+                                bookId = bookId, // null
+                                chapterId = chapterId // может быть null
+                            )
+                        }
+                        return@collectLatest
+                    }
+
+                    // Сценарий 3: Пришли новые ID. Начинаем пассивную загрузку.
+                    Log.d(
+                        "PlayerViewModel",
+                        "INIT: (Distinct) Активная пара (книга/глава) изменилась. Пассивная загрузка."
+                    )
 
                     val isChapterInfoStale =
                         currentState.chapterInfo != null && currentState.bookId != bookId
-
-
-                    if (bookId == null) {
-                        _uiState.update {
-                            it.copy(
-                                error = "Книга не выбрана",
-                                chapterInfo = null,
-                                isLoading = false,
-                                bookId = null,
-                                chapterId = null
-                            )
-                        }
-                        return@collectLatest
-                    }
-                    if (chapterId == null) {
-                        _uiState.update {
-                            it.copy(
-                                error = "Глава не выбрана",
-                                chapterInfo = null,
-                                isLoading = false,
-                                bookId = bookId,
-                                chapterId = null
-
-                            )
-                        }
-                        return@collectLatest
-                    }
-
-                    val isChapterAlreadyLoaded =
-                        !isChapterInfoStale &&
-                                currentState.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true
-
-                    if (isChapterAlreadyLoaded || (currentState.isLoading && currentState.loadCommand == null)) {
-                        _uiState.update { it.copy(bookId = bookId, chapterId = chapterId) }
-                        return@collectLatest
-                    }
-
-                    Log.d(
-                        "PlayerViewModel",
-                        "INIT: Активная пара (книга/глава) изменилась. Пассивная загрузка. Stale: $isChapterInfoStale"
-                    )
-
                     val infoToUpdate = if (isChapterInfoStale) null else currentState.chapterInfo
 
                     _uiState.update {
@@ -165,63 +144,6 @@ class PlayerViewModel @Inject constructor(
         _uiState.update { it.copy(loadCommand = null) }
     }
 
-    /**
-     * Сохраняет прогресс прослушивания.
-     * Использует гибридную логику:
-     * 1. Throttle: Сохраняет не чаще, чем раз в SAVE_THROTTLE_MS.
-     * 2. Debounce: Сохраняет, если вызовы прекратились на SAVE_DEBOUNCE_MS (т.е. на паузе).
-     */
-    fun saveProgress(position: Long) {
-        // Получаем ID
-        val currentBookId = _uiState.value.bookId
-        val currentChapterId = _uiState.value.chapterId
-        if (currentBookId == null || currentChapterId == null || position == 0L) {
-            return
-        }
-
-        // Отменяем предыдущую *запланированную* (debounce) задачу
-        saveProgressJob?.cancel()
-
-        val currentTimeMs = System.currentTimeMillis()
-
-        // --- Логика Throttling ---
-        if (currentTimeMs - lastSaveTimeMs > SAVE_THROTTLE_MS) {
-            // Прошло 10 секунд, можно сохранять немедленно
-            Log.d("PlayerViewModel", "SaveProgress (Throttled): $position")
-            lastSaveTimeMs = currentTimeMs // Обновляем время
-            // Запускаем реальное сохранение
-            saveProgressJob = viewModelScope.launch {
-                try {
-                    saveListenProgressUseCase(currentBookId, currentChapterId, position)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        } else {
-            // --- Логика Debounce ---
-            // 10 секунд не прошло. Просто планируем сохранение
-            // (оно выполнится, если 1 сек не будет новых вызовов, т.е. на паузе)
-            saveProgressJob = viewModelScope.launch {
-                delay(SAVE_DEBOUNCE_MS)
-                Log.d("PlayerViewModel", "SaveProgress (Debounced): $position")
-                // Проверяем, что ID не изменились, пока мы ждали
-                if (_uiState.value.bookId == currentBookId && _uiState.value.chapterId == currentChapterId) {
-                    saveListenProgressUseCase(currentBookId, currentChapterId, position)
-                    // Также обновляем время, т.к. debounce-сохранение тоже считается
-                    lastSaveTimeMs = System.currentTimeMillis()
-                }
-            }
-        }
-    }
-
-
-    override fun onCleared() {
-        Log.d("PlayerViewModel", "onCleared")
-        // Отменяем *запланированное* сохранение, если ViewModel уничтожается
-        saveProgressJob?.cancel()
-        super.onCleared()
-    }
-
     private fun loadChapterInfoForPlay(
         bookId: String, chapterId: String, loadCommand: LoadCommand
     ) {
@@ -266,4 +188,3 @@ class PlayerViewModel @Inject constructor(
         }
     }
 }
-

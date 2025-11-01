@@ -121,61 +121,6 @@ fun ChapterDetailsScreen(
 
     val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(playerUiState.chapterInfo, playerUiState.loadCommand, mediaService) {
-        val chapterInfo = playerUiState.chapterInfo
-        val service = mediaService
-        val command = playerUiState.loadCommand
-
-        // Если этот экран активен, он ПЕРЕХВАТИТ команду
-        if (chapterInfo != null && service != null && command != null) {
-
-            // Получаем ID из playerUiState
-            val bookId = playerUiState.bookId
-            val chapterId = playerUiState.chapterId
-
-            // Проверяем, что ID существуют
-            if (bookId == null || chapterId == null) {
-                Log.e(
-                    "ChapterDetailsScreen",
-                    "Cannot set media, bookId or chapterId is null in playerUiState"
-                )
-                playerViewModel.onMediaSet() // Сбрасываем команду
-                return@LaunchedEffect
-            }
-
-            val isCorrectChapterLoaded = playerState.loadedChapterId.isNotEmpty() &&
-                    playerState.loadedChapterId == chapterInfo.media.subtitlesPath
-
-            if (isCorrectChapterLoaded) {
-                // Глава уже загружена
-                Log.d(
-                    "ChapterDetailsScreen",
-                    "LaunchedEffect: Глава уже загружена. Выполняем команду."
-                )
-                if (command.seekToPositionMs != null) {
-                    service.seekTo(command.seekToPositionMs)
-                }
-                if (command.playWhenReady) {
-                    service.play()
-                }
-            } else {
-                // Новая глава
-                Log.d("ChapterDetailsScreen", "LaunchedEffect: Новая глава. Вызываем setMedia.")
-                service.setMedia(
-                    bookId = bookId,
-                    chapterId = chapterId,
-                    media = chapterInfo.media,
-                    chapterTitle = chapterInfo.chapterTitle,
-                    coverPath = chapterInfo.coverPath,
-                    playWhenReady = command.playWhenReady,
-                    seekToPositionMs = command.seekToPositionMs
-                )
-            }
-
-            playerViewModel.onMediaSet()
-        }
-    }
-
 
     DisposableEffect(Unit) {
         val serviceIntent = Intent(context, MediaPlayerService::class.java)
@@ -210,6 +155,50 @@ fun ChapterDetailsScreen(
         clipboardManager.addPrimaryClipChangedListener(listener)
         onDispose {
             clipboardManager.removePrimaryClipChangedListener(listener)
+        }
+    }
+
+    /**
+     * Этот LaunchedEffect перехватывает команды от [PlayerViewModel],
+     * которые относятся к *этой* главе, и немедленно выполняет их,
+     * не дожидаясь, пока пользователь вернется на [MainScaffold].
+     */
+    LaunchedEffect(playerUiState, mediaService, state.details) {
+        val command = playerUiState.loadCommand ?: return@LaunchedEffect
+        val service = mediaService ?: return@LaunchedEffect
+        val screenDetails = state.details ?: return@LaunchedEffect
+
+        // Информация о главе, которую PlayerViewModel *намеревается* загрузить
+        val playerChapterInfo = playerUiState.chapterInfo ?: return@LaunchedEffect
+
+        // Выполняем команду, *только* если она относится к главе,
+        // открытой на этом экране
+        if (playerChapterInfo.media.subtitlesPath == screenDetails.subtitlesPath) {
+            Log.d("ChapterDetailsScreen", "LaunchedEffect: Executing LoadCommand locally.")
+
+            val isCorrectChapterLoaded =
+                service.playerStateFlow.value.loadedChapterId == playerChapterInfo.media.subtitlesPath
+
+            if (isCorrectChapterLoaded) {
+                // Глава уже загружена, просто мотаем и играем
+                command.seekToPositionMs?.let { service.seekTo(it) }
+                if (command.playWhenReady) service.play()
+            } else {
+                // Это новая глава, нужно загрузить медиа
+                service.setMedia(
+                    bookId = state.bookId,
+                    chapterId = state.chapterId,
+                    media = playerChapterInfo.media,
+                    chapterTitle = playerChapterInfo.chapterTitle,
+                    coverPath = playerChapterInfo.coverPath,
+                    playWhenReady = command.playWhenReady,
+                    seekToPositionMs = command.seekToPositionMs
+                        ?: playerChapterInfo.lastListenedPosition
+                )
+            }
+
+            // Сообщаем ViewModel, что команда выполнена
+            playerViewModel.onMediaSet()
         }
     }
 
@@ -303,7 +292,6 @@ fun ChapterDetailsScreen(
                                                     seekToPositionMs = entry.startMs
                                                 )
                                             }
-                                            // В любом случае переходим на таб плеера
                                             mainViewModel.navigateToPlayerTab()
                                         }
                                     )
@@ -544,3 +532,4 @@ private fun OriginalTextContent(text: String) {
         }
     }
 }
+
