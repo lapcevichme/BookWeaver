@@ -14,7 +14,8 @@ data class PlayerUiState(
     val chapterId: String? = null,
     val chapterInfo: PlayerChapterInfo? = null,
     val error: String? = null,
-    val loadCommand: LoadCommand? = null
+    val loadCommand: LoadCommand? = null,
+    val clearService: Boolean = false
 )
 
 

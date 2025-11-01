@@ -564,7 +564,7 @@ class MediaPlayerService : Service() {
             // 10 секунд не прошло. Просто планируем сохранение
             // (оно выполнится, если 1 сек не будет новых вызовов)
             saveProgressJob = serviceScope.launch {
-                delay(10000)
+                delay(SAVE_DEBOUNCE_MS)
                 Log.d(TAG, "SaveProgress (Debounced): $position")
                 // Проверяем, что ID не изменились, пока мы ждали
                 if (currentBookId == bookId && currentChapterId == chapterId) {

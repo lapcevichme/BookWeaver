@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,47 +39,100 @@ class PlayerViewModel @Inject constructor(
             ) { bookId, chapterId ->
                 Pair(bookId, chapterId)
             }
-                // Игнорируем состояние (book, null), но пропускаем (book, chapter) и (null, ...)
-                .filter { (bookId, chapterId) ->
-                    (bookId != null && chapterId != null) || bookId == null
-                }
-                .distinctUntilChanged() // Игнорируем повторные эмиссии
-                .collectLatest { (bookId, chapterId) -> // Оставляем collectLatest
+                .distinctUntilChanged()
+                .collectLatest { (bookId, chapterId) ->
                     val currentState = _uiState.value
 
-                    // Сценарий 1: Книга или глава не выбраны (null)
-                    if (bookId == null || chapterId == null) {
-                        // Если VM и так пуст, ничего не делаем (избегаем лишних апдейтов)
-                        if (currentState.chapterInfo == null && currentState.bookId == null) {
-                            return@collectLatest
-                        }
-
-                        // Иначе, очищаем состояние VM.
-                        Log.d(
-                            "PlayerViewModel",
-                            "INIT: Active book/chapter is null. Clearing VM state."
-                        )
+                    // Сценарий 1: Книга не выбрана (bookId is null)
+                    if (bookId == null) {
                         _uiState.update {
                             it.copy(
-                                error = if (bookId == null) "Книга не выбрана" else "Глава не выбрана",
-                                chapterInfo = null,
                                 isLoading = false,
-                                bookId = bookId, // null
-                                chapterId = chapterId // может быть null
+                                error = null,
+                                chapterInfo = null,
+                                bookId = null,
+                                chapterId = null,
+                                loadCommand = null,
+                                // Сбрасываем clearService, если он был
+                                clearService = true
                             )
                         }
                         return@collectLatest
                     }
 
-                    // Сценарий 3: Пришли новые ID. Начинаем пассивную загрузку.
+                    // --- С этого момента у нас есть bookId: String ---
+
+                    // Сценарий 2: Книга выбрана, глава - нет (chapterId is null)
+                    if (chapterId == null) {
+                        Log.d("PlayerViewModel", "INIT: Book selected, but no chapter.")
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = "Глава не выбрана",
+                                chapterInfo = null,
+                                bookId = bookId,
+                                chapterId = null,
+                                loadCommand = null,
+                                // Сбрасываем сервис, если он еще не сброшен
+                                clearService = true
+                            )
+                        }
+                        return@collectLatest
+                    }
+
+                    // --- С этого момента у нас есть и bookId: String, и chapterId: String ---
+
+                    val isBookChanged = currentState.bookId != bookId
+                    val isHotRestart = currentState.bookId == null // Это первая загрузка
+                    val isChapterChanged = currentState.chapterId != chapterId
+
+                    // Сценарий 3: РЕАЛЬНАЯ смена книги (не "горячий" рестарт)
+                    if (isBookChanged && !isHotRestart) {
+                        Log.d(
+                            "PlayerViewModel",
+                            "INIT: Book changed (A->B). Issuing ClearService."
+                        )
+                        _uiState.update {
+                            it.copy(
+                                isLoading = true,
+                                error = null,
+                                bookId = bookId,
+                                chapterId = chapterId,
+                                chapterInfo = null,
+                                loadCommand = null,
+                                clearService = true // <<< ВЫСТАВЛЯЕМ КОМАНДУ
+                            )
+                        }
+                        // Запускаем загрузку (теперь chapterId не null)
+                        loadChapterInfo(bookId, chapterId)
+                        return@collectLatest
+                    }
+
+                    // --- Сценарии 4 (Рестарт) и 5 (Смена главы) ---
+
+                    val isSameTarget = !isBookChanged && !isChapterChanged
+                    val isAlreadyLoaded = currentState.chapterInfo != null && isSameTarget
+                    val isPassiveLoading =
+                        currentState.isLoading && currentState.loadCommand == null && isSameTarget
+
+                    // Сценарий 4.1: "Горячий" перезапуск или избыточная эмиссия
+                    if (isAlreadyLoaded || isPassiveLoading) {
+                        Log.d("PlayerViewModel", "INIT: Skip. Already loaded/loading.")
+                        return@collectLatest
+                    }
+
+                    // Сценарий 4.2: Сюда попадаем при:
+                    //   a) "Горячем" рестарте (isHotRestart = true)
+                    //   b) Смене главы (isChapterChanged = true)
+                    //   c) Пассивной загрузке (напр. после сброса)
+
                     Log.d(
                         "PlayerViewModel",
-                        "INIT: (Distinct) Активная пара (книга/глава) изменилась. Пассивная загрузка."
+                        "INIT: Passive loading $bookId / $chapterId. (BookChanged: $isBookChanged, ChapterChanged: $isChapterChanged)"
                     )
 
-                    val isChapterInfoStale =
-                        currentState.chapterInfo != null && currentState.bookId != bookId
-                    val infoToUpdate = if (isChapterInfoStale) null else currentState.chapterInfo
+                    val infoToKeep =
+                        if (isBookChanged || isChapterChanged) null else currentState.chapterInfo
 
                     _uiState.update {
                         it.copy(
@@ -88,31 +140,49 @@ class PlayerViewModel @Inject constructor(
                             error = null,
                             bookId = bookId,
                             chapterId = chapterId,
-                            chapterInfo = infoToUpdate
+                            chapterInfo = infoToKeep,
+                            loadCommand = null,
+                            clearService = false // Убеждаемся, что флаг сброшен
                         )
                     }
 
-                    getPlayerChapterInfoUseCase(bookId, chapterId)
-                        .onSuccess { info ->
-                            _uiState.update {
-                                it.copy(
-                                    isLoading = false, chapterInfo = info, bookId = bookId,
-                                    chapterId = chapterId
-                                )
-                            }
-                        }
-                        .onFailure { error ->
-                            _uiState.update {
-                                it.copy(
-                                    isLoading = false,
-                                    error = error.message,
-                                    bookId = bookId,
-                                    chapterId = chapterId,
-                                    chapterInfo = null
-                                )
-                            }
-                            error.printStackTrace()
-                        }
+                    // Запускаем загрузку (теперь chapterId не null)
+                    loadChapterInfo(bookId, chapterId)
+                }
+        }
+    }
+
+    private fun loadChapterInfo(bookId: String, chapterId: String) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    bookId = bookId,
+                    chapterId = chapterId
+                )
+            }
+            getPlayerChapterInfoUseCase(bookId, chapterId)
+                .onSuccess { info ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            chapterInfo = info,
+                            bookId = bookId,
+                            chapterId = chapterId
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = error.message,
+                            bookId = bookId,
+                            chapterId = chapterId
+                        )
+                    }
+                    error.printStackTrace()
                 }
         }
     }
@@ -142,6 +212,13 @@ class PlayerViewModel @Inject constructor(
 
     fun onMediaSet() {
         _uiState.update { it.copy(loadCommand = null) }
+    }
+
+    /**
+     * Вызывается из MainScaffold, когда команда `clearService` была выполнена.
+     */
+    fun onServiceCleared() {
+        _uiState.update { it.copy(clearService = false) }
     }
 
     private fun loadChapterInfoForPlay(
@@ -188,3 +265,4 @@ class PlayerViewModel @Inject constructor(
         }
     }
 }
+

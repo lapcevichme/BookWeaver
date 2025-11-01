@@ -357,6 +357,18 @@ fun MainScaffold(
         val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
         val isServiceEmpty = currentServiceChapterId.isEmpty()
 
+        // СЦЕНАРИЙ 0: ViewModel приказал очистить сервис
+        if (playerUiState.clearService) {
+            Log.d("MainScaffold_Sync", "SCENARIO 0: ClearService command received. Stopping.")
+            // Выполняем, только если сервис *действительно* не пуст
+            if (!isServiceEmpty) {
+                service.stopAndClear()
+            }
+            // Сообщаем VM, что команда выполнена (или проигнорирована, т.к. сервис уже пуст)
+            playerViewModel.onServiceCleared()
+            return@LaunchedEffect
+        }
+
         if (command != null) {
             // --- СЦЕНАРИЙ 1: АКТИВНАЯ КОМАНДА (нажали Play) ---
             Log.d("MainScaffold_Sync", "SCENARIO 1: Active LoadCommand")
@@ -400,7 +412,7 @@ fun MainScaffold(
                     currentServiceChapterId == chapterInfo.media.subtitlesPath
 
             // Восстанавливаем состояние *только* если сервис был полностью пуст.
-            // Если в нем играет *другая* глава, мы не должны ее прерывать.
+            // (Сценарий холодного старта, когда сервис НЕ был запущен)
             if (!isCorrectChapterLoaded && isServiceEmpty) {
                 Log.d("MainScaffold_Sync", "Triggering passive restore (Service was empty).")
                 service.setMedia(
@@ -413,32 +425,29 @@ fun MainScaffold(
                     seekToPositionMs = chapterInfo.lastListenedPosition
                 )
             }
-
-        } else if (chapterInfo == null) {
-            // --- СЦЕНАРИЙ 3: ОЧИСТКА (ViewModel говорит, что глав не должно быть) ---
-            Log.d("MainScaffold_Sync", "SCENARIO 3: Stop and Clear Check")
-
-            // Мы должны останавливать сервис, ТОЛЬКО если VM явно
-            // говорит, что книги нет (bookId == null).
-            // Если bookId есть, а chapterInfo = null, VM просто грузится.
-            if (bookId == null && !isServiceEmpty) {
+            // Сценарий, когда VM загрузил новую главу (Б), а сервис
+            // все еще играет старую (А).
+            else if (!isCorrectChapterLoaded && !isServiceEmpty) {
                 Log.d(
-                    "MainScaffold",
-                    "Sync: UI state has NO book (bookId is null), but service is not empty. Stopping and clearing service."
+                    "MainScaffold_Sync",
+                    "Triggering passive restore (Service has wrong chapter). Loading new media."
                 )
-                service.stopAndClear()
-            } else if (bookId != null && !isServiceEmpty) {
-                Log.d(
-                    "MainScaffold",
-                    "Sync: UI state has bookId but chapterInfo is null. VM is likely loading. Waiting."
+                // Просто загружаем новую главу. setMedia() сам остановит старую.
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    media = chapterInfo.media,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = false, // Пассивный переход не должен авто-играть
+                    seekToPositionMs = chapterInfo.lastListenedPosition
                 )
-                // Ничего не делаем, ждем пока VM загрузит chapterInfo
             }
+            // (Если isCorrectChapterLoaded = true, ничего не делаем -
+            // это сценарий перезапуска, когда сервис уже играет нужную главу)
+
         }
     }
-
-
-
 
 
     LaunchedEffect(Unit) {
@@ -601,6 +610,7 @@ fun MainScaffold(
                         }
                     }
 
+
                     LibraryScreen(
                         uiState = uiState,
                         bottomContentPadding = innerPadding.calculateBottomPadding(),
@@ -645,4 +655,3 @@ fun LoreHelperScreenPlaceholder() {
         Text("Помощник по лору", style = MaterialTheme.typography.headlineMedium)
     }
 }
-
