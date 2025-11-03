@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.core.service
+package com.lapcevichme.bookweaver.core
 
 import android.graphics.Bitmap
 

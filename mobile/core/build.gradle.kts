@@ -1,12 +1,12 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "com.lapcevichme.bookweaver.data"
+    namespace = "com.lapcevichme.bookweaver.core"
     compileSdk = 36
 
     defaultConfig {
@@ -35,29 +35,27 @@ android {
 }
 
 dependencies {
-    implementation(project(":core"))
     implementation(project(":domain"))
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.room.ktx)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    implementation(libs.androidx.security.crypto)
-    implementation(libs.okhttp)
-    // Библиотека для парсинга JSON
-    implementation(libs.kotlinx.serialization.json)
-    // Coroutines
-    implementation(libs.kotlinx.coroutines.core)
 
-    // Hilt для внедрения зависимостей в репозитории
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.kotlinx.serialization.json)
+
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.coil.compose)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
 
     implementation(libs.material.kolor)
-    ksp(libs.androidx.room.compiler)
+    implementation(libs.hilt.android)
+    implementation(libs.androidx.hilt.navigation.compose)
 }

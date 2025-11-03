@@ -31,7 +31,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.lapcevichme.bookweaver.core.service.PlayerState
+import com.lapcevichme.bookweaver.core.PlayerState
 
 @Composable
 fun MiniPlayerBar(

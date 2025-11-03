@@ -52,7 +52,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
-import com.lapcevichme.bookweaver.core.service.PlayerState
+import com.lapcevichme.bookweaver.core.PlayerState
 import com.lapcevichme.bookweaver.core.ui.components.MiniPlayerBar
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapper
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapperViewModel

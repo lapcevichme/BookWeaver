@@ -72,7 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
-import com.lapcevichme.bookweaver.core.service.PlayerState
+import com.lapcevichme.bookweaver.core.PlayerState
 import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.features.player.PlayerViewModel
 import kotlinx.coroutines.launch

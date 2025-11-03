@@ -2,6 +2,7 @@ package com.lapcevichme.bookweaver.data.repository
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.util.Log
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -20,6 +21,7 @@ import com.lapcevichme.bookweaver.domain.model.Book
 import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.Chapter
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
+import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
@@ -39,6 +41,7 @@ import java.io.InputStream
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.collections.map
 
 
 /**
@@ -469,4 +472,117 @@ class BookRepositoryImpl @Inject constructor(
             bookDao.updateListenProgress(bookId, chapterId, position)
         }
     }
+
+    /**
+     * НОВЫЙ МЕТОД
+     * Ищет путь к файлу эмбиента по его имени.
+     * @param bookId ID книги
+     * @param ambientName Имя файла (например, "forest.mp3" или "rain.mp3")
+     * @return Result с полным путем к файлу или null, если файл не найден.
+     */
+    override suspend fun getAmbientTrackPath(
+        bookId: String,
+        ambientName: String
+    ): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            // Если имя "none" или пустое, сразу возвращаем null
+            if (ambientName.isEmpty() || ambientName.equals("none", ignoreCase = true)) {
+                return@withContext Result.success(null)
+            }
+
+            // Стандартное расположение эмбиент-файлов
+            val ambientFile = File(booksDir, "$bookId/ambient/$ambientName")
+
+            if (ambientFile.exists() && ambientFile.isFile) {
+                Result.success(ambientFile.absolutePath)
+            } else {
+                // Файл не найден
+                Log.w(
+                    "BookRepositoryImpl",
+                    "Ambient file not found at: ${ambientFile.absolutePath}"
+                )
+                Result.success(null)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Реализация "грязной" работы по слиянию.
+     * Этот метод находится в `data` слое, поэтому он МОЖЕТ
+     * знать о `SubtitleEntry` из `core` и DTO-моделях.
+     */
+    override suspend fun getPlaybackData(
+        bookId: String,
+        chapterId: String
+    ): Result<Pair<List<PlaybackEntry>, String>> = withContext(Dispatchers.IO) {
+        try {
+            val bookDir = File(booksDir, bookId)
+            val chapterDir = File(bookDir, chapterId)
+            if (!chapterDir.exists()) throw Exception("Chapter directory not found")
+
+            // 1.
+            val scenarioFile = File(chapterDir, "scenario.json")
+            if (!scenarioFile.exists()) throw Exception("scenario.json not found")
+            val scenarioDtoList = json.decodeFromString<List<ScenarioEntryDto>>(scenarioFile.readText())
+            //
+            val scenarioMap = scenarioDtoList.associateBy { it.id.toString() }
+
+            // 2.
+            val subtitlesFile = File(chapterDir, "subtitles.json")
+            if (!subtitlesFile.exists()) throw Exception("subtitles.json not found")
+            //
+            val subtitleEntryList = json.decodeFromString<List<SubtitleEntry>>(subtitlesFile.readText())
+
+            // 3.
+            val audioDirectoryPath = File(chapterDir, "audio").absolutePath
+            if (!File(audioDirectoryPath).exists()) throw Exception("audio directory not found")
+
+            // 4.
+            val mergedList = subtitleEntryList.map { subtitleEntry ->
+                val key = subtitleEntry.audioFile.removeSuffix(".wav")
+                val scenarioDto = scenarioMap[key]
+
+                //
+                val text = scenarioDto?.text ?: subtitleEntry.text
+                val speaker = scenarioDto?.speaker ?: "Рассказчик"
+                val ambient = scenarioDto?.ambient ?: "none"
+                val emotion = scenarioDto?.emotion
+                val type = scenarioDto?.type ?: "narration"
+
+                // 5.
+                PlaybackEntry(
+                    id = key,
+                    audioFile = subtitleEntry.audioFile,
+                    text = text,
+                    startMs = subtitleEntry.startMs,
+                    endMs = subtitleEntry.endMs,
+                    words = subtitleEntry.words.map { it.toDomain() }, //
+                    speaker = speaker,
+                    ambient = ambient,
+                    emotion = emotion,
+                    type = type
+                )
+            }
+
+            Log.d("BookRepositoryImpl", "Successfully merged ${mergedList.size} playback entries.")
+            Result.success(Pair(mergedList, audioDirectoryPath))
+
+        } catch (e: Exception) {
+            Log.w("BookRepositoryImpl", "getPlaybackData failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+//
+//    /** * */
+//    private fun WordEntry.toDomain(): DomainWordEntry {
+//        return DomainWordEntry(
+//            word = this.word,
+//            start = this.start,
+//            end = this.end
+//        )
+//    }
+
 }

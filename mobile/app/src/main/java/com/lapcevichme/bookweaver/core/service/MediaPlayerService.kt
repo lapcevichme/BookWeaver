@@ -25,7 +25,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
+import com.lapcevichme.bookweaver.core.PlayerState
+import com.lapcevichme.bookweaver.core.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlaybackSpeedUseCase

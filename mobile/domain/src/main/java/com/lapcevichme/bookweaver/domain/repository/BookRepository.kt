@@ -2,6 +2,7 @@ package com.lapcevichme.bookweaver.domain.repository
 
 import com.lapcevichme.bookweaver.domain.model.Book
 import com.lapcevichme.bookweaver.domain.model.BookDetails
+import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import kotlinx.coroutines.flow.Flow
@@ -79,4 +80,25 @@ interface BookRepository {
     suspend fun generateAndCacheThemeColor(bookId: String, coverPath: String?)
 
     suspend fun saveListenProgress(bookId: String, chapterId: String, position: Long)
+
+    /**
+     * Получает путь к файлу эмбиента по имени.
+     */
+    suspend fun getAmbientTrackPath(
+        bookId: String,
+        ambientName: String
+    ): Result<String?>
+
+    /**
+     * Загружает, парсит и СЛИВАЕТ `scenario.json` и `subtitles.json`.
+     * Возвращает чистую доменную модель `PlaybackEntry`.
+     * Вся "грязная" работа по парсингу и маппингу остается в `data` слое.
+     *
+     * @return Result с парой:
+     * Pair<List<PlaybackEntry>, String (audioDirectoryPath)>
+     */
+    suspend fun getPlaybackData(
+        bookId: String,
+        chapterId: String
+    ): Result<Pair<List<PlaybackEntry>, String>>
 }

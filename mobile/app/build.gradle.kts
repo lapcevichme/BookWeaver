@@ -62,6 +62,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core"))
     implementation(project(":domain"))
     implementation(project(":data"))
 
@@ -101,6 +102,6 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media)
 
-    implementation("com.materialkolor:material-kolor:4.0.0")
+    implementation(libs.material.kolor)
 
 }

@@ -4,7 +4,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
+import com.lapcevichme.bookweaver.core.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterDetails
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry

@@ -1,6 +1,6 @@
 package com.lapcevichme.bookweaver.features.chapterdetails
 
-import com.lapcevichme.bookweaver.core.service.parsing.WordEntry
+import com.lapcevichme.bookweaver.core.WordEntry
 
 data class UiScenarioEntry(
     val id: String,

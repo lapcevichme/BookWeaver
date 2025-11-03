@@ -66,7 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
-import com.lapcevichme.bookweaver.core.service.PlayerState
+import com.lapcevichme.bookweaver.core.PlayerState
 import kotlinx.coroutines.launch
 import java.util.Locale
 

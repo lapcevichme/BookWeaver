@@ -126,3 +126,30 @@ data class PlayerChapterInfo(
     val media: ChapterMedia,
     val lastListenedPosition: Long
 )
+
+
+/**
+ * Чистая доменная модель для одного слова в субтитрах.
+ */
+data class DomainWordEntry(
+    val word: String,
+    val start: Long,
+    val end: Long
+)
+
+/**
+ * Чистая доменная "объединенная" модель.
+ * Содержит ВСЕ данные, необходимые для воспроизведения.
+ */
+data class PlaybackEntry(
+    val id: String,
+    val audioFile: String,
+    val text: String,
+    val startMs: Long,
+    val endMs: Long,
+    val words: List<DomainWordEntry>,
+    val speaker: String,
+    val ambient: String,
+    val emotion: String?,
+    val type: String
+)
