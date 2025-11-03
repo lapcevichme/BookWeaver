@@ -4,11 +4,13 @@ import com.lapcevichme.bookweaver.data.ServerRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.BookRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.ConnectionRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.SettingsRepositoryImpl
+import com.lapcevichme.bookweaver.data.repository.UserPreferencesRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.mock.MockBookRepository
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import com.lapcevichme.bookweaver.domain.repository.ConnectionRepository
 import com.lapcevichme.bookweaver.domain.repository.ServerRepository
 import com.lapcevichme.bookweaver.domain.repository.SettingsRepository
+import com.lapcevichme.bookweaver.domain.repository.UserPreferencesRepository
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -51,4 +53,8 @@ abstract class RepositoryBindsModule {
     @Binds
     @Singleton
     abstract fun bindServerRepository(impl: ServerRepositoryImpl): ServerRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindUserPreferencesRepository(impl: UserPreferencesRepositoryImpl): UserPreferencesRepository
 }

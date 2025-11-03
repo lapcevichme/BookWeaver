@@ -27,6 +27,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.lapcevichme.bookweaver.core.service.parsing.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
+import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetPlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SaveListenProgressUseCase
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +39,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -49,19 +52,21 @@ class MediaPlayerService : Service() {
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // --- 1. Внедряем UseCase для сохранения ---
     @Inject
     lateinit var saveListenProgressUseCase: SaveListenProgressUseCase
-    // ---
+
+    @Inject
+    lateinit var getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase
+    @Inject
+    lateinit var getAmbientVolumeUseCase: GetAmbientVolumeUseCase
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSessionCompat
     private var placeholderBitmap: Bitmap? = null
 
-    // --- 2. Добавляем ID для сохранения ---
+    // Добавляем ID для сохранения
     private var currentBookId: String? = null
     private var currentChapterId: String? = null
-    // ---
 
     private var currentSubtitlesPath: String? = null
     private var currentSubtitles: List<SubtitleEntry> = emptyList()
@@ -168,6 +173,24 @@ class MediaPlayerService : Service() {
                 updatePlayerState()
             }
         })
+
+        serviceScope.launch {
+            getPlaybackSpeedUseCase().collectLatest { speed ->
+                Log.d(TAG, "Setting player speed from DataStore: $speed")
+                player.playbackParameters = PlaybackParameters(speed)
+                // Обновляем state, чтобы UI (нотификация) тоже знала
+                updatePlayerState()
+            }
+        }
+
+        serviceScope.launch {
+            getAmbientVolumeUseCase().collectLatest { volume ->
+                Log.d(TAG, "Setting ambient volume from DataStore: $volume")
+                // TODO: Здесь ты будешь устанавливать громкость
+                // твоего второго плеера (для эмбиента)
+                // ambientPlayer.setVolume(volume)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -286,8 +309,6 @@ class MediaPlayerService : Service() {
 
             player.prepare()
 
-            setPlaybackSpeed(1.0f)
-
             var loadedBitmap: Bitmap? = null
             if (coverPath != null) {
                 try {
@@ -371,6 +392,12 @@ class MediaPlayerService : Service() {
         }
     }
 
+    /**
+     * @Deprecated: Этот метод теперь не должен использоваться из UI.
+     * Используйте PlayerViewModel.onPlaybackSpeedChanged()
+     * Оставлен для обратной совместимости или тестов.
+     */
+    @Deprecated("Use ViewModel to save speed")
     fun setPlaybackSpeed(speed: Float) {
         player.playbackParameters = PlaybackParameters(speed)
     }

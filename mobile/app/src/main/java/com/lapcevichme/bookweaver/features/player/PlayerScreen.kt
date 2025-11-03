@@ -76,7 +76,6 @@ fun PlayerScreen(
     playerState: PlayerState,
     mediaService: MediaPlayerService?
 ) {
-
     val playerUiState by viewModel.uiState.collectAsStateWithLifecycle()
 
 
@@ -101,6 +100,8 @@ fun PlayerScreen(
 
         else -> {
             AudioPlayerScreenUI(
+                playerUiState = playerUiState,
+                viewModel = viewModel,
                 playerState = playerState,
                 chapterTitle = playerState.fileName.takeIf { it.isNotEmpty() }
                     ?: playerUiState.chapterInfo?.chapterTitle
@@ -115,6 +116,8 @@ fun PlayerScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AudioPlayerScreenUI(
+    playerUiState: PlayerUiState,
+    viewModel: PlayerViewModel,
     playerState: PlayerState,
     chapterTitle: String,
     mediaPlayerService: MediaPlayerService?
@@ -316,7 +319,7 @@ private fun AudioPlayerScreenUI(
 
                     TextButton(onClick = { showSpeedSheet = true }) {
                         Text(
-                            text = "${playerState.playbackSpeed}x",
+                            text = "${playerUiState.playbackSpeed}x",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 16.sp
@@ -352,7 +355,7 @@ private fun AudioPlayerScreenUI(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                mediaPlayerService?.setPlaybackSpeed(speed)
+                                viewModel.onPlaybackSpeedChanged(speed)
                                 coroutineScope
                                     .launch { sheetState.hide() }
                                     .invokeOnCompletion {
@@ -363,7 +366,7 @@ private fun AudioPlayerScreenUI(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = playerState.playbackSpeed == speed,
+                            selected = playerUiState.playbackSpeed == speed,
                             onClick = null
                         )
                         Spacer(modifier = Modifier.width(16.dp))

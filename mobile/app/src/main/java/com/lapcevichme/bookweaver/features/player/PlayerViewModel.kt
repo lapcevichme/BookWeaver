@@ -5,7 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetPlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.SaveAmbientVolumeUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.SavePlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,7 +29,11 @@ class PlayerViewModel @Inject constructor(
     getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
     getActiveChapterFlowUseCase: GetActiveChapterFlowUseCase,
     private val getPlayerChapterInfoUseCase: GetPlayerChapterInfoUseCase,
-    private val setActiveChapterUseCase: SetActiveChapterUseCase
+    private val setActiveChapterUseCase: SetActiveChapterUseCase,
+    private val getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase,
+    private val savePlaybackSpeedUseCase: SavePlaybackSpeedUseCase,
+    private val getAmbientVolumeUseCase: GetAmbientVolumeUseCase,
+    private val saveAmbientVolumeUseCase: SaveAmbientVolumeUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -35,12 +43,16 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 getActiveBookFlowUseCase(),
-                getActiveChapterFlowUseCase()
-            ) { bookId, chapterId ->
-                Pair(bookId, chapterId)
+                getActiveChapterFlowUseCase(),
+                getPlaybackSpeedUseCase(),
+                getAmbientVolumeUseCase()
+            ) { bookId, chapterId, speed, volume ->
+                Triple(Pair(bookId, chapterId), speed, volume)
             }
                 .distinctUntilChanged()
-                .collectLatest { (bookId, chapterId) ->
+                .collectLatest { (bookAndChapter, speed, volume) ->
+                    val (bookId, chapterId) = bookAndChapter
+
                     val currentState = _uiState.value
 
                     // Сценарий 1: Книга не выбрана (bookId is null)
@@ -53,8 +65,9 @@ class PlayerViewModel @Inject constructor(
                                 bookId = null,
                                 chapterId = null,
                                 loadCommand = null,
-                                // Сбрасываем clearService, если он был
-                                clearService = true
+                                clearService = true,
+                                playbackSpeed = speed,
+                                ambientVolume = volume
                             )
                         }
                         return@collectLatest
@@ -73,8 +86,9 @@ class PlayerViewModel @Inject constructor(
                                 bookId = bookId,
                                 chapterId = null,
                                 loadCommand = null,
-                                // Сбрасываем сервис, если он еще не сброшен
-                                clearService = true
+                                clearService = true,
+                                playbackSpeed = speed,
+                                ambientVolume = volume
                             )
                         }
                         return@collectLatest
@@ -83,7 +97,7 @@ class PlayerViewModel @Inject constructor(
                     // --- С этого момента у нас есть и bookId: String, и chapterId: String ---
 
                     val isBookChanged = currentState.bookId != bookId
-                    val isHotRestart = currentState.bookId == null // Это первая загрузка
+                    val isHotRestart = currentState.bookId == null
                     val isChapterChanged = currentState.chapterId != chapterId
 
                     // Сценарий 3: РЕАЛЬНАЯ смена книги (не "горячий" рестарт)
@@ -100,10 +114,11 @@ class PlayerViewModel @Inject constructor(
                                 chapterId = chapterId,
                                 chapterInfo = null,
                                 loadCommand = null,
-                                clearService = true // <<< ВЫСТАВЛЯЕМ КОМАНДУ
+                                clearService = true,
+                                playbackSpeed = speed,
+                                ambientVolume = volume
                             )
                         }
-                        // Запускаем загрузку (теперь chapterId не null)
                         loadChapterInfo(bookId, chapterId)
                         return@collectLatest
                     }
@@ -118,6 +133,12 @@ class PlayerViewModel @Inject constructor(
                     // Сценарий 4.1: "Горячий" перезапуск или избыточная эмиссия
                     if (isAlreadyLoaded || isPassiveLoading) {
                         Log.d("PlayerViewModel", "INIT: Skip. Already loaded/loading.")
+                        // Все равно обновим настройки, если они изменились
+                        if (currentState.playbackSpeed != speed || currentState.ambientVolume != volume) {
+                            _uiState.update {
+                                it.copy(playbackSpeed = speed, ambientVolume = volume)
+                            }
+                        }
                         return@collectLatest
                     }
 
@@ -142,11 +163,11 @@ class PlayerViewModel @Inject constructor(
                             chapterId = chapterId,
                             chapterInfo = infoToKeep,
                             loadCommand = null,
-                            clearService = false // Убеждаемся, что флаг сброшен
+                            clearService = false,
+                            playbackSpeed = speed,
+                            ambientVolume = volume
                         )
                     }
-
-                    // Запускаем загрузку (теперь chapterId не null)
                     loadChapterInfo(bookId, chapterId)
                 }
         }
@@ -262,6 +283,21 @@ class PlayerViewModel @Inject constructor(
                     }
                     error.printStackTrace()
                 }
+        }
+    }
+
+    fun onPlaybackSpeedChanged(newSpeed: Float) {
+        viewModelScope.launch {
+            savePlaybackSpeedUseCase(newSpeed)
+            // UI обновится автоматически, т.к. init() слушает
+            // getPlaybackSpeedUseCase()
+        }
+    }
+
+    fun onAmbientVolumeChanged(newVolume: Float) {
+        viewModelScope.launch {
+            saveAmbientVolumeUseCase(newVolume)
+            // UI обновится автоматически
         }
     }
 }
