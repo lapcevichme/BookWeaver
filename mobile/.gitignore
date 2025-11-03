@@ -52,6 +52,7 @@ local.properties
 # Файлы Keystore (КРИТИЧЕСКИ ВАЖНО ИГНОРИРОВАТЬ ДЛЯ БЕЗОПАСНОСТИ!)
 *.jks
 *.keystore
+keystore.properties
 
 # Файлы Google Services (google-services.json):
 # ВАЖНО: Обычно этот файл нужно включать в Git, т.к. он содержит публичные ID проекта.
