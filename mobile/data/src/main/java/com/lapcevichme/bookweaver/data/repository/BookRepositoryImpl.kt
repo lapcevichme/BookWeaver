@@ -497,19 +497,30 @@ class BookRepositoryImpl @Inject constructor(
                 return@withContext Result.success(null)
             }
 
-            // Стандартное расположение эмбиент-файлов
-            val ambientFile = File(booksDir, "$bookId/ambient/$ambientName")
+            val ambientDir = File(booksDir, "$bookId/ambient")
 
-            if (ambientFile.exists() && ambientFile.isFile) {
-                Result.success(ambientFile.absolutePath)
-            } else {
-                // Файл не найден
-                Log.w(
-                    "BookRepositoryImpl",
-                    "Ambient file not found at: ${ambientFile.absolutePath}"
-                )
-                Result.success(null)
+            // Проверяем, не передано ли имя УЖЕ с расширением
+            val ambientFileAsIs = File(ambientDir, ambientName)
+            if (ambientFileAsIs.exists() && ambientFileAsIs.isFile) {
+                return@withContext Result.success(ambientFileAsIs.absolutePath)
             }
+
+            // Если файл "как есть" не найден, пробуем добавить расширения
+            val possibleExtensions = listOf(".mp3", ".ogg", ".wav")
+            for (ext in possibleExtensions) {
+                val ambientFileWithExt = File(ambientDir, "$ambientName$ext")
+                if (ambientFileWithExt.exists() && ambientFileWithExt.isFile) {
+                    return@withContext Result.success(ambientFileWithExt.absolutePath)
+                }
+            }
+
+            // Файл не найден ни с одним из расширений
+            Log.w(
+                "BookRepositoryImpl",
+                "Ambient file not found. Looked for '$ambientName' (and with extensions $possibleExtensions) in: ${ambientDir.absolutePath}"
+            )
+            Result.success(null)
+
         } catch (e: Exception) {
             e.printStackTrace()
             Result.failure(e)

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -123,8 +124,10 @@ private fun AudioPlayerScreenUI(
     mediaPlayerService: MediaPlayerService?
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState()
+    val speedSheetState = rememberModalBottomSheetState()
+    val settingsSheetState = rememberModalBottomSheetState() //
     var showSpeedSheet by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) } //
 
     fun formatTime(millis: Long): String {
         if (millis < 0) return "00:00"
@@ -325,7 +328,7 @@ private fun AudioPlayerScreenUI(
                             fontSize = 16.sp
                         )
                     }
-                    IconButton(onClick = { /* TODO: Settings */ }) {
+                    IconButton(onClick = { showSettingsSheet = true }) { //
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = "Настройки",
@@ -341,7 +344,7 @@ private fun AudioPlayerScreenUI(
     if (showSpeedSheet) {
         ModalBottomSheet(
             onDismissRequest = { showSpeedSheet = false },
-            sheetState = sheetState
+            sheetState = speedSheetState
         ) {
             val speeds = listOf(0.5f, 0.75f, 1.0f, 1.5f, 2.0f)
             Column(modifier = Modifier.padding(16.dp)) {
@@ -357,9 +360,9 @@ private fun AudioPlayerScreenUI(
                             .clickable {
                                 viewModel.onPlaybackSpeedChanged(speed)
                                 coroutineScope
-                                    .launch { sheetState.hide() }
+                                    .launch { speedSheetState.hide() }
                                     .invokeOnCompletion {
-                                        if (!sheetState.isVisible) showSpeedSheet = false
+                                        if (!speedSheetState.isVisible) showSpeedSheet = false
                                     }
                             }
                             .padding(vertical = 12.dp),
@@ -373,6 +376,51 @@ private fun AudioPlayerScreenUI(
                         Text("${speed}x")
                     }
                 }
+            }
+        }
+    }
+
+    if (showSettingsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsSheet = false },
+            sheetState = settingsSheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .navigationBarsPadding()
+            ) {
+                Text(
+                    "Настройки плеера",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                // Слайдер громкости эмбиента
+                Text(
+                    "Громкость эмбиента",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.GraphicEq,
+                        contentDescription = "Громкость эмбиента",
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                    Slider(
+                        value = playerUiState.ambientVolume,
+                        onValueChange = { newVolume ->
+                            viewModel.onAmbientVolumeChanged(newVolume)
+                        },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
