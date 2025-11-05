@@ -22,13 +22,13 @@ import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
-import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.lapcevichme.bookweaver.core.PlayerState
-import com.lapcevichme.bookweaver.core.SubtitleEntry
-import com.lapcevichme.bookweaver.domain.model.ChapterMedia
+import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
+import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientTrackPathUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetChapterPlaybackDataUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SaveListenProgressUseCase
 import dagger.hilt.android.AndroidEntryPoint
@@ -43,7 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -53,25 +53,36 @@ class MediaPlayerService : Service() {
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    //
+    @Inject
+    lateinit var getChapterPlaybackDataUseCase: GetChapterPlaybackDataUseCase
+
+    @Inject
+    lateinit var getAmbientTrackPathUseCase: GetAmbientTrackPathUseCase
+
+    //
     @Inject
     lateinit var saveListenProgressUseCase: SaveListenProgressUseCase
 
     @Inject
     lateinit var getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase
+
     @Inject
     lateinit var getAmbientVolumeUseCase: GetAmbientVolumeUseCase
 
     private lateinit var player: ExoPlayer
+    private lateinit var ambientPlayer: ExoPlayer
     private lateinit var mediaSession: MediaSessionCompat
     private var placeholderBitmap: Bitmap? = null
 
-    // Добавляем ID для сохранения
     private var currentBookId: String? = null
     private var currentChapterId: String? = null
 
-    private var currentSubtitlesPath: String? = null
-    private var currentSubtitles: List<SubtitleEntry> = emptyList()
-    private val json = Json { ignoreUnknownKeys = true }
+    private var currentPlaybackData: List<PlaybackEntry> = emptyList()
+
+    private var currentAmbientName: String = "none"
+    private var currentAudioDirectoryPath: String = ""
+    private var ambientVolume: Float = 0.5f
 
     private var currentMediaItemIndex = 0
     private var basePositionOffsetMs = 0L
@@ -102,12 +113,16 @@ class MediaPlayerService : Service() {
 
     override fun onBind(intent: Intent): IBinder = binder
 
+
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
 
         player = ExoPlayer.Builder(this).build()
+        ambientPlayer = ExoPlayer.Builder(this).build()
+        ambientPlayer.repeatMode = Player.REPEAT_MODE_ONE
+
         mediaSession = MediaSessionCompat(this, "AudioPlayerSession")
         mediaSession.setCallback(object : MediaSessionCompat.Callback() {
             override fun onPlay() {
@@ -134,13 +149,15 @@ class MediaPlayerService : Service() {
                 updateNotification()
                 if (isPlaying) {
                     startPositionUpdates()
+                    if (ambientPlayer.playbackState == Player.STATE_IDLE || !ambientPlayer.isPlaying) {
+                        if (ambientPlayer.mediaItemCount > 0) ambientPlayer.play()
+                    }
                 } else {
                     stopPositionUpdates()
-                    // Принудительное сохранение на ПАУЗУ
-                    Log.d(TAG, "Player is PAUSED. Forcing debounced save.")
+                    ambientPlayer.pause()
                     triggerSave(
                         position = _playerStateFlow.value.currentPosition,
-                        isDebounce = true, // Сохраняем с задержкой (на случай, если это seek)
+                        isDebounce = true,
                         isFinalSave = false
                     )
                 }
@@ -150,46 +167,41 @@ class MediaPlayerService : Service() {
                 if (playbackState == Player.STATE_ENDED) {
                     player.seekTo(0, 0L)
                     player.playWhenReady = false
+                    ambientPlayer.pause()
                 }
                 updatePlayerState()
                 updateNotification()
             }
 
-            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-                updatePlayerState()
-            }
-
-            override fun onCues(cues: List<Cue>) {
-                // не используется
-            }
-
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 currentMediaItemIndex = player.currentMediaItemIndex
                 basePositionOffsetMs =
-                    currentSubtitles.getOrNull(currentMediaItemIndex)?.startMs ?: 0L
+                    currentPlaybackData.getOrNull(currentMediaItemIndex)?.startMs ?: 0L
                 Log.d(
                     TAG,
                     "MediaItem transition. New index: $currentMediaItemIndex, new offset: $basePositionOffsetMs"
                 )
+                checkAmbient()
                 updatePlayerState()
             }
         })
 
         serviceScope.launch {
             getPlaybackSpeedUseCase().collectLatest { speed ->
-                Log.d(TAG, "Setting player speed from DataStore: $speed")
+                // Сохраняем playWhenReady при смене скорости
+                val wasPlaying = player.playWhenReady
                 player.playbackParameters = PlaybackParameters(speed)
-                // Обновляем state, чтобы UI (нотификация) тоже знала
+                player.playWhenReady = wasPlaying // Восстанавливаем
+
                 updatePlayerState()
             }
         }
 
         serviceScope.launch {
             getAmbientVolumeUseCase().collectLatest { volume ->
-                Log.d(TAG, "Setting ambient volume from DataStore: $volume")
-                // TODO: Здесь ты будешь устанавливать громкость
-                // твоего второго плеера (для эмбиента)
-                // ambientPlayer.setVolume(volume)
+                Log.d(TAG, "Setting ambient volume: $volume")
+                ambientVolume = volume
+                ambientPlayer.volume = volume
             }
         }
     }
@@ -202,21 +214,18 @@ class MediaPlayerService : Service() {
             ACTION_PREVIOUS -> player.seekToPreviousMediaItem()
             ACTION_NEXT -> player.seekToNextMediaItem()
             ACTION_STOP -> {
-                // --- 4. Обновляем ACTION_STOP ---
-                // Принудительно сохраняем, прежде чем убить сервис
                 Log.d(TAG, "ACTION_STOP received. Forcing final save and stopping.")
                 triggerSave(
                     position = _playerStateFlow.value.currentPosition,
                     isDebounce = false,
                     isFinalSave = true
                 )
-                stopSelf() // Останавливаем сервис
+                stopSelf()
             }
         }
         return START_NOT_STICKY
     }
 
-    // --- 5. Перехватываем "убийство" приложения свайпом ---
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         Log.d(TAG, "onTaskRemoved: App swiped away. Forcing final save.")
@@ -224,36 +233,25 @@ class MediaPlayerService : Service() {
         triggerSave(
             position = _playerStateFlow.value.currentPosition,
             isDebounce = false,
-            isFinalSave = true // Флаг немедленного сохранения
+            isFinalSave = true
         )
     }
-
 
     @OptIn(UnstableApi::class)
     fun setMedia(
         bookId: String,
         chapterId: String,
-        media: ChapterMedia,
         chapterTitle: String,
         coverPath: String?,
         playWhenReady: Boolean,
         seekToPositionMs: Long? = null
     ) {
-        val subtitlesPath = media.subtitlesPath
-        val audioDirectoryPath = media.audioDirectoryPath
-
-        if (subtitlesPath == null) {
-            Log.e(TAG, "Error setting media: subtitlesPath or audioDirectoryPath is null")
-            _playerStateFlow.value = _playerStateFlow.value.copy(error = "Media paths are missing")
-            return
-        }
-
-        // --- 6. Сохраняем ID ---
         Log.d(
             TAG,
             "setMedia called for $bookId / $chapterId. Play: $playWhenReady, Seek: $seekToPositionMs"
         )
-        // Принудительно сохраняем прогресс СТАРОЙ главы, прежде чем загрузить новую
+
+        // Сохраняем прогресс старой главы, если она была
         if (currentChapterId != null && _playerStateFlow.value.currentPosition > 0) {
             Log.d(TAG, "setMedia: Saving progress for old chapter $currentChapterId")
             triggerSave(
@@ -263,93 +261,103 @@ class MediaPlayerService : Service() {
             )
         }
 
-        currentBookId = bookId
-        currentChapterId = chapterId
-        currentSubtitlesPath = subtitlesPath
-
+        // Немедленно останавливаем все и очищаем медиа
         player.stop()
         player.clearMediaItems()
-        currentSubtitles = emptyList()
+        ambientPlayer.stop()
+        ambientPlayer.clearMediaItems()
 
+        // Сбрасываем внутреннее состояние
+        currentBookId = bookId
+        currentChapterId = chapterId
+        currentPlaybackData = emptyList()
         currentMediaItemIndex = 0
         basePositionOffsetMs = 0L
         totalChapterDurationMs = 0L
+        currentAmbientName = "none"
+        currentAudioDirectoryPath = ""
 
-        try {
-            val subtitlesFile = File(subtitlesPath)
-            val subtitlesJson = subtitlesFile.readText()
-            currentSubtitles = json.decodeFromString<List<SubtitleEntry>>(subtitlesJson)
+        serviceScope.launch {
+            getChapterPlaybackDataUseCase(bookId, chapterId).fold(
+                onSuccess = { (playbackData, audioDirectoryPath) ->
+                    if (playbackData.isEmpty()) {
+                        throw Exception("Merged PlaybackData is empty")
+                    }
 
-            if (currentSubtitles.isEmpty()) {
-                throw Exception("Файл субтитров пуст")
-            }
+                    currentPlaybackData = playbackData
+                    currentAudioDirectoryPath = audioDirectoryPath
+                    totalChapterDurationMs = playbackData.lastOrNull()?.endMs ?: 0L
 
-            totalChapterDurationMs = currentSubtitles.lastOrNull()?.endMs ?: 0L
+                    val mediaItems = mutableListOf<MediaItem>()
+                    for (entry in playbackData) {
+                        val audioFile = File(audioDirectoryPath, entry.audioFile)
+                        if (!audioFile.exists()) {
+                            Log.w(TAG, "Missing audio file: ${entry.audioFile}")
+                            continue
+                        }
+                        mediaItems.add(MediaItem.fromUri(audioFile.toUri()))
+                    }
+                    player.setMediaItems(mediaItems)
 
-            val mediaItems = mutableListOf<MediaItem>()
+                    if (seekToPositionMs != null) {
+                        Log.d(TAG, "setMedia: Перемотка (до prepare) на $seekToPositionMs")
+                        seekTo(seekToPositionMs)
+                    } else {
+                        checkAmbient()
+                    }
 
-            for (entry in currentSubtitles) {
-                val audioFile = File(audioDirectoryPath, entry.audioFile)
-                if (!audioFile.exists()) {
-                    Log.w(TAG, "Missing audio file: ${entry.audioFile}")
-                    continue
+                    player.playWhenReady = playWhenReady
+                    player.prepare()
+
+                    var loadedBitmap: Bitmap? = null
+                    if (coverPath != null) {
+                        try {
+                            loadedBitmap = BitmapFactory.decodeFile(coverPath)
+                            placeholderBitmap = loadedBitmap
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to load cover image", e)
+                        }
+                    }
+
+                    // Устанавливаем НОВОЕ чистое состояние
+                    _playerStateFlow.value = PlayerState(
+                        fileName = chapterTitle,
+                        albumArt = loadedBitmap,
+                        subtitlesEnabled = true,
+                        duration = totalChapterDurationMs,
+                        currentPosition = seekToPositionMs ?: 0L,
+                        loadedChapterId = chapterId
+                    )
+
+                    updatePlayerState() // Обновляем isPlaying, speed и т.д.
+                    updateNotification()
+                },
+                onFailure = { e ->
+                    // При ошибке - полная очистка
+                    Log.e(TAG, "Error setting media source, probably no subtitles", e)
+
+                    // Вызываем полную очистку. Она сбросит _playerStateFlow в PlayerState()
+                    // и уберет нотификацию.
+                    stopAndClear()
+
+                    // Обновляем состояние (уже чистое) ошибкой, чтобы UI (ViewModel)
+                    // мог ее поймать и сбросить loadCommand.
+                    _playerStateFlow.value = PlayerState(
+                        error = "Аудио для этой главы недоступно."
+                    )
                 }
-
-                val mediaItem = MediaItem.fromUri(audioFile.toUri())
-                mediaItems.add(mediaItem)
-            }
-
-            player.setMediaItems(mediaItems)
-
-            if (seekToPositionMs != null) {
-                Log.d(TAG, "setMedia: Перемотка (до prepare) на $seekToPositionMs")
-                seekTo(seekToPositionMs)
-            }
-
-            player.playWhenReady = playWhenReady
-
-            player.prepare()
-
-            var loadedBitmap: Bitmap? = null
-            if (coverPath != null) {
-                try {
-                    loadedBitmap = BitmapFactory.decodeFile(coverPath)
-                    placeholderBitmap = loadedBitmap
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to load cover image", e)
-                }
-            }
-
-            _playerStateFlow.value = PlayerState(
-                fileName = chapterTitle,
-                albumArt = loadedBitmap,
-                subtitlesEnabled = true,
-                duration = totalChapterDurationMs,
-                currentPosition = seekToPositionMs ?: 0L,
-                loadedChapterId = currentSubtitlesPath ?: ""
-            )
-
-            updatePlayerState()
-            updateNotification()
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting media source", e)
-            currentBookId = null
-            currentChapterId = null
-            currentSubtitlesPath = null
-            _playerStateFlow.value = _playerStateFlow.value.copy(
-                error = "Ошибка установки медиа: ${e.message}",
-                loadedChapterId = ""
             )
         }
     }
 
     fun play() {
         player.play()
+        if (ambientPlayer.mediaItemCount > 0) ambientPlayer.play() //
     }
 
     fun pause() {
         player.pause()
+        ambientPlayer.pause()
     }
 
     fun togglePlayPause() {
@@ -361,15 +369,15 @@ class MediaPlayerService : Service() {
     }
 
     fun seekTo(position: Long) {
-        if (currentSubtitles.isEmpty()) return
+        if (currentPlaybackData.isEmpty()) return
 
         val clampedPosition = position.coerceIn(0L, totalChapterDurationMs)
 
-        val targetItemIndex = currentSubtitles.indexOfLast { clampedPosition >= it.startMs }
+        val targetItemIndex = currentPlaybackData.indexOfLast { clampedPosition >= it.startMs }
             .coerceAtLeast(0)
 
-        val targetItem = currentSubtitles.getOrNull(targetItemIndex) ?: currentSubtitles.first()
-
+        val targetItem =
+            currentPlaybackData.getOrNull(targetItemIndex) ?: currentPlaybackData.first()
         val relativePosition = (clampedPosition - targetItem.startMs).coerceAtLeast(0L)
 
         Log.d(
@@ -382,89 +390,118 @@ class MediaPlayerService : Service() {
 
         player.seekTo(targetItemIndex, relativePosition)
 
+        checkAmbient() //
+
         if (player.playbackState != Player.STATE_IDLE) {
             updatePlayerState()
-            // Сохраняем на seek
             triggerSave(
                 position = clampedPosition,
-                isDebounce = true, // С задержкой
+                isDebounce = true,
                 isFinalSave = false
             )
         }
     }
 
     /**
-     * @Deprecated: Этот метод теперь не должен использоваться из UI.
-     * Используйте PlayerViewModel.onPlaybackSpeedChanged()
-     * Оставлен для обратной совместимости или тестов.
+     * Проверяет, не изменился ли эмбиент для текущего PlaybackEntry.
      */
-    @Deprecated("Use ViewModel to save speed")
-    fun setPlaybackSpeed(speed: Float) {
-        player.playbackParameters = PlaybackParameters(speed)
+    private fun checkAmbient() {
+        val entry = currentPlaybackData.getOrNull(currentMediaItemIndex) ?: return
+        val newAmbientName = entry.ambient //
+
+        if (newAmbientName != currentAmbientName) {
+            Log.d(TAG, "Ambient changed from '$currentAmbientName' to '$newAmbientName'")
+            currentAmbientName = newAmbientName
+            updateAmbientPlayer(newAmbientName)
+        }
     }
+
+    /**
+     * Загружает и запускает эмбиент-трек по его имени.
+     */
+    @OptIn(UnstableApi::class)
+    private fun updateAmbientPlayer(ambientName: String) {
+        ambientPlayer.stop()
+        ambientPlayer.clearMediaItems()
+
+        if (ambientName == "none" || currentBookId == null) {
+            return
+        }
+
+        serviceScope.launch {
+            getAmbientTrackPathUseCase(currentBookId!!, ambientName).fold(
+                onSuccess = { path ->
+                    if (path == null) {
+                        Log.w(TAG, "Ambient track '$ambientName' not found at path.")
+                        return@fold
+                    }
+
+                    try {
+                        Log.d(TAG, "Loading ambient: $path")
+                        ambientPlayer.setMediaItem(MediaItem.fromUri(File(path).toUri()))
+                        ambientPlayer.volume = ambientVolume
+                        ambientPlayer.playWhenReady = player.isPlaying //
+                        ambientPlayer.prepare()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to load ambient from path: $path", e)
+                    }
+                },
+                onFailure = { e ->
+                    Log.e(TAG, "Error getting ambient path for '$ambientName'", e)
+                }
+            )
+        }
+    }
+
 
     fun toggleSubtitles(enabled: Boolean) {
         _playerStateFlow.value = _playerStateFlow.value.copy(subtitlesEnabled = enabled)
         updatePlayerState()
     }
 
-    /**
-     * Останавливает воспроизведение, очищает плейлист,
-     * принудительно сохраняет прогресс и сбрасывает состояние сервиса.
-     * Используется при смене книги.
-     */
     fun stopAndClear() {
         Log.d(TAG, "stopAndClear: Stopping player, clearing media, and resetting state.")
-
-        // 1. Финальное сохранение (использует старое состояние, поэтому делаем в первую очередь)
         triggerSave(
             position = _playerStateFlow.value.currentPosition,
             isDebounce = false,
             isFinalSave = true
         )
-
-        // 2. НЕМЕДЛЕННО сбрасываем публичное состояние.
-        // Это гарантирует, что любые коллбэки (onIsPlayingChanged, onPlaybackStateChanged)
-        // увидят, что loadedChapterId пуст, и не вызовут startForeground() в updateNotification.
+        // !! Убеждаемся, что сброс состояния происходит ДО остановки плеера !!
+        // Это предотвратит вызов updateNotification() с "грязным" состоянием.
         _playerStateFlow.value = PlayerState()
 
-        // 3. Остановка плеера
-        player.pause() // Теперь onIsPlayingChanged(false) -> updateNotification() -> if("") -> false
-        player.stop() // Теперь onPlaybackStateChanged -> updateNotification() -> if("") -> false
-        player.clearMediaItems() // Очищаем
+        player.pause(); player.stop(); player.clearMediaItems()
+        ambientPlayer.pause(); ambientPlayer.stop(); ambientPlayer.clearMediaItems()
 
-        // 4. Сброс внутреннего состояния
         currentBookId = null
         currentChapterId = null
-        currentSubtitlesPath = null
-        currentSubtitles = emptyList()
+        currentPlaybackData = emptyList()
         totalChapterDurationMs = 0L
         basePositionOffsetMs = 0L
         currentMediaItemIndex = 0
+        currentAmbientName = "none"
+        currentAudioDirectoryPath = ""
 
-        // 5. Убираем нотификацию и сервис из foreground
-        stopForeground(STOP_FOREGROUND_REMOVE) // true
+        stopForeground(STOP_FOREGROUND_REMOVE)
         Log.d(TAG, "stopAndClear: State has been cleared.")
     }
-    // --- КОНЕЦ НОВОГО МЕТОДА ---
 
     private fun updatePlayerState() {
-        if (player.playbackState == Player.STATE_IDLE || currentSubtitles.isEmpty()) return
+        if (player.playbackState == Player.STATE_IDLE || currentPlaybackData.isEmpty()) return
 
         val currentItemOffset =
-            currentSubtitles.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
+            currentPlaybackData.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
         basePositionOffsetMs = currentItemOffset
 
         val absolutePosition = basePositionOffsetMs + player.currentPosition
 
         val currentSubtitleText: CharSequence =
             if (_playerStateFlow.value.subtitlesEnabled) {
-                val currentEntry = currentSubtitles.firstOrNull {
+                val currentEntry = currentPlaybackData.firstOrNull {
                     absolutePosition >= it.startMs && absolutePosition < it.endMs
-                } ?: currentSubtitles.lastOrNull {
-                    it == currentSubtitles.last() && absolutePosition >= it.startMs && absolutePosition <= it.endMs
+                } ?: currentPlaybackData.lastOrNull {
+                    it == currentPlaybackData.last() && absolutePosition >= it.startMs && absolutePosition <= it.endMs
                 }
-
 
                 if (currentEntry == null) {
                     ""
@@ -483,11 +520,11 @@ class MediaPlayerService : Service() {
             currentPosition = absolutePosition.coerceAtMost(totalChapterDurationMs),
             playbackSpeed = player.playbackParameters.speed,
             currentSubtitle = currentSubtitleText,
-            loadedChapterId = currentSubtitlesPath ?: ""
+            loadedChapterId = currentChapterId ?: ""
         )
     }
 
-    private fun buildKaraokeSubtitle(entry: SubtitleEntry, absolutePosition: Long): CharSequence {
+    private fun buildKaraokeSubtitle(entry: PlaybackEntry, absolutePosition: Long): CharSequence {
         try {
             val spannable = SpannableString(entry.text)
             var charIndex = 0
@@ -498,7 +535,10 @@ class MediaPlayerService : Service() {
 
                 if (startChar >= endChar) continue
 
-                if (absolutePosition >= word.start && absolutePosition <= word.end) {
+                val wordAbsoluteStart = word.start
+                val wordAbsoluteEnd = word.end
+
+                if (absolutePosition >= wordAbsoluteStart && absolutePosition <= wordAbsoluteEnd) {
                     spannable.setSpan(
                         StyleSpan(Typeface.BOLD),
                         startChar,
@@ -508,6 +548,9 @@ class MediaPlayerService : Service() {
                 }
 
                 charIndex = endChar
+                if (charIndex < spannable.length && spannable[charIndex] == ' ') {
+                    charIndex++
+                }
             }
             return spannable
         } catch (e: Exception) {
@@ -523,50 +566,36 @@ class MediaPlayerService : Service() {
         positionUpdateJob = serviceScope.launch {
             while (isActive) {
                 updatePlayerState()
-                // --- 7. Запускаем сохранение (throttle) ---
+                checkAmbient()
                 triggerSave(
                     position = _playerStateFlow.value.currentPosition,
-                    isDebounce = false, // Это throttle
+                    isDebounce = false,
                     isFinalSave = false
                 )
-                delay(100) // Обновление UI
+                delay(100)
             }
         }
     }
-
     private fun stopPositionUpdates() {
         positionUpdateJob?.cancel()
     }
 
-    // --- 8. Новая функция сохранения ---
-    /**
-     * Запускает сохранение прогресса с логикой throttle/debounce
-     * @param position Текущая позиция
-     * @param isDebounce true - если это "отложенное" сохранение (на паузу, seek),
-     * false - если это "мгновенное" (throttle, раз в 10 сек)
-     * @param isFinalSave true - если это *немедленное* сохранение (выход, смена главы).
-     * Игнорирует все задержки.
-     */
     private fun triggerSave(position: Long, isDebounce: Boolean, isFinalSave: Boolean) {
         val bookId = currentBookId
         val chapterId = currentChapterId
         if (bookId == null || chapterId == null || position == 0L) {
-            return // Нечего сохранять
+            return
         }
 
-        // Отменяем предыдущую *запланированную* (debounce) задачу
         saveProgressJob?.cancel()
-
         val currentTimeMs = System.currentTimeMillis()
 
-        // --- 1. Немедленное сохранение (высший приоритет) ---
         if (isFinalSave) {
             Log.d(TAG, "SaveProgress (Final): $position")
-            // Запускаем реальное сохранение
-            serviceScope.launch {
+            serviceScope.launch(Dispatchers.IO) { //
                 try {
                     saveListenProgressUseCase(bookId, chapterId, position)
-                    lastSaveTimeMs = System.currentTimeMillis() // Обновляем время
+                    lastSaveTimeMs = System.currentTimeMillis()
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -574,35 +603,28 @@ class MediaPlayerService : Service() {
             return
         }
 
-        // --- 2. Throttle (раз в 10 сек) ---
         if (!isDebounce && currentTimeMs - lastSaveTimeMs > SAVE_THROTTLE_MS) {
             Log.d(TAG, "SaveProgress (Throttled): $position")
-            lastSaveTimeMs = currentTimeMs // Обновляем время
-            // Запускаем реальное сохранение
-            saveProgressJob = serviceScope.launch {
+            lastSaveTimeMs = currentTimeMs
+            saveProgressJob = serviceScope.launch(Dispatchers.IO) { //
                 try {
                     saveListenProgressUseCase(bookId, chapterId, position)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
-        }
-        // --- 3. Debounce (на паузу / seek) ---
-        else if (isDebounce) {
-            // 10 секунд не прошло. Просто планируем сохранение
-            // (оно выполнится, если 1 сек не будет новых вызовов)
+        } else if (isDebounce) {
             saveProgressJob = serviceScope.launch {
                 delay(SAVE_DEBOUNCE_MS)
                 Log.d(TAG, "SaveProgress (Debounced): $position")
-                // Проверяем, что ID не изменились, пока мы ждали
                 if (currentBookId == bookId && currentChapterId == chapterId) {
-                    saveListenProgressUseCase(bookId, chapterId, position)
-                    // Также обновляем время, т.к. debounce-сохранение тоже считается
+                    withContext(Dispatchers.IO) { //
+                        saveListenProgressUseCase(bookId, chapterId, position)
+                    }
                     lastSaveTimeMs = System.currentTimeMillis()
                 }
             }
         }
-        // else - (Throttle, но 10 сек не прошло) -> просто ничего не делаем.
     }
 
 
@@ -646,7 +668,7 @@ class MediaPlayerService : Service() {
             .setState(
                 if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                 basePositionOffsetMs + player.currentPosition,
-                1.0f
+                player.playbackParameters.speed
             )
             .setActions(PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SEEK_TO or PlaybackStateCompat.ACTION_SKIP_TO_NEXT or PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or PlaybackStateCompat.ACTION_STOP)
             .build()
@@ -655,7 +677,7 @@ class MediaPlayerService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(_playerStateFlow.value.fileName.ifEmpty { "Аудиоплеер" })
             .setContentText("BookWeaver")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(android.R.drawable.ic_media_play) //
             .setLargeIcon(placeholderBitmap)
             .setContentIntent(mediaSession.controller.sessionActivity)
             .setDeleteIntent(createPendingIntent(ACTION_STOP))
@@ -671,9 +693,10 @@ class MediaPlayerService : Service() {
             .setOngoing(isPlaying)
             .build()
 
-        // Не вызываем startForeground, если мы очистили сервис
         if (_playerStateFlow.value.loadedChapterId.isNotEmpty()) {
             startForeground(NOTIFICATION_ID, notification)
+        } else {
+            stopForeground(STOP_FOREGROUND_REMOVE) //
         }
     }
 
@@ -693,7 +716,6 @@ class MediaPlayerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy: Service destroyed. Forcing final save.")
-        // --- 9. Финальное сохранение при уничтожении ---
         triggerSave(
             position = _playerStateFlow.value.currentPosition,
             isDebounce = false,
@@ -701,6 +723,7 @@ class MediaPlayerService : Service() {
         )
         serviceScope.cancel()
         player.release()
+        ambientPlayer.release()
         mediaSession.release()
     }
 }

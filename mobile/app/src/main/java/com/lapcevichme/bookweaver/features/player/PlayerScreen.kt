@@ -182,7 +182,7 @@ private fun AudioPlayerScreenUI(
             ) {
                 if (playerState.albumArt != null) {
                     Image(
-                        bitmap = playerState.albumArt.asImageBitmap(),
+                        bitmap = playerState.albumArt!!.asImageBitmap(),
                         contentDescription = "Обложка альбома",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop

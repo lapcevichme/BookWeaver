@@ -7,6 +7,7 @@ import com.lapcevichme.bookweaver.domain.model.BookManifest
 import com.lapcevichme.bookweaver.domain.model.Chapter
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import com.lapcevichme.bookweaver.domain.model.ChapterSummary
+import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
@@ -167,7 +168,7 @@ class MockBookRepository @Inject constructor() : BookRepository {
         )
     }
 
-    override suspend fun setActiveChapterId(chapterId: String) {
+    override suspend fun setActiveChapterId(chapterId: String?) {
         _activeChapterId.value = chapterId
     }
 
@@ -195,6 +196,24 @@ class MockBookRepository @Inject constructor() : BookRepository {
         chapterId: String,
         position: Long
     ) {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getAmbientTrackPath(
+        bookId: String,
+        ambientName: String
+    ): Result<String?> {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getPlaybackData(
+        bookId: String,
+        chapterId: String
+    ): Result<Pair<List<PlaybackEntry>, String>> {
+        TODO("Not yet implemented")
+    }
+
+    override suspend fun getLastListenedChapterId(bookId: String): String? {
         TODO("Not yet implemented")
     }
 

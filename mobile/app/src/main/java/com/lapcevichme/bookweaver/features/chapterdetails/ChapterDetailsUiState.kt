@@ -1,10 +1,13 @@
 package com.lapcevichme.bookweaver.features.chapterdetails
 
+/**
+ * Модель UI-состояния экрана
+ */
 data class ChapterDetailsUiState(
-    val isLoading: Boolean = true,
+    val isLoading: Boolean = false,
     val chapterTitle: String = "Загрузка...",
-    val details: UiChapterDetails? = null,
-    val error: String? = null,
     val bookId: String = "",
-    val chapterId: String = ""
+    val chapterId: String = "",
+    val details: UiChapterDetails? = null,
+    val error: String? = null
 )

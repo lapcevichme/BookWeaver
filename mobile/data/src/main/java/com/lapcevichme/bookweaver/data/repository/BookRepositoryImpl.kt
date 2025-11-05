@@ -8,6 +8,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.lapcevichme.bookweaver.core.SubtitleEntry
+import com.lapcevichme.bookweaver.core.WordEntry
 import com.lapcevichme.bookweaver.data.dataStore
 import com.lapcevichme.bookweaver.data.database.BookDao
 import com.lapcevichme.bookweaver.data.database.toDomain
@@ -21,6 +23,7 @@ import com.lapcevichme.bookweaver.domain.model.Book
 import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.Chapter
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
+import com.lapcevichme.bookweaver.domain.model.DomainWordEntry
 import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
@@ -400,9 +403,13 @@ class BookRepositoryImpl @Inject constructor(
     }
 
 
-    override suspend fun setActiveChapterId(chapterId: String) {
+    override suspend fun setActiveChapterId(chapterId: String?) {
         context.dataStore.edit { settings ->
-            settings[PreferencesKeys.ACTIVE_CHAPTER_ID] = chapterId
+            if (chapterId == null) {
+                settings.remove(PreferencesKeys.ACTIVE_CHAPTER_ID)
+            } else {
+                settings[PreferencesKeys.ACTIVE_CHAPTER_ID] = chapterId
+            }
         }
     }
 
@@ -523,43 +530,37 @@ class BookRepositoryImpl @Inject constructor(
             val chapterDir = File(bookDir, chapterId)
             if (!chapterDir.exists()) throw Exception("Chapter directory not found")
 
-            // 1.
             val scenarioFile = File(chapterDir, "scenario.json")
             if (!scenarioFile.exists()) throw Exception("scenario.json not found")
             val scenarioDtoList = json.decodeFromString<List<ScenarioEntryDto>>(scenarioFile.readText())
-            //
-            val scenarioMap = scenarioDtoList.associateBy { it.id.toString() }
 
-            // 2.
+            val scenarioMap = scenarioDtoList.associateBy { it.id }
+
             val subtitlesFile = File(chapterDir, "subtitles.json")
             if (!subtitlesFile.exists()) throw Exception("subtitles.json not found")
-            //
+
             val subtitleEntryList = json.decodeFromString<List<SubtitleEntry>>(subtitlesFile.readText())
 
-            // 3.
             val audioDirectoryPath = File(chapterDir, "audio").absolutePath
             if (!File(audioDirectoryPath).exists()) throw Exception("audio directory not found")
 
-            // 4.
             val mergedList = subtitleEntryList.map { subtitleEntry ->
                 val key = subtitleEntry.audioFile.removeSuffix(".wav")
                 val scenarioDto = scenarioMap[key]
 
-                //
                 val text = scenarioDto?.text ?: subtitleEntry.text
                 val speaker = scenarioDto?.speaker ?: "Рассказчик"
                 val ambient = scenarioDto?.ambient ?: "none"
                 val emotion = scenarioDto?.emotion
                 val type = scenarioDto?.type ?: "narration"
 
-                // 5.
                 PlaybackEntry(
                     id = key,
                     audioFile = subtitleEntry.audioFile,
                     text = text,
                     startMs = subtitleEntry.startMs,
                     endMs = subtitleEntry.endMs,
-                    words = subtitleEntry.words.map { it.toDomain() }, //
+                    words = subtitleEntry.words.map { it.toDomain() },
                     speaker = speaker,
                     ambient = ambient,
                     emotion = emotion,
@@ -575,14 +576,16 @@ class BookRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
-//
-//    /** * */
-//    private fun WordEntry.toDomain(): DomainWordEntry {
-//        return DomainWordEntry(
-//            word = this.word,
-//            start = this.start,
-//            end = this.end
-//        )
-//    }
+    private fun WordEntry.toDomain(): DomainWordEntry {
+        return DomainWordEntry(
+            word = this.word,
+            start = this.start,
+            end = this.end
+        )
+    }
+
+    override suspend fun getLastListenedChapterId(bookId: String): String? = withContext(Dispatchers.IO) {
+        return@withContext bookDao.getBookById(bookId)?.lastListenedChapterId
+    }
 
 }

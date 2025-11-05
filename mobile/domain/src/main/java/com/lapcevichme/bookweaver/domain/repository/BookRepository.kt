@@ -63,7 +63,7 @@ interface BookRepository {
     /**
      * Устанавливает ID активной главы.
      */
-    suspend fun setActiveChapterId(chapterId: String)
+    suspend fun setActiveChapterId(chapterId: String?)
 
     /**
      * Получает Flow с ID активной главы.
@@ -101,4 +101,6 @@ interface BookRepository {
         bookId: String,
         chapterId: String
     ): Result<Pair<List<PlaybackEntry>, String>>
+
+    suspend fun getLastListenedChapterId(bookId: String): String?
 }

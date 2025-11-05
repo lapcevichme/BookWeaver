@@ -4,26 +4,20 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lapcevichme.bookweaver.core.SubtitleEntry
 import com.lapcevichme.bookweaver.domain.model.ChapterDetails
-import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
-import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import com.lapcevichme.bookweaver.domain.usecase.books.GetChapterDetailsUseCase
-import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetChapterPlaybackDataUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import java.io.File
 import javax.inject.Inject
-
 
 @HiltViewModel
 class ChapterDetailsViewModel @Inject constructor(
     private val getChapterDetailsUseCase: GetChapterDetailsUseCase,
-    private val getPlayerChapterInfoUseCase: GetPlayerChapterInfoUseCase,
+    private val getPlaybackDataUseCase: GetChapterPlaybackDataUseCase,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -37,7 +31,7 @@ class ChapterDetailsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChapterDetailsUiState())
     val uiState = _uiState.asStateFlow()
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private var textOnlyDetails: ChapterDetails? = null
 
     init {
         _uiState.update {
@@ -47,105 +41,68 @@ class ChapterDetailsViewModel @Inject constructor(
                 chapterId = this.chapterId
             )
         }
-        loadDetails()
+        loadChapterTextContent()
     }
 
-    private fun loadDetails() {
+    /**
+     * Этап 1: Загрузка только текстового контента (scenario.json).
+     * Это позволяет показать экран, даже если аудио (subtitles.json) нет.
+     */
+    private fun loadChapterTextContent() {
+        Log.d(TAG, "Этап 1: Загрузка текста (scenario.json)...")
+        _uiState.update { it.copy(isLoading = true) }
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-
-            val detailsResult = getChapterDetailsUseCase(bookId, chapterId)
-            val mediaInfoResult = getPlayerChapterInfoUseCase(bookId, chapterId)
-
-            detailsResult
-                .onSuccess { detailsModel ->
-                    mediaInfoResult
-                        .onSuccess { mediaInfo ->
-                            try {
-                                val scenarioModel = mergeScenarios(detailsModel, mediaInfo)
-                                val subtitlesPath = mediaInfo.media.subtitlesPath ?: ""
-
-                                _uiState.update {
-                                    it.copy(
-                                        isLoading = false,
-                                        details = detailsModel.toUiModel(
-                                            scenarioModel,
-                                            subtitlesPath
-                                        ),
-                                        error = null
-                                    )
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to parse/merge scenarios", e)
-                                _uiState.update {
-                                    it.copy(
-                                        isLoading = false,
-                                        error = "Ошибка парсинга сценария: ${e.message}"
-                                    )
-                                }
-                            }
-                        }
-                        .onFailure { mediaError ->
-                            _uiState.update {
-                                it.copy(
-                                    isLoading = false,
-                                    error = "Ошибка загрузки медиа: ${mediaError.message}"
-                                )
-                            }
-                        }
-                }
-                .onFailure { detailsError ->
+            getChapterDetailsUseCase(bookId, chapterId).fold(
+                onSuccess = { details ->
+                    Log.d(TAG, "Этап 1: Текст успешно загружен. ${details.scenario.size} реплик.")
+                    textOnlyDetails = details
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            error = "Ошибка загрузки главы: ${detailsError.message}"
+                            details = details.toUiModelTextOnly(),
+                            error = null
+                        )
+                    }
+                    loadChapterAudioContent()
+                },
+                onFailure = { e ->
+                    Log.e(TAG, "Этап 1: Ошибка загрузки текста", e)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Ошибка загрузки данных главы: ${e.message}"
                         )
                     }
                 }
+            )
         }
     }
 
-    private fun mergeScenarios(
-        detailsModel: ChapterDetails,
-        mediaInfo: PlayerChapterInfo
-    ): List<UiScenarioEntry> {
-        val subtitlesPath = mediaInfo.media.subtitlesPath
-            ?: throw Exception("Файл сценария (subtitles.json) не найден.")
-
-        val subtitlesJson = File(subtitlesPath).readText()
-        val timingsList = json.decodeFromString<List<SubtitleEntry>>(subtitlesJson)
-        Log.d(TAG, "mergeScenarios: timingsList loaded. Size: ${timingsList.size}")
-
-        val domainScenario: List<ScenarioEntry> = detailsModel.scenario
-        Log.d(TAG, "mergeScenarios: domainScenario loaded. Size: ${domainScenario.size}")
-
-        val speakerMap = domainScenario.associateBy(
-            keySelector = { it.id.toString() },
-            valueTransform = { it.speaker }
-        )
-        Log.d(TAG, "mergeScenarios: speakerMap created. Size: ${speakerMap.size}")
-        if (speakerMap.isNotEmpty()) {
-            Log.d(TAG, "mergeScenarios: speakerMap keys: ${speakerMap.keys.take(5).joinToString()}")
+    /**
+     * Этап 2: Попытка загрузить и "применить" аудио-данные (subtitles.json).
+     * Вызывается ПОСЛЕ Этапа 1.
+     */
+    private fun loadChapterAudioContent() {
+        Log.d(TAG, "Этап 2: Попытка загрузки аудио (subtitles.json)...")
+        val baseDetails = textOnlyDetails ?: run {
+            Log.e(TAG, "Этап 2: Ошибка, textOnlyDetails is null. Загрузка аудио невозможна.")
+            return
         }
 
-        return timingsList.map { timingEntry ->
-            val key = timingEntry.audioFile.removeSuffix(".wav")
-            val speaker = speakerMap[key] ?: "Рассказчик"
-
-            if (timingsList.first() == timingEntry) {
-                Log.d(
-                    TAG,
-                    "mergeScenarios: Mapping first entry. Key: '$key', Speaker found: '$speaker'"
-                )
-            }
-
-            UiScenarioEntry(
-                id = timingEntry.audioFile,
-                speaker = speaker,
-                text = timingEntry.text,
-                startMs = timingEntry.startMs,
-                endMs = timingEntry.endMs,
-                words = timingEntry.words
+        viewModelScope.launch {
+            getPlaybackDataUseCase(bookId, chapterId).fold(
+                onSuccess = { (playbackData, _) ->
+                    Log.d(TAG, "Этап 2: Аудио-данные успешно загружены и применены.")
+                    _uiState.update {
+                        it.copy(
+                            details = baseDetails.toUiModelWithAudio(playbackData)
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    Log.w(TAG, "Этап 2: Аудио-данные не найдены (subtitles.json). Глава в режиме 'только чтение'.")
+                }
             )
         }
     }
@@ -158,20 +115,5 @@ class ChapterDetailsViewModel @Inject constructor(
             chapterId
         }
     }
-}
-
-// --- Mapper ---
-
-private fun ChapterDetails.toUiModel(
-    mergedScenario: List<UiScenarioEntry>,
-    subtitlesPath: String
-): UiChapterDetails {
-    return UiChapterDetails(
-        teaser = this.summary?.teaser ?: "Тизер недоступен",
-        synopsis = this.summary?.synopsis ?: "Синопсис недоступен",
-        scenario = mergedScenario,
-        originalText = this.originalText,
-        subtitlesPath = subtitlesPath
-    )
 }
 

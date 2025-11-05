@@ -3,6 +3,7 @@ package com.lapcevichme.bookweaver.features.player
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lapcevichme.bookweaver.core.PlayerState
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
@@ -133,7 +134,6 @@ class PlayerViewModel @Inject constructor(
                     // Сценарий 4.1: "Горячий" перезапуск или избыточная эмиссия
                     if (isAlreadyLoaded || isPassiveLoading) {
                         Log.d("PlayerViewModel", "INIT: Skip. Already loaded/loading.")
-                        // Все равно обновим настройки, если они изменились
                         if (currentState.playbackSpeed != speed || currentState.ambientVolume != volume) {
                             _uiState.update {
                                 it.copy(playbackSpeed = speed, ambientVolume = volume)
@@ -142,11 +142,7 @@ class PlayerViewModel @Inject constructor(
                         return@collectLatest
                     }
 
-                    // Сценарий 4.2: Сюда попадаем при:
-                    //   a) "Горячем" рестарте (isHotRestart = true)
-                    //   b) Смене главы (isChapterChanged = true)
-                    //   c) Пассивной загрузке (напр. после сброса)
-
+                    // Сценарий 4.2
                     Log.d(
                         "PlayerViewModel",
                         "INIT: Passive loading $bookId / $chapterId. (BookChanged: $isBookChanged, ChapterChanged: $isChapterChanged)"
@@ -172,7 +168,6 @@ class PlayerViewModel @Inject constructor(
                 }
         }
     }
-
     private fun loadChapterInfo(bookId: String, chapterId: String) {
         viewModelScope.launch {
             _uiState.update {
@@ -185,13 +180,28 @@ class PlayerViewModel @Inject constructor(
             }
             getPlayerChapterInfoUseCase(bookId, chapterId)
                 .onSuccess { info ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            chapterInfo = info,
-                            bookId = bookId,
-                            chapterId = chapterId
-                        )
+                    if (info.media.subtitlesPath == null) {
+                        Log.w("PlayerViewModel", "loadChapterInfo: Success, but no subtitlesPath. Chapter has no audio.")
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = "У этой главы нет аудио.",
+                                loadCommand = null,
+                                bookId = bookId,
+                                chapterId = chapterId,
+                                chapterInfo = info,
+                                clearService = true // !! ФИКС: СКАЗАТЬ СЕРВИСУ ОЧИСТИТЬСЯ !!
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                chapterInfo = info,
+                                bookId = bookId,
+                                chapterId = chapterId
+                            )
+                        }
                     }
                 }
                 .onFailure { error ->
@@ -216,12 +226,16 @@ class PlayerViewModel @Inject constructor(
             setActiveChapterUseCase(chapterId)
         }
 
-        val isSameChapter =
-            _uiState.value.chapterInfo?.media?.subtitlesPath?.contains(chapterId) == true
+        val isSameChapter = _uiState.value.chapterId == chapterId
 
-        if (isSameChapter) {
-            Log.d("PlayerViewModel", "playChapter: Та же глава, просто обновляем команду")
-            _uiState.update { it.copy(loadCommand = newCommand) }
+        if (isSameChapter && _uiState.value.chapterInfo != null) {
+            if (_uiState.value.chapterInfo?.media?.subtitlesPath != null) {
+                Log.d("PlayerViewModel", "playChapter: Та же глава, просто обновляем команду")
+                _uiState.update { it.copy(loadCommand = newCommand) }
+            } else {
+                Log.w("PlayerViewModel", "playChapter: Та же глава, но у нее нет аудио. Игнор.")
+                _uiState.update { it.copy(error = "У этой главы нет аудио.", clearService = true) } // !! ФИКС: СКАЗАТЬ СЕРВИСУ ОЧИСТИТЬСЯ !!
+            }
         } else {
             Log.d(
                 "PlayerViewModel",
@@ -231,9 +245,47 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Вызывается "Диспетчером", когда команда seek/play для УЖЕ ЗАГРУЖЕННОЙ
+     * главы была выполнена.
+     */
     fun onMediaSet() {
         _uiState.update { it.copy(loadCommand = null) }
     }
+
+    /**
+     * Вызывается "Диспетчером" при каждом изменении PlayerState из сервиса.
+     */
+    fun onPlayerStateChanged(playerState: PlayerState) {
+        val currentState = _uiState.value
+
+        // !! ФИКС: Добавлена проверка на ошибку, даже если команды нет !!
+        // Это ловит случай, когда сервис ломается (например, нет аудио),
+        // а ViewModel об этом не знает.
+        if (playerState.error != null && currentState.error == null && !currentState.clearService) {
+            Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error. Clearing command.")
+            _uiState.update { it.copy(loadCommand = null, error = playerState.error) }
+        }
+
+        if (currentState.loadCommand == null) {
+            return // Команды нет, нечего сбрасывать
+        }
+
+        val targetChapterId = currentState.chapterId
+        val actualChapterId = playerState.loadedChapterId
+
+        if (playerState.error != null && !currentState.clearService) {
+            Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error during load command. Clearing command.")
+            _uiState.update { it.copy(loadCommand = null, error = playerState.error) }
+            return
+        }
+
+        if (targetChapterId == actualChapterId) {
+            Log.d("PlayerViewModel", "onPlayerStateChanged: Target chapter ($targetChapterId) is now loaded. Clearing command.")
+            _uiState.update { it.copy(loadCommand = null) }
+        }
+    }
+
 
     /**
      * Вызывается из MainScaffold, когда команда `clearService` была выполнена.
@@ -246,10 +298,12 @@ class PlayerViewModel @Inject constructor(
         bookId: String, chapterId: String, loadCommand: LoadCommand
     ) {
         viewModelScope.launch {
-            // Устанавливаем isLoading и loadCommand.
             _uiState.update {
                 it.copy(
-                    isLoading = true, error = null, loadCommand = loadCommand, bookId = bookId,
+                    isLoading = true,
+                    error = null,
+                    loadCommand = null,
+                    bookId = bookId,
                     chapterId = chapterId
                 )
             }
@@ -259,20 +313,33 @@ class PlayerViewModel @Inject constructor(
             )
             getPlayerChapterInfoUseCase(bookId, chapterId)
                 .onSuccess { info ->
-                    _uiState.update {
-                        // Cохраняем команду И chapterInfo, когда данные успешно загружены
-                        it.copy(
-                            isLoading = false,
-                            chapterInfo = info,
-                            loadCommand = loadCommand,
-                            bookId = bookId,
-                            chapterId = chapterId
-                        )
+                    if (info.media.subtitlesPath == null) {
+                        Log.w("PlayerViewModel", "loadChapterInfoForPlay: Success, but no subtitlesPath. Chapter has no audio.")
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = "У этой главы нет аудио.",
+                                loadCommand = null,
+                                bookId = bookId,
+                                chapterId = chapterId,
+                                chapterInfo = info,
+                                clearService = true // !! ФИКС: СКАЗАТЬ СЕРВИСУ ОЧИСТИТЬСЯ !!
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                chapterInfo = info,
+                                loadCommand = loadCommand,
+                                bookId = bookId,
+                                chapterId = chapterId
+                            )
+                        }
                     }
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        // При ошибке сбрасываем команду
                         it.copy(
                             isLoading = false,
                             error = error.message,
@@ -289,16 +356,34 @@ class PlayerViewModel @Inject constructor(
     fun onPlaybackSpeedChanged(newSpeed: Float) {
         viewModelScope.launch {
             savePlaybackSpeedUseCase(newSpeed)
-            // UI обновится автоматически, т.к. init() слушает
-            // getPlaybackSpeedUseCase()
         }
     }
 
     fun onAmbientVolumeChanged(newVolume: Float) {
         viewModelScope.launch {
             saveAmbientVolumeUseCase(newVolume)
-            // UI обновится автоматически
+        }
+    }
+
+    fun seekTo(positionMs: Long) {
+        _uiState.update { currentState ->
+            val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
+            currentState.copy(
+                loadCommand = baseCommand.copy(
+                    seekToPositionMs = positionMs
+                )
+            )
+        }
+    }
+
+    fun play() {
+        _uiState.update { currentState ->
+            val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
+            currentState.copy(
+                loadCommand = baseCommand.copy(
+                    playWhenReady = true
+                )
+            )
         }
     }
 }
-

@@ -2,11 +2,11 @@ package com.lapcevichme.bookweaver.features.library
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lapcevichme.bookweaver.domain.usecase.books.GetLastListenedChapterIdUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetLocalBooksUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.SetActiveBookUseCase
-// --- 1. ЗАМЕНЯЕМ ИМПОРТ ---
-// import com.lapcevichme.bookweaver.domain.usecase.theme.UpdateThemeFromCoverUseCase // <-- УДАЛЕНО
-import com.lapcevichme.bookweaver.domain.usecase.theme.GenerateBookThemeUseCase // <-- ДОБАВЛЕНО
+import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
+import com.lapcevichme.bookweaver.domain.usecase.theme.GenerateBookThemeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -23,6 +23,8 @@ import javax.inject.Inject
 class LibraryViewModel @Inject constructor(
     getLocalBooksUseCase: GetLocalBooksUseCase,
     private val setActiveBookUseCase: SetActiveBookUseCase,
+    private val setActiveChapterUseCase: SetActiveChapterUseCase,
+    private val getLastListenedChapterIdUseCase: GetLastListenedChapterIdUseCase,
     private val generateBookThemeUseCase: GenerateBookThemeUseCase
 ) : ViewModel() {
 
@@ -46,15 +48,20 @@ class LibraryViewModel @Inject constructor(
         when (event) {
             is LibraryEvent.BookSelected -> {
                 viewModelScope.launch {
-                    // Сначала БЫСТРЫЕ операции: установить активную книгу и перейти
+                    // Асинхронно получаем последнюю главу для ВЫБРАННОЙ книги
+                    val lastChapterId = getLastListenedChapterIdUseCase(event.bookId)
+
+                    // Устанавливаем эту главу (может быть null, и это ок)
+                    setActiveChapterUseCase(lastChapterId)
+
+                    // Теперь устанавливаем активную книгу
                     setActiveBookUseCase(event.bookId)
                     _navigationEvent.send(NavigationEvent.NavigateToBookHub)
-                    // "Тяжелую" (5 сек) генерацию запускаем в ОТДЕЛЬНОМ
-                    // фоновом потоке, чтобы не блокировать навигацию
+
+                    // "Тяжелую" генерацию темы запускаем в фоне
                     launch(Dispatchers.IO) {
-                        // Находим путь к обложке
-                        val coverPath = uiState.value.books.find { it.id == event.bookId }?.coverPath
-                        // Запускаем НОВЫЙ use case
+                        val coverPath =
+                            uiState.value.books.find { it.id == event.bookId }?.coverPath
                         generateBookThemeUseCase(event.bookId, coverPath)
                     }
                 }

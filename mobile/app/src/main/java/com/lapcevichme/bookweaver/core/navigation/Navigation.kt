@@ -51,8 +51,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.PlayerState
+import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.ui.components.MiniPlayerBar
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapper
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapperViewModel
@@ -85,7 +85,6 @@ sealed class Screen(val route: String) {
     object OnboardingLibrary : Screen("onboarding_library")
     object InstallBook : Screen("install_book")
     object AppSettings : Screen("app_settings")
-
     object ChapterDetails : Screen("chapter_details") {
         const val bookIdArg = "bookId"
         const val chapterIdArg = "chapterId"
@@ -142,18 +141,151 @@ private val bottomNavItems = listOf(
     Screen.Bottom.Library,
 )
 
-// --- ГЛАВНЫЙ NAVHOST ПРИЛОЖЕНИЯ ---
-
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
     val mainViewModel: MainViewModel = hiltViewModel()
 
+    val context = LocalContext.current
+    val activity = getLocalActivity()
+
+    val playerViewModel: PlayerViewModel = hiltViewModel(activity)
+    val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
+
+    var mediaService by remember { mutableStateOf<MediaPlayerService?>(null) }
+
+    val playerState by mediaService?.playerStateFlow
+        ?.collectAsStateWithLifecycle(initialValue = PlayerState())
+        ?: remember { mutableStateOf(PlayerState()) }
+
+    // "Замыкаем цикл", передавая PayerState обратно в ViewModel !!
+    // Это позволит ViewModel самой сбрасывать команду, когда она выполнится.
+    LaunchedEffect(playerState) {
+        playerViewModel.onPlayerStateChanged(playerState)
+    }
+
+    val serviceConnection = remember {
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                val binder = service as MediaPlayerService.LocalBinder
+                mediaService = binder.getService()
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                mediaService = null
+            }
+        }
+    }
+
+    DisposableEffect(context) {
+        val serviceIntent = Intent(context, MediaPlayerService::class.java)
+        ContextCompat.startForegroundService(context, serviceIntent)
+        context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+
+        onDispose {
+            Log.d("AppNavHost", "onDispose: Unbinding from MediaPlayerService")
+            context.unbindService(serviceConnection)
+        }
+    }
+
+    // "Диспетчер"
+    LaunchedEffect(playerUiState, mediaService) {
+        val service = mediaService ?: return@LaunchedEffect
+        val command = playerUiState.loadCommand
+        val chapterInfo = playerUiState.chapterInfo
+        val bookId = playerUiState.bookId
+        val chapterId = playerUiState.chapterId
+
+        val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
+        val isServiceEmpty = currentServiceChapterId.isEmpty()
+
+        // Сценарий 0: Очистка
+        if (playerUiState.clearService) {
+            Log.d("AppNavHost_Sync", "SCENARIO 0: ClearService command received.")
+            if (!isServiceEmpty) {
+                service.stopAndClear()
+            }
+            playerViewModel.onServiceCleared()
+            return@LaunchedEffect
+        }
+
+        // Сценарий 1: Активная команда
+        if (command != null) {
+            Log.d("AppNavHost_Sync", "SCENARIO 1: Active LoadCommand")
+            if (chapterInfo == null || bookId == null || chapterId == null) {
+                Log.e("AppNavHost_Sync", "LoadCommand failed: chapterInfo or IDs are null")
+                return@LaunchedEffect
+            }
+
+            val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
+                    currentServiceChapterId == chapterId
+
+            if (isCorrectChapterLoaded) {
+                Log.d(
+                    "AppNavHost_Sync",
+                    "Executing command on loaded chapter: Play=${command.playWhenReady}, Seek=${command.seekToPositionMs}"
+                )
+                if (command.seekToPositionMs != null) {
+                    service.seekTo(command.seekToPositionMs)
+                }
+                if (command.playWhenReady) {
+                    service.play()
+                }
+                // Сбрасываем команду, ТОЛЬКО если это seek/play для УЖЕ загруженной главы
+                playerViewModel.onMediaSet()
+            } else {
+                // Новая глава. Загружаем.
+                Log.d(
+                    "AppNavHost_Sync",
+                    "Executing command by calling setMedia: Play=${command.playWhenReady}, Seek=${command.seekToPositionMs}"
+                )
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = command.playWhenReady,
+                    seekToPositionMs = command.seekToPositionMs ?: chapterInfo.lastListenedPosition
+                )
+            }
+            return@LaunchedEffect // Выходим в любом случае, если была команда
+        }
+
+        // Сценарий 2: Пассивное восстановление
+        // (Выполняется, ТОЛЬКО если command == null)
+        if (chapterInfo != null && bookId != null && chapterId != null) {
+            Log.d("AppNavHost_Sync", "SCENARIO 2: Passive Restore Check")
+            val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
+                    currentServiceChapterId == chapterId
+
+            if (!isCorrectChapterLoaded && isServiceEmpty) {
+                Log.d("AppNavHost_Sync", "Triggering passive restore (Service was empty).")
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = false, // Пассивное не играет
+                    seekToPositionMs = chapterInfo.lastListenedPosition
+                )
+            } else if (!isCorrectChapterLoaded && !isServiceEmpty) {
+                Log.d("AppNavHost_Sync", "Triggering passive restore (Service has wrong chapter).")
+                service.setMedia(
+                    bookId = bookId,
+                    chapterId = chapterId,
+                    chapterTitle = chapterInfo.chapterTitle,
+                    coverPath = chapterInfo.coverPath,
+                    playWhenReady = false, // Пассивное не играет
+                    seekToPositionMs = chapterInfo.lastListenedPosition
+                )
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = "app_root"
     ) {
-        // Маршрут-диспетчер для определения, куда направить пользователя
         composable("app_root") {
             val viewModel: MainViewModel = hiltViewModel(it)
             val startupState by viewModel.startupState.collectAsStateWithLifecycle()
@@ -162,7 +294,6 @@ fun AppNavHost() {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-
             LaunchedEffect(startupState) {
                 when (startupState) {
                     StartupState.NoBooks -> {
@@ -195,10 +326,14 @@ fun AppNavHost() {
         ) { backStackEntry ->
             val startRoute = backStackEntry.arguments?.getString("start_route")
             checkNotNull(startRoute)
+
             MainScaffold(
                 rootNavController = navController,
                 startBottomRoute = startRoute,
-                mainViewModel = mainViewModel
+                mainViewModel = mainViewModel,
+                playerViewModel = playerViewModel,
+                playerState = playerState,
+                mediaService = mediaService
             )
         }
 
@@ -211,6 +346,7 @@ fun AppNavHost() {
                 }
             )
         }
+
         composable(Screen.InstallBook.route) {
             val viewModel: BookInstallationViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -221,15 +357,20 @@ fun AppNavHost() {
                 onInstallationSuccess = { navController.popBackStack() }
             )
         }
+
         composable(
             route = Screen.ChapterDetails.routeWithArgs,
             arguments = Screen.ChapterDetails.arguments
         ) { backStackEntry ->
             val viewModel: ChapterDetailsViewModel = hiltViewModel(backStackEntry)
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
             BookThemeWrapper {
                 ChapterDetailsScreen(
                     state = uiState,
+                    playerState = playerState,
+                    playerViewModel = playerViewModel,
+                    mainViewModel = mainViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -283,14 +424,15 @@ fun AppNavHost() {
 }
 
 
-// SCAFFOLD С BOTTOMNAV И ВЛОЖЕННЫМ NAVHOST
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MainScaffold(
     rootNavController: NavHostController,
     startBottomRoute: String,
-    mainViewModel: MainViewModel
+    mainViewModel: MainViewModel,
+    playerViewModel: PlayerViewModel,
+    playerState: PlayerState,
+    mediaService: MediaPlayerService?
 ) {
     val bottomNavController = rememberNavController()
 
@@ -308,147 +450,7 @@ fun MainScaffold(
         else -> bookSeedColor
     }
 
-    val context = LocalContext.current
-    val playerViewModel: PlayerViewModel = hiltViewModel(activity)
     val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
-
-    var mediaService by remember { mutableStateOf<MediaPlayerService?>(null) }
-    val playerState by mediaService?.playerStateFlow
-        ?.collectAsStateWithLifecycle(initialValue = PlayerState())
-        ?: remember { mutableStateOf(PlayerState()) }
-
-    val serviceConnection = remember {
-        object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                val binder = service as MediaPlayerService.LocalBinder
-                mediaService = binder.getService()
-            }
-
-            override fun onServiceDisconnected(name: ComponentName?) {
-                mediaService = null
-            }
-        }
-    }
-
-    DisposableEffect(context) {
-        val serviceIntent = Intent(context, MediaPlayerService::class.java)
-        // 1. Запускаем сервис (чтобы он жил)
-        ContextCompat.startForegroundService(context, serviceIntent)
-        // 2. Привязываемся к нему (чтобы им управлять)
-        context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
-
-        onDispose {
-            Log.d("MainScaffold", "onDispose: Unbinding from MediaPlayerService")
-            context.unbindService(serviceConnection)
-        }
-    }
-
-    /**
-     * Этот LaunchedEffect отвечает за "пассивное восстановление" состояния
-     * при холодном старте приложения И за ОЧИСТКУ при смене книги.
-     */
-    LaunchedEffect(playerUiState, mediaService) {
-        val service = mediaService ?: return@LaunchedEffect
-        val command = playerUiState.loadCommand
-        val chapterInfo = playerUiState.chapterInfo
-        val bookId = playerUiState.bookId
-        val chapterId = playerUiState.chapterId
-
-        val currentServiceChapterId = service.playerStateFlow.value.loadedChapterId
-        val isServiceEmpty = currentServiceChapterId.isEmpty()
-
-        // СЦЕНАРИЙ 0: ViewModel приказал очистить сервис
-        if (playerUiState.clearService) {
-            Log.d("MainScaffold_Sync", "SCENARIO 0: ClearService command received. Stopping.")
-            // Выполняем, только если сервис *действительно* не пуст
-            if (!isServiceEmpty) {
-                service.stopAndClear()
-            }
-            // Сообщаем VM, что команда выполнена (или проигнорирована, т.к. сервис уже пуст)
-            playerViewModel.onServiceCleared()
-            return@LaunchedEffect
-        }
-
-        if (command != null) {
-            // --- СЦЕНАРИЙ 1: АКТИВНАЯ КОМАНДА (нажали Play) ---
-            Log.d("MainScaffold_Sync", "SCENARIO 1: Active LoadCommand")
-            if (chapterInfo == null || bookId == null || chapterId == null) {
-                Log.e("MainScaffold_Sync", "LoadCommand failed: chapterInfo or IDs are null")
-                playerViewModel.onMediaSet() // Сбрасываем сбойную команду
-                return@LaunchedEffect
-            }
-
-            val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
-                    currentServiceChapterId == chapterInfo.media.subtitlesPath
-
-            if (isCorrectChapterLoaded) {
-                // Глава уже та, что нужна. Просто выполняем команду.
-                if (command.seekToPositionMs != null) {
-                    service.seekTo(command.seekToPositionMs)
-                }
-                if (command.playWhenReady) {
-                    service.play()
-                }
-            } else {
-                // Новая глава. Загружаем.
-                service.setMedia(
-                    bookId = bookId,
-                    chapterId = chapterId,
-                    media = chapterInfo.media,
-                    chapterTitle = chapterInfo.chapterTitle,
-                    coverPath = chapterInfo.coverPath,
-                    playWhenReady = command.playWhenReady,
-                    // Приоритет у команды, затем у сохраненной позиции
-                    seekToPositionMs = command.seekToPositionMs ?: chapterInfo.lastListenedPosition
-                )
-            }
-            // Сообщаем ViewModel, что команда выполнена
-            playerViewModel.onMediaSet()
-
-        } else if (chapterInfo != null && bookId != null && chapterId != null) {
-            // --- СЦЕНАРИЙ 2: ПАССИВНОЕ ВОССТАНОВЛЕНИЕ (команды нет, но глава должна быть) ---
-            Log.d("MainScaffold_Sync", "SCENARIO 2: Passive Restore Check")
-            val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
-                    currentServiceChapterId == chapterInfo.media.subtitlesPath
-
-            // Восстанавливаем состояние *только* если сервис был полностью пуст.
-            // (Сценарий холодного старта, когда сервис НЕ был запущен)
-            if (!isCorrectChapterLoaded && isServiceEmpty) {
-                Log.d("MainScaffold_Sync", "Triggering passive restore (Service was empty).")
-                service.setMedia(
-                    bookId = bookId,
-                    chapterId = chapterId,
-                    media = chapterInfo.media,
-                    chapterTitle = chapterInfo.chapterTitle,
-                    coverPath = chapterInfo.coverPath,
-                    playWhenReady = false, // Никогда не авто-воспроизводим пассивно
-                    seekToPositionMs = chapterInfo.lastListenedPosition
-                )
-            }
-            // Сценарий, когда VM загрузил новую главу (Б), а сервис
-            // все еще играет старую (А).
-            else if (!isCorrectChapterLoaded && !isServiceEmpty) {
-                Log.d(
-                    "MainScaffold_Sync",
-                    "Triggering passive restore (Service has wrong chapter). Loading new media."
-                )
-                // Просто загружаем новую главу. setMedia() сам остановит старую.
-                service.setMedia(
-                    bookId = bookId,
-                    chapterId = chapterId,
-                    media = chapterInfo.media,
-                    chapterTitle = chapterInfo.chapterTitle,
-                    coverPath = chapterInfo.coverPath,
-                    playWhenReady = false, // Пассивный переход не должен авто-играть
-                    seekToPositionMs = chapterInfo.lastListenedPosition
-                )
-            }
-            // (Если isCorrectChapterLoaded = true, ничего не делаем -
-            // это сценарий перезапуска, когда сервис уже играет нужную главу)
-
-        }
-    }
-
 
     LaunchedEffect(Unit) {
         mainViewModel.navigationEvent.collect { event ->
@@ -480,17 +482,16 @@ fun MainScaffold(
                     val isPlayerScreenActive =
                         currentDestination?.route == Screen.Bottom.Player.route
 
-                    // MiniPlayerBar должен появляться, если ИЛИ в сервисе что-то загружено,
-                    // ИЛИ ViewModel знает, что что-то ДОЛЖНО быть загружено (после перезапуска).
+                    // Показываем, ТОЛЬКО если СЕРВИС что-то загрузил
                     val isSomethingLoaded =
-                        playerState.loadedChapterId.isNotEmpty() || playerUiState.chapterId != null
+                        playerState.loadedChapterId.isNotEmpty()
 
                     val showMiniPlayer = isSomethingLoaded && !isPlayerScreenActive
 
                     if (showMiniPlayer) {
                         MiniPlayerBar(
                             playerState = playerState,
-                            chapterTitle = playerUiState.chapterInfo?.chapterTitle ?: "Аудиоплеер",
+                            chapterTitle = playerState.fileName.ifEmpty { "Аудиоплеер" },
                             bookTitle = playerUiState.chapterInfo?.bookTitle ?: "",
                             onPlayPauseClick = { mediaService?.togglePlayPause() },
                             onBarClick = {
@@ -542,11 +543,10 @@ fun MainScaffold(
             }
         ) { innerPadding ->
 
-            // NavHost всегда занимает 100% места.
             NavHost(
                 navController = bottomNavController,
                 startDestination = startBottomRoute,
-                modifier = Modifier.fillMaxSize() // NavHost всегда во весь экран
+                modifier = Modifier.fillMaxSize()
             ) {
                 composable(Screen.Bottom.BookHub.route) {
                     val viewModel: BookHubViewModel = hiltViewModel()
@@ -554,8 +554,6 @@ fun MainScaffold(
 
                     BookHubScreen(
                         uiState = uiState,
-                        // Передаем нижний отступ, чтобы LazyColumn в BookHubScreen
-                        // мог добавить его в contentPadding.
                         bottomContentPadding = innerPadding.calculateBottomPadding(),
                         onNavigateToCharacters = {
                             uiState.bookId?.let { bookId ->

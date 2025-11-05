@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.hilt.android)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -58,4 +60,5 @@ dependencies {
     implementation(libs.material.kolor)
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.navigation.compose)
+    ksp(libs.hilt.compiler)
 }

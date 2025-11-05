@@ -2,13 +2,8 @@ package com.lapcevichme.bookweaver.features.chapterdetails
 
 import android.content.ClipDescription
 import android.content.ClipboardManager
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
-import android.os.IBinder
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -70,8 +65,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.PlayerState
 import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.features.player.PlayerViewModel
@@ -81,57 +74,19 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChapterDetailsScreen(
     state: ChapterDetailsUiState,
-    onNavigateBack: () -> Unit
+    playerState: PlayerState,
+    playerViewModel: PlayerViewModel,
+    mainViewModel: MainViewModel,
+    onNavigateBack: () -> Unit,
+    viewModel: ChapterDetailsViewModel = hiltViewModel()
 ) {
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
     val tabTitles = listOf("Сводка", "Сценарий", "Оригинал")
 
     val context = LocalContext.current
-    val activity = remember(context) {
-        context as? ComponentActivity
-            ?: throw IllegalStateException("Context is not a ComponentActivity")
-    }
-    val mainViewModel: MainViewModel = hiltViewModel(activity)
-    val playerViewModel: PlayerViewModel = hiltViewModel(activity)
 
-
-    // Логика привязки к MediaPlayerService
-    var mediaService by remember { mutableStateOf<MediaPlayerService?>(null) }
-    val isServiceBound = mediaService != null
-
-    val playerState by mediaService?.playerStateFlow
-        ?.collectAsStateWithLifecycle(initialValue = PlayerState())
-        ?: remember { mutableStateOf(PlayerState()) }
-
-    val serviceConnection = remember {
-        object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                Log.d("ChapterDetailsScreen", "Service connected")
-                val binder = service as MediaPlayerService.LocalBinder
-                mediaService = binder.getService()
-            }
-
-            override fun onServiceDisconnected(name: ComponentName?) {
-                Log.d("ChapterDetailsScreen", "Service disconnected")
-                mediaService = null
-            }
-        }
-    }
-
-    val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
-
-
-    DisposableEffect(Unit) {
-        val serviceIntent = Intent(context, MediaPlayerService::class.java)
-        context.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
-        onDispose {
-            if (isServiceBound) {
-                context.unbindService(serviceConnection)
-            }
-        }
-    }
-
+    // Логика буфера обмена
     var copiedText by remember { mutableStateOf<String?>(null) }
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -158,55 +113,16 @@ fun ChapterDetailsScreen(
         }
     }
 
-    /**
-     * Этот LaunchedEffect перехватывает команды от [PlayerViewModel],
-     * которые относятся к *этой* главе, и немедленно выполняет их,
-     * не дожидаясь, пока пользователь вернется на [MainScaffold].
-     */
-    LaunchedEffect(playerUiState, mediaService, state.details) {
-        val command = playerUiState.loadCommand ?: return@LaunchedEffect
-        val service = mediaService ?: return@LaunchedEffect
-        val screenDetails = state.details ?: return@LaunchedEffect
-
-        // Информация о главе, которую PlayerViewModel *намеревается* загрузить
-        val playerChapterInfo = playerUiState.chapterInfo ?: return@LaunchedEffect
-
-        // Выполняем команду, *только* если она относится к главе,
-        // открытой на этом экране
-        if (playerChapterInfo.media.subtitlesPath == screenDetails.subtitlesPath) {
-            Log.d("ChapterDetailsScreen", "LaunchedEffect: Executing LoadCommand locally.")
-
-            val isCorrectChapterLoaded =
-                service.playerStateFlow.value.loadedChapterId == playerChapterInfo.media.subtitlesPath
-
-            if (isCorrectChapterLoaded) {
-                // Глава уже загружена, просто мотаем и играем
-                command.seekToPositionMs?.let { service.seekTo(it) }
-                if (command.playWhenReady) service.play()
-            } else {
-                // Это новая глава, нужно загрузить медиа
-                service.setMedia(
-                    bookId = state.bookId,
-                    chapterId = state.chapterId,
-                    media = playerChapterInfo.media,
-                    chapterTitle = playerChapterInfo.chapterTitle,
-                    coverPath = playerChapterInfo.coverPath,
-                    playWhenReady = command.playWhenReady,
-                    seekToPositionMs = command.seekToPositionMs
-                        ?: playerChapterInfo.lastListenedPosition
-                )
-            }
-
-            // Сообщаем ViewModel, что команда выполнена
-            playerViewModel.onMediaSet()
-        }
-    }
-
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.chapterTitle, maxLines = 1) },
+                title = {
+                    Text(
+                        state.chapterTitle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -241,21 +157,20 @@ fun ChapterDetailsScreen(
                         }
                     }
 
-                    else -> {
+                    state.details != null -> {
                         HorizontalPager(
                             state = pagerState,
                             modifier = Modifier.fillMaxSize()
                         ) { page ->
                             when (page) {
                                 0 -> SummaryContent(
-                                    state.details?.teaser ?: "",
-                                    state.details?.synopsis ?: ""
+                                    state.details.teaser,
+                                    state.details.synopsis
                                 )
 
                                 1 -> {
                                     val isThisChapterPlaying =
-                                        !state.details?.subtitlesPath.isNullOrEmpty() &&
-                                                state.details.subtitlesPath == playerState.loadedChapterId
+                                        (state.details.hasAudio == true) && (state.chapterId == playerState.loadedChapterId)
 
                                     val positionForThisChapter = if (isThisChapterPlaying) {
                                         playerState.currentPosition
@@ -264,24 +179,24 @@ fun ChapterDetailsScreen(
                                     }
 
                                     ScenarioContent(
-                                        scenario = state.details?.scenario ?: emptyList(),
+                                        scenario = state.details.scenario,
                                         currentPosition = positionForThisChapter,
                                         onEntryClick = { entry ->
+
+                                            if (!entry.isPlayable) return@ScenarioContent
+
                                             if (isThisChapterPlaying) {
-                                                // Та же глава, просто мотаем
                                                 Log.d(
                                                     "ChapterDetailsScreen",
-                                                    "onEntryClick: Та же глава. Перемотка на ${entry.startMs}"
+                                                    "onEntryClick: Та же глава. Отправка команды seek ${entry.startMs}"
                                                 )
-                                                mediaService?.seekTo(entry.startMs)
+                                                playerViewModel.seekTo(entry.startMs)
 
-                                                // Если была пауза, а мы кликнули - начинаем играть
                                                 if (!playerState.isPlaying) {
-                                                    mediaService?.play()
+                                                    playerViewModel.play()
                                                 }
 
                                             } else {
-                                                // Другая глава, даем команду PlayerViewModel
                                                 Log.d(
                                                     "ChapterDetailsScreen",
                                                     "onEntryClick: Другая глава. Вызов playChapter(${state.bookId}, ${state.chapterId}, ${entry.startMs})"
@@ -297,13 +212,20 @@ fun ChapterDetailsScreen(
                                     )
                                 }
 
-                                2 -> OriginalTextContent(state.details?.originalText ?: "")
+                                2 -> OriginalTextContent(state.details.originalText)
                             }
+                        }
+                    }
+                    // Добавим 'else' на случай, если state.details == null, но isLoading == false и error == null
+                    else -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Нет данных для отображения")
                         }
                     }
                 }
             }
 
+            // Карточка буфера обмена
             CopiedTextActionsCard(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 copiedText = copiedText ?: "",
@@ -321,9 +243,7 @@ fun ChapterDetailsScreen(
     }
 }
 
-/**
- * Новая Composable-функция для отображения карточки с действиями
- */
+
 @Composable
 private fun CopiedTextActionsCard(
     modifier: Modifier = Modifier,
@@ -335,14 +255,14 @@ private fun CopiedTextActionsCard(
     AnimatedVisibility(
         visible = copiedText.isNotEmpty(),
         modifier = modifier,
-        enter = slideInVertically(initialOffsetY = { it }), // Въезжает снизу
-        exit = slideOutVertically(targetOffsetY = { it }) // Уезжает вниз
+        enter = slideInVertically(initialOffsetY = { it }),
+        exit = slideOutVertically(targetOffsetY = { it })
     ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
-                .navigationBarsPadding(), // Отступ от навигационной панели
+                .navigationBarsPadding(),
             shape = RoundedCornerShape(12.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
@@ -382,7 +302,6 @@ private fun CopiedTextActionsCard(
     }
 }
 
-
 @Composable
 private fun SummaryContent(teaser: String, synopsis: String) {
     Column(
@@ -407,10 +326,15 @@ private fun ScenarioContent(
     onEntryClick: (UiScenarioEntry) -> Unit
 ) {
     val lazyListState = rememberLazyListState()
-    val currentPlayingEntryId by remember(currentPosition) {
+
+    val currentPlayingEntryId by remember(currentPosition, scenario) {
         derivedStateOf {
+            // Не ищем, если нет аудио
+            if (scenario.none { it.isPlayable }) return@derivedStateOf null
+
             scenario.firstOrNull { entry ->
                 val isLastEntry = scenario.lastOrNull()?.id == entry.id
+                // Логика для последнего элемента: включаем endMs
                 if (isLastEntry) {
                     currentPosition >= entry.startMs && currentPosition <= entry.endMs
                 } else {
@@ -421,21 +345,32 @@ private fun ScenarioContent(
     }
 
     LaunchedEffect(currentPlayingEntryId) {
-        if (currentPlayingEntryId != null) {
-            val targetIndex = scenario.indexOfFirst { it.id == currentPlayingEntryId }
-            if (targetIndex != -1) {
-                val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
-                val isTargetVisible = visibleItems.any { it.index == targetIndex }
-                if (isTargetVisible) {
-                    Log.d("ScenarioContent", "Item $targetIndex is visible. Scrolling to focus.")
-                    lazyListState.animateScrollToItem(targetIndex, scrollOffset = -100)
-                } else {
-                    Log.d(
-                        "ScenarioContent",
-                        "Item $targetIndex is NOT visible. User is reading. No scroll."
-                    )
-                }
-            }
+        if (currentPlayingEntryId == null) return@LaunchedEffect
+
+        val targetIndex = scenario.indexOfFirst { it.id == currentPlayingEntryId }
+        if (targetIndex == -1) return@LaunchedEffect
+
+        // Не скроллим, если пользователь сам крутит список
+        val isScrolling = lazyListState.isScrollInProgress
+        if (isScrolling) {
+            Log.d("ScenarioContent", "User is scrolling. No auto-scroll.")
+            return@LaunchedEffect
+        }
+
+        // Проверяем, виден ли элемент (даже частично)
+        val visibleItemsInfo = lazyListState.layoutInfo.visibleItemsInfo
+        if (visibleItemsInfo.isEmpty()) {
+            return@LaunchedEffect // Список еще не отрисовался
+        }
+        val isTargetVisible = visibleItemsInfo.any { it.index == targetIndex }
+
+        // Скроллим, ТОЛЬКО ЕСЛИ элемент уже виден
+        if (isTargetVisible) {
+            Log.d("ScenarioContent", "Item $targetIndex is visible. Scrolling to focus.")
+            // Добавляем -100 смещения, чтобы реплика была не у самого края
+            lazyListState.animateScrollToItem(targetIndex, scrollOffset = -100)
+        } else {
+            Log.d("ScenarioContent", "Item $targetIndex is NOT visible. No auto-scroll.")
         }
     }
 
@@ -447,17 +382,21 @@ private fun ScenarioContent(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(scenario, key = { _, entry -> entry.id }) { index, entry ->
-                val isLastEntry = index == scenario.lastIndex
-                val isPlaying = if (isLastEntry) {
+
+                val isPlaying = entry.isPlayable && (if (index == scenario.lastIndex) {
                     currentPosition >= entry.startMs && currentPosition <= entry.endMs
                 } else {
                     currentPosition >= entry.startMs && currentPosition < entry.endMs
-                }
+                })
 
                 val highlightColor = MaterialTheme.colorScheme.primary
                 val speakerColor = MaterialTheme.colorScheme.onBackground
-                val defaultTextColor =
+                // Текст по умолчанию (для режима "нет аудио")
+                val defaultTextColor = MaterialTheme.colorScheme.onBackground
+                // Текст, с которым можно взаимодействовать (есть аудио, но не играет)
+                val interactiveTextColor =
                     MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                // Текст, который играет сейчас
                 val playingTextColor = MaterialTheme.colorScheme.onBackground
 
                 val annotatedString = buildAnnotatedString {
@@ -471,11 +410,16 @@ private fun ScenarioContent(
                         append(": ")
                     }
 
+                    // Базовый цвет текста зависит от того, есть ли аудио
+                    val baseColor = if (entry.isPlayable) interactiveTextColor else defaultTextColor
+
                     if (entry.words.isEmpty()) {
-                        withStyle(style = SpanStyle(color = if (isPlaying) playingTextColor else defaultTextColor)) {
+                        // Если слов нет, просто вставляем текст
+                        withStyle(style = SpanStyle(color = if (isPlaying) playingTextColor else baseColor)) {
                             append(entry.text)
                         }
                     } else {
+                        // Если слова есть, строим "караоке"
                         entry.words.forEach { word ->
                             val isCurrentWord = isPlaying &&
                                     currentPosition >= word.start && currentPosition <= word.end
@@ -485,13 +429,14 @@ private fun ScenarioContent(
                                     color = when {
                                         isCurrentWord -> highlightColor
                                         isPlaying -> playingTextColor
-                                        else -> defaultTextColor
+                                        else -> baseColor
                                     },
                                     fontWeight = if (isCurrentWord) FontWeight.Bold else FontWeight.Normal
                                 )
                             ) {
                                 append(word.word)
                             }
+                            append(" ") // Добавляем пробел между словами
                         }
                     }
                 }
@@ -505,19 +450,14 @@ private fun ScenarioContent(
                             else MaterialTheme.colorScheme.surface,
                             shape = MaterialTheme.shapes.medium
                         )
-                        .clickable { onEntryClick(entry) }
+                        .clickable(enabled = entry.isPlayable) { onEntryClick(entry) }
                         .padding(8.dp),
                     style = MaterialTheme.typography.bodyLarge
                 )
-
-                if (index < scenario.lastIndex) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
             }
         }
     }
 }
-
 
 @Composable
 private fun OriginalTextContent(text: String) {
@@ -532,4 +472,3 @@ private fun OriginalTextContent(text: String) {
         }
     }
 }
-
