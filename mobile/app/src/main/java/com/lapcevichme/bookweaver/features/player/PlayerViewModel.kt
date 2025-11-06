@@ -250,6 +250,7 @@ class PlayerViewModel @Inject constructor(
      * главы была выполнена.
      */
     fun onMediaSet() {
+        Log.d("PlayerViewModel", "onMediaSet: Clearing LoadCommand (SYNC)")
         _uiState.update { it.copy(loadCommand = null) }
     }
 
@@ -258,32 +259,38 @@ class PlayerViewModel @Inject constructor(
      */
     fun onPlayerStateChanged(playerState: PlayerState) {
         val currentState = _uiState.value
+        val command = currentState.loadCommand
 
-        // !! ФИКС: Добавлена проверка на ошибку, даже если команды нет !!
-        // Это ловит случай, когда сервис ломается (например, нет аудио),
-        // а ViewModel об этом не знает.
-        if (playerState.error != null && currentState.error == null && !currentState.clearService) {
-            Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error. Clearing command.")
-            _uiState.update { it.copy(loadCommand = null, error = playerState.error) }
+        // 1. Если команды нет, нас это не интересует
+        if (command == null) {
+            // !! ФИКС: Но мы *должны* обработать ошибку, о которой мы еще не знаем !!
+            if (playerState.error != null && currentState.error == null && !currentState.clearService) {
+                Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error. (No command, just reporting)")
+                _uiState.update { it.copy(error = playerState.error) }
+            }
+            return
         }
 
-        if (currentState.loadCommand == null) {
-            return // Команды нет, нечего сбрасывать
-        }
+        // 2. С этого момента у нас ЕСТЬ команда (command != null)
 
         val targetChapterId = currentState.chapterId
         val actualChapterId = playerState.loadedChapterId
 
-        if (playerState.error != null && !currentState.clearService) {
+        // 3. Обработка ошибки *во время* выполнения команды
+        if (playerState.error != null) {
             Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error during load command. Clearing command.")
             _uiState.update { it.copy(loadCommand = null, error = playerState.error) }
             return
         }
 
-        if (targetChapterId == actualChapterId) {
-            Log.d("PlayerViewModel", "onPlayerStateChanged: Target chapter ($targetChapterId) is now loaded. Clearing command.")
-            _uiState.update { it.copy(loadCommand = null) }
+        // 4. Команда для одной главы, а сервис загрузил другую (или пуст)
+        if (targetChapterId != actualChapterId) {
+            Log.d("PlayerViewModel", "onPlayerStateChanged: Waiting for chapter. Target: $targetChapterId, Actual: $actualChapterId")
+            return // Команда еще не выполнена, ждем нужную главу
         }
+
+        Log.d("PlayerViewModel", "onPlayerStateChanged: Command processed for $targetChapterId. Clearing command.")
+        _uiState.update { it.copy(loadCommand = null) }
     }
 
 
@@ -393,6 +400,7 @@ class PlayerViewModel @Inject constructor(
      * между раздельными вызовами seekTo() и play().
      */
     fun seekToAndPlay(positionMs: Long) {
+        Log.d("PlayerViewModel", "seekToAndPlay: Установка LoadCommand (play=true, seek=$positionMs)")
         _uiState.update { currentState ->
             val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
             currentState.copy(

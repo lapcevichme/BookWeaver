@@ -224,7 +224,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
 
         // Сценарий 1: Активная команда
         if (command != null) {
-            Log.d("AppNavHost_Sync", "SCENARIO 1: Active LoadCommand")
+            Log.d("AppNavHost_Sync", "SCENARIO 1: Active LoadCommand: Play=${command.playWhenReady}, Seek=${command.seekToPositionMs}")
             if (chapterInfo == null || bookId == null || chapterId == null) {
                 Log.e("AppNavHost_Sync", "LoadCommand failed: chapterInfo or IDs are null")
                 return@LaunchedEffect
@@ -244,8 +244,8 @@ fun AppNavHost(themeSetting: ThemeSetting) {
                 if (command.playWhenReady) {
                     service.play()
                 }
-                // Сбрасываем команду, ТОЛЬКО если это seek/play для УЖЕ загруженной главы
-                playerViewModel.onMediaSet()
+                Log.d("AppNavHost_Sync", "Command sent to service. Waiting for PlayerState change to consume.")
+
             } else {
                 // Новая глава. Загружаем.
                 Log.d(
@@ -266,8 +266,20 @@ fun AppNavHost(themeSetting: ThemeSetting) {
 
         // Сценарий 2: Пассивное восстановление
         // (Выполняется, ТОЛЬКО если command == null)
+
+        // --- НОВЫЙ ФИКС: ---
+        // НЕ ВЫПОЛНЯТЬ пассивное восстановление, если ViewModel УЖЕ
+        // находится в процессе загрузки (isLoading == true).
+        // Это предотвращает гонку, когда playChapter() инициирует загрузку
+        // (isLoading=true, command=null), а "Диспетчер" тут же пытается
+        // пассивно восстановить *старую* главу.
+        if (playerUiState.isLoading) {
+            Log.d("AppNavHost_Sync", "SCENARIO 2: SKIPPED (ViewModel is loading).")
+            return@LaunchedEffect
+        }
+
         if (chapterInfo != null && bookId != null && chapterId != null) {
-            Log.d("AppNavHost_Sync", "SCENARIO 2: Passive Restore Check")
+            Log.d("AppNavHost_Sync", "SCENARIO 2: Passive Restore Check (ViewModel is idle)")
             val isCorrectChapterLoaded = currentServiceChapterId.isNotEmpty() &&
                     currentServiceChapterId == chapterId
 

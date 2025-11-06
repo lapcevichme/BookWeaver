@@ -361,11 +361,13 @@ class MediaPlayerService : Service() {
     }
 
     fun play() {
+        Log.d(TAG, "play() called")
         player.play()
         if (ambientPlayer.mediaItemCount > 0) ambientPlayer.play() //
     }
 
     fun pause() {
+        Log.d(TAG, "pause() called")
         player.pause()
         ambientPlayer.pause()
     }
