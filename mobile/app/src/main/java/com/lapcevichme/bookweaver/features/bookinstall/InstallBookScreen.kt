@@ -239,13 +239,13 @@ fun InstallBookScreen(
                                 }
 
                                 if (progress.totalBytes > 0) {
-                                    LinearProgressIndicator(
+                                    LinearWavyProgressIndicator(
                                         progress = { percent },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 } else {
                                     // "Бесконечный" прогресс-бар
-                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
                                 }
 
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -261,7 +261,7 @@ fun InstallBookScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                CircularProgressIndicator()
+                                LoadingIndicator()
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text("Установка...", style = MaterialTheme.typography.bodyLarge)
                             }

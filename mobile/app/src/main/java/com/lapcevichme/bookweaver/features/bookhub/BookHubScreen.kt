@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.dp
  * Этот экран теперь является "Хабом" для активной книги.
  * Он не знает о NavController, а только сообщает о событиях навигации через коллбэки.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
+    ExperimentalMaterial3ExpressiveApi::class
+)
 @Composable
 fun BookHubScreen(
     uiState: BookDetailsUiState,
@@ -56,7 +58,7 @@ fun BookHubScreen(
                 Box(Modifier
                     .fillMaxSize()
                     .padding(padding), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    LoadingIndicator()
                 }
             }
 

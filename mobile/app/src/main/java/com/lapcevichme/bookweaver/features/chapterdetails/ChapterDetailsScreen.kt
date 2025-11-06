@@ -35,10 +35,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -70,7 +73,9 @@ import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.features.player.PlayerViewModel
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
+    ExperimentalMaterial3ExpressiveApi::class
+)
 @Composable
 fun ChapterDetailsScreen(
     state: ChapterDetailsUiState,
@@ -147,7 +152,7 @@ fun ChapterDetailsScreen(
                 when {
                     state.isLoading -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
+                            LoadingIndicator()
                         }
                     }
 
@@ -184,7 +189,7 @@ fun ChapterDetailsScreen(
                                         onEntryClick = { entry ->
 
                                             if (!entry.isPlayable) return@ScenarioContent
-                                            
+
                                             if (isThisChapterPlaying) {
                                                 Log.d(
                                                     "ChapterDetailsScreen",
