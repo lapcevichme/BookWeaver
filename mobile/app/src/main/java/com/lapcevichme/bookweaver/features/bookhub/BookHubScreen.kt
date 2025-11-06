@@ -74,8 +74,6 @@ fun BookHubScreen(
                         .fillMaxSize()
                         .padding(padding),
                     contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
                         bottom = bottomContentPadding
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -84,17 +82,18 @@ fun BookHubScreen(
                         stickyHeader {
                             Surface(
                                 modifier = Modifier.fillParentMaxWidth(),
-                                shadowElevation = 2.dp
+                                color = MaterialTheme.colorScheme.surfaceContainer
                             ) {
                                 Text(
                                     text = volume.title,
                                     style = MaterialTheme.typography.titleLarge,
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp)
                                 )
                             }
                         }
                         items(volume.chapters, key = { it.id }) { chapter ->
                             ChapterItem(
+                                modifier = Modifier.padding(horizontal = 16.dp),
                                 chapter = chapter,
                                 isActive = chapter.id == uiState.activeChapterId,
                                 onViewDetailsClick = { onChapterViewDetailsClick(chapter.id) },
@@ -121,10 +120,11 @@ private fun ChapterItem(
     chapter: UiChapter,
     isActive: Boolean,
     onViewDetailsClick: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onViewDetailsClick),
         // Меняем цвет фона для активной главы

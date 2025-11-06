@@ -219,7 +219,6 @@ private fun AudioPlayerScreenUI(
                                 textSize = 18f
                                 textAlignment = TextView.TEXT_ALIGNMENT_CENTER
                                 setTextColor(subtitleColorInt)
-                                setShadowLayer(8f, 0f, 0f, android.graphics.Color.BLACK)
                                 movementMethod = ScrollingMovementMethod.getInstance()
                             }
                         },

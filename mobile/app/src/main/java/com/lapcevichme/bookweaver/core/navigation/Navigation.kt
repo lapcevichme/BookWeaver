@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
@@ -596,7 +597,7 @@ fun MainScaffold(
                 if (navBackStackEntry?.destination?.route == Screen.Bottom.Library.route) {
                     FloatingActionButton(onClick = { rootNavController.navigate(Screen.InstallBook.route) }) {
                         Icon(
-                            Icons.AutoMirrored.Filled.LibraryBooks,
+                            Icons.Default.Add,
                             contentDescription = "Добавить книгу"
                         )
                     }
