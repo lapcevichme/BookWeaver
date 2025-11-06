@@ -207,6 +207,16 @@ class MediaPlayerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // !! ANR FIX !!
+        // Мы обязаны немедленно вызвать startForeground, если сервис был запущен через startForegroundService().
+        // Это уведомление будет почти сразу заменено или удалено вызовом updateNotification() ниже.
+        val minimalNotification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("BookWeaver")
+            .setContentText("Инициализация плеера...")
+            .setSmallIcon(android.R.drawable.ic_media_play) // TODO: Заменить на иконку приложения
+            .build()
+        startForeground(NOTIFICATION_ID, minimalNotification)
+
         updateNotification()
         when (intent?.action) {
             ACTION_PLAY -> play()
@@ -677,7 +687,7 @@ class MediaPlayerService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(_playerStateFlow.value.fileName.ifEmpty { "Аудиоплеер" })
             .setContentText("BookWeaver")
-            .setSmallIcon(android.R.drawable.ic_media_play) //
+            .setSmallIcon(android.R.drawable.ic_media_play) // TODO: Заменить на иконку приложения
             .setLargeIcon(placeholderBitmap)
             .setContentIntent(mediaSession.controller.sessionActivity)
             .setDeleteIntent(createPendingIntent(ACTION_STOP))
@@ -694,8 +704,11 @@ class MediaPlayerService : Service() {
             .build()
 
         if (_playerStateFlow.value.loadedChapterId.isNotEmpty()) {
+            // Если у нас есть контент, мы ОБНОВЛЯЕМ уведомление
             startForeground(NOTIFICATION_ID, notification)
         } else {
+            // Если контента нет, мы УБИРАЕМ сервис из foreground
+            // (но он продолжит жить, если привязан)
             stopForeground(STOP_FOREGROUND_REMOVE) //
         }
     }
@@ -727,4 +740,3 @@ class MediaPlayerService : Service() {
         mediaSession.release()
     }
 }
-

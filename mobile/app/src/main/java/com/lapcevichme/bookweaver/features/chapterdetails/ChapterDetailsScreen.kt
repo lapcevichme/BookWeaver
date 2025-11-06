@@ -184,17 +184,18 @@ fun ChapterDetailsScreen(
                                         onEntryClick = { entry ->
 
                                             if (!entry.isPlayable) return@ScenarioContent
-
+                                            
                                             if (isThisChapterPlaying) {
                                                 Log.d(
                                                     "ChapterDetailsScreen",
-                                                    "onEntryClick: Та же глава. Отправка команды seek ${entry.startMs}"
+                                                    "onEntryClick: Та же глава. Отправка команды seekAndPlay ${entry.startMs}"
                                                 )
-                                                playerViewModel.seekTo(entry.startMs)
-
-                                                if (!playerState.isPlaying) {
-                                                    playerViewModel.play()
-                                                }
+                                                // playerViewModel.seekTo(entry.startMs)
+                                                //
+                                                // if (!playerState.isPlaying) {
+                                                //     playerViewModel.play()
+                                                // }
+                                                playerViewModel.seekToAndPlay(entry.startMs)
 
                                             } else {
                                                 Log.d(

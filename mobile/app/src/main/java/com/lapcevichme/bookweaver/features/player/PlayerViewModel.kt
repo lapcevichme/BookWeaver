@@ -61,7 +61,7 @@ class PlayerViewModel @Inject constructor(
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                error = null,
+                                error = "Книга не выбрана",
                                 chapterInfo = null,
                                 bookId = null,
                                 chapterId = null,
@@ -382,6 +382,23 @@ class PlayerViewModel @Inject constructor(
             currentState.copy(
                 loadCommand = baseCommand.copy(
                     playWhenReady = true
+                )
+            )
+        }
+    }
+
+    /**
+     * Атомарно устанавливает команду на перемотку и воспроизведение.
+     * Используется из ChapterDetailsScreen, чтобы избежать race condition
+     * между раздельными вызовами seekTo() и play().
+     */
+    fun seekToAndPlay(positionMs: Long) {
+        _uiState.update { currentState ->
+            val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
+            currentState.copy(
+                loadCommand = baseCommand.copy(
+                    playWhenReady = true,
+                    seekToPositionMs = positionMs
                 )
             )
         }
