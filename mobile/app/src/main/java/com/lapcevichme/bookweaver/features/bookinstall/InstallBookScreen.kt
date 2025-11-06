@@ -3,6 +3,10 @@ package com.lapcevichme.bookweaver.features.bookinstall
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +23,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+// --- ИЗМЕНЕНИЕ ---
+// Добавляем импорт из доменного слоя
+import com.lapcevichme.bookweaver.domain.model.DownloadProgress
+// --- КОНЕЦ ИЗМЕНЕНИЯ ---
+import kotlin.math.roundToInt
 
 /**
  * Обновленный экран установки, который теперь тоже "глупый".
@@ -104,12 +113,12 @@ fun InstallBookScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("URL на .bw файл") },
                         singleLine = true,
-                        enabled = !uiState.isLoading
+                        enabled = !uiState.isBusy
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = { onEvent(InstallationEvent.InstallFromUrlClicked) },
-                        enabled = !uiState.isLoading && uiState.urlInput.isNotBlank(),
+                        enabled = !uiState.isBusy && uiState.urlInput.isNotBlank(),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Download, null)
@@ -152,7 +161,7 @@ fun InstallBookScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     OutlinedButton(
                         onClick = { filePickerLauncher.launch("*/*") },
-                        enabled = !uiState.isLoading,
+                        enabled = !uiState.isBusy,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Выбрать файл .bw с устройства")
@@ -176,7 +185,7 @@ fun InstallBookScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = { /* TODO: qrCodeLauncher.launch(...) */ },
-                        enabled = !uiState.isLoading,
+                        enabled = !uiState.isBusy,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Сканировать QR-код")
@@ -185,19 +194,44 @@ fun InstallBookScreen(
             }
 
 
-            // ИНДИКАТОР ЗАГРУЗКИ
+            // Блок индикатора загрузки
             AnimatedContent(
-                targetState = uiState.isLoading,
+                targetState = uiState.downloadProgress,
                 label = "loading-indicator",
-                modifier = Modifier.padding(vertical = 24.dp)
-            ) { isLoading ->
-                if (isLoading) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CircularProgressIndicator()
-                        Text("Установка...", style = MaterialTheme.typography.bodyLarge)
+                modifier = Modifier
+                    .padding(vertical = 24.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp), // Задаем минимальную высоту
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
+                }
+            ) { progressState ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    when (progressState) {
+                        is DownloadProgress.Downloading -> {
+                            // Показываем LinearProgressIndicator с процентами
+                            LinearProgressIndicator(
+                                progress = { progressState.percent / 100f },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                "Скачивание... ${progressState.percent}%",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                        DownloadProgress.Installing -> {
+                            // Показываем бесконечный CircularProgressIndicator
+                            CircularProgressIndicator()
+                            Text("Установка...", style = MaterialTheme.typography.bodyLarge)
+                        }
+                        DownloadProgress.Idle -> {
+                            // Ничего не показываем, когда бездействуем
+                            Spacer(modifier = Modifier.height(48.dp))
+                        }
                     }
                 }
             }

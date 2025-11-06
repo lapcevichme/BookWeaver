@@ -10,9 +10,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.lapcevichme.bookweaver.domain.model.DownloadProgress
 
 
 @HiltViewModel
@@ -37,10 +40,39 @@ class BookInstallationViewModel @Inject constructor(
 
     private fun installFromUrl() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, installationResult = null) }
-            val result = downloadAndInstallBookUseCase(_uiState.value.urlInput)
-            _uiState.update {
-                it.copy(isLoading = false, installationResult = result.map {})
+            downloadAndInstallBookUseCase(_uiState.value.urlInput)
+                .catch { e ->
+                    _uiState.update {
+                        it.copy(
+                            installationResult = Result.failure(e),
+                            downloadProgress = DownloadProgress.Idle
+                        )
+                    }
+                }
+                .onCompletion {
+                    if (_uiState.value.isBusy) {
+                        _uiState.update { it.copy(downloadProgress = DownloadProgress.Idle) }
+                    }
+                }
+                .collect { progress ->
+                    when (progress) {
+                        is DownloadProgress.Downloading -> {
+                            _uiState.update { it.copy(downloadProgress = progress) }
+                        }
+                        DownloadProgress.Installing -> {
+                            _uiState.update { it.copy(downloadProgress = progress) }
+                        }
+                        // 'Idle' не должен приходить из UseCase, но на всякий случай
+                        DownloadProgress.Idle -> {
+                            _uiState.update { it.copy(downloadProgress = DownloadProgress.Idle) }
+                        }
+                    }
+                }
+
+            if (_uiState.value.installationResult == null) {
+                _uiState.update {
+                    it.copy(installationResult = Result.success(Unit))
+                }
             }
         }
     }
@@ -48,21 +80,33 @@ class BookInstallationViewModel @Inject constructor(
     private fun installFromUri(uri: Uri?) {
         if (uri == null) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, installationResult = null) }
+            // Установка из файла - это быстрый процесс,
+            // поэтому мы просто покажем "Установка..."
+            _uiState.update {
+                it.copy(
+                    downloadProgress = DownloadProgress.Installing,
+                    installationResult = null
+                )
+            }
             try {
                 // Преобразование Uri -> InputStream происходит здесь, в presentation слое
                 context.contentResolver.openInputStream(uri)?.use { inputStream ->
                     val result = installBookUseCase(inputStream)
                     _uiState.update {
-                        it.copy(isLoading = false, installationResult = result.map {})
+                        it.copy(
+                            downloadProgress = DownloadProgress.Idle,
+                            installationResult = result.map {}
+                        )
                     }
                 } ?: throw Exception("Не удалось открыть файл")
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(isLoading = false, installationResult = Result.failure(e))
+                    it.copy(
+                        downloadProgress = DownloadProgress.Idle,
+                        installationResult = Result.failure(e)
+                    )
                 }
             }
         }
     }
 }
-

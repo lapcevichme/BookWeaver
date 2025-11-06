@@ -7,6 +7,7 @@ import com.lapcevichme.bookweaver.domain.model.BookManifest
 import com.lapcevichme.bookweaver.domain.model.Chapter
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import com.lapcevichme.bookweaver.domain.model.ChapterSummary
+import com.lapcevichme.bookweaver.domain.model.DownloadProgress
 import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
@@ -109,6 +110,10 @@ class MockBookRepository @Inject constructor() : BookRepository {
                 chapters = mockChapters
             )
         )
+    }
+
+    override fun downloadAndInstallBook(url: String): Flow<DownloadProgress> {
+        TODO("Not yet implemented")
     }
 
     override suspend fun getScenarioForChapter(
@@ -217,22 +222,22 @@ class MockBookRepository @Inject constructor() : BookRepository {
         TODO("Not yet implemented")
     }
 
-    override suspend fun downloadAndInstallBook(url: String): Result<File> {
-        delay(2000) // Симуляция долгой загрузки
-        if (url.contains("fail")) {
-            return Result.failure(Exception("Не удалось скачать книгу (симуляция)"))
-        }
-
-        val newBook = Book(
-            id = "downloaded_${UUID.randomUUID()}",
-            title = "Скачанная книга",
-            localPath = "/mock/downloaded",
-            coverPath = null,
-            author = null
-        )
-        mockBooks.add(newBook)
-        return Result.success(File(newBook.localPath))
-    }
+//    override suspend fun downloadAndInstallBook(url: String): Result<File> {
+//        delay(2000) // Симуляция долгой загрузки
+//        if (url.contains("fail")) {
+//            return Result.failure(Exception("Не удалось скачать книгу (симуляция)"))
+//        }
+//
+//        val newBook = Book(
+//            id = "downloaded_${UUID.randomUUID()}",
+//            title = "Скачанная книга",
+//            localPath = "/mock/downloaded",
+//            coverPath = null,
+//            author = null
+//        )
+//        mockBooks.add(newBook)
+//        return Result.success(File(newBook.localPath))
+//    }
 
     override suspend fun installBook(inputStream: InputStream): Result<File> {
         delay(1500)

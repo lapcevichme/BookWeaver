@@ -2,6 +2,7 @@ package com.lapcevichme.bookweaver.domain.repository
 
 import com.lapcevichme.bookweaver.domain.model.Book
 import com.lapcevichme.bookweaver.domain.model.BookDetails
+import com.lapcevichme.bookweaver.domain.model.DownloadProgress
 import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
@@ -27,8 +28,7 @@ interface BookRepository {
      * @param url Ссылка на .bw файл.
      * @return Возвращает Result с путем к папке книги в случае успеха.
      */
-    suspend fun downloadAndInstallBook(url: String): Result<File>
-
+    fun downloadAndInstallBook(url: String): Flow<DownloadProgress>
     /**
      * Устанавливает книгу из потока данных.
      * @param inputStream Поток данных .bw архива.

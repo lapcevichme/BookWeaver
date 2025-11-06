@@ -24,6 +24,7 @@ import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.Chapter
 import com.lapcevichme.bookweaver.domain.model.ChapterMedia
 import com.lapcevichme.bookweaver.domain.model.DomainWordEntry
+import com.lapcevichme.bookweaver.domain.model.DownloadProgress
 import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.PlayerChapterInfo
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
@@ -33,6 +34,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -74,36 +77,6 @@ class BookRepositoryImpl @Inject constructor(
             booksDir.mkdirs()
         }
     }
-    /*
-        override fun getLocalBooks(): Flow<List<Book>> = flow {
-            val books = withContext(Dispatchers.IO) {
-                booksDir.listFiles()?.filter { it.isDirectory }?.mapNotNull { bookDir ->
-                    val manifestFile = File(bookDir, "manifest.json")
-                    if (manifestFile.exists()) {
-                        try {
-                            val manifestDto =
-                                json.decodeFromString<BookManifestDto>(manifestFile.readText())
-                            val coverFile = File(bookDir, "cover.jpg")
-
-                            Book(
-                                id = bookDir.name,
-                                title = manifestDto.bookName,
-                                author = manifestDto.author,
-                                localPath = bookDir.absolutePath,
-                                coverPath = if (coverFile.exists()) coverFile.absolutePath else null
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                } ?: emptyList()
-            }
-            emit(books)
-        }
-     */
 
     override fun getLocalBooks(): Flow<List<Book>> = bookDao.getAllBooks()
         .map { entities ->
@@ -196,95 +169,143 @@ class BookRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun downloadAndInstallBook(url: String): Result<File> =
-        withContext(Dispatchers.IO) {
-            try {
-                val request = Request.Builder().url(url).build()
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw Exception("Ошибка скачивания: ${response.code}")
-                    response.body!!.byteStream().use { inputStream ->
-                        return@withContext installBook(inputStream)
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Result.failure(e)
-            }
-        }
+    override fun downloadAndInstallBook(url: String): Flow<DownloadProgress> = flow {
+        var tempFile: File? = null
+        try {
+            emit(DownloadProgress.Downloading(0))
 
-    override suspend fun installBook(inputStream: InputStream): Result<File> =
-        withContext(Dispatchers.IO) {
-            // Копируем входящий поток во временный файл, чтобы его можно было читать несколько раз.
-            val tempFile = File.createTempFile("install_", ".bw", context.cacheDir)
+            val request = Request.Builder().url(url).build()
+            val response = httpClient.newCall(request).execute()
+
+            if (!response.isSuccessful) throw Exception("Ошибка скачивания: ${response.code}")
+
+            val body = response.body
+            val totalBytes = body.contentLength()
+            tempFile = File.createTempFile("install_", ".bw", context.cacheDir)
+
             FileOutputStream(tempFile).use { output ->
-                inputStream.use { input -> input.copyTo(output) }
-            }
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(8 * 1024)
+                    var bytesRead: Int
+                    var totalBytesRead = 0L
+                    var lastEmittedProgress = 0
 
-            try {
-                var bookId: String?
-                lateinit var manifest: BookManifestDto
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        totalBytesRead += bytesRead
 
-                // Первый проход: Ищем manifest.json и определяем ID книги (имя папки).
-                ZipFile(tempFile).use { zipFile ->
-                    val manifestEntry = zipFile.getEntry("manifest.json")
-                        ?: return@withContext Result.failure(Exception("manifest.json не найден в архиве"))
-
-                    val manifestContent =
-                        zipFile.getInputStream(manifestEntry).bufferedReader().readText()
-                    manifest = json.decodeFromString<BookManifestDto>(manifestContent)
-                    bookId = manifest.bookName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").lowercase()
-                }
-
-                if (bookId == null) {
-                    return@withContext Result.failure(Exception("Не удалось определить ID книги из манифеста"))
-                }
-
-                val bookDir = File(booksDir, bookId!!)
-                if (bookDir.exists()) bookDir.deleteRecursively()
-                bookDir.mkdirs()
-
-                // Второй проход: Распаковываем все файлы в нужную директорию.
-                ZipFile(tempFile).use { zipFile ->
-                    for (entry in zipFile.entries()) {
-                        val outputFile = File(bookDir, entry.name)
-                        if (entry.isDirectory) {
-                            outputFile.mkdirs()
-                        } else {
-                            outputFile.parentFile?.mkdirs()
-                            zipFile.getInputStream(entry).use { input ->
-                                FileOutputStream(outputFile).use { output ->
-                                    input.copyTo(output)
-                                }
+                        if (totalBytes > 0) {
+                            val progress = (totalBytesRead * 100 / totalBytes).toInt()
+                            if (progress > lastEmittedProgress) {
+                                emit(DownloadProgress.Downloading(progress))
+                                lastEmittedProgress = progress
                             }
                         }
                     }
                 }
+            }
 
-                // Нам нужен путь к обложке
-                val coverFile = File(bookDir, "cover.jpg")
+            emit(DownloadProgress.Installing)
+            val installResult = installBookFromFile(tempFile)
+            if (installResult.isFailure) {
+                throw installResult.exceptionOrNull() ?: Exception("Неизвестная ошибка установки")
+            }
 
-                // Создаем доменную модель Book, используя `manifest` из первого прохода
-                val domainBook = Book(
-                    id = bookId,
-                    title = manifest.bookName,
-                    author = manifest.author,
-                    localPath = bookDir.absolutePath,
-                    coverPath = if (coverFile.exists()) coverFile.absolutePath else null
-                )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            throw e
+        } finally {
+            tempFile?.delete()
+        }
+    }.flowOn(Dispatchers.IO)
 
-                // Сохраняем ее в базу данных
-                bookDao.insertBook(domainBook.toEntity())
-
-
-                return@withContext Result.success(bookDir)
+    /**
+     * Этот метод остался для обратной совместимости (установка из файла)
+     * Он просто сохраняет поток во временный файл и вызывает installBookFromFile
+     */
+    override suspend fun installBook(inputStream: InputStream): Result<File> =
+        withContext(Dispatchers.IO) {
+            val tempFile = File.createTempFile("install_", ".bw", context.cacheDir)
+            try {
+                FileOutputStream(tempFile).use { output ->
+                    inputStream.use { input -> input.copyTo(output) }
+                }
+                // Вызываем новый метод
+                installBookFromFile(tempFile)
             } catch (e: Exception) {
-                e.printStackTrace()
-                return@withContext Result.failure(e)
+                Result.failure(e)
             } finally {
-                // 4. Очищаем временный файл.
                 tempFile.delete()
             }
         }
+
+    /**
+     * Новый приватный метод, который содержит основную логику распаковки
+     */
+    private suspend fun installBookFromFile(file: File): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            var bookId: String?
+            lateinit var manifest: BookManifestDto
+
+            // Первый проход: Ищем manifest.json и определяем ID книги (имя папки).
+            ZipFile(file).use { zipFile ->
+                val manifestEntry = zipFile.getEntry("manifest.json")
+                    ?: return@withContext Result.failure(Exception("manifest.json не найден в архиве"))
+
+                val manifestContent =
+                    zipFile.getInputStream(manifestEntry).bufferedReader().readText()
+                manifest = json.decodeFromString<BookManifestDto>(manifestContent)
+                bookId = manifest.bookName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").lowercase()
+            }
+
+            if (bookId == null) {
+                return@withContext Result.failure(Exception("Не удалось определить ID книги из манифеста"))
+            }
+
+            val bookDir = File(booksDir, bookId!!)
+            if (bookDir.exists()) bookDir.deleteRecursively()
+            bookDir.mkdirs()
+
+            // Второй проход: Распаковываем все файлы в нужную директорию.
+            ZipFile(file).use { zipFile ->
+                for (entry in zipFile.entries()) {
+                    val outputFile = File(bookDir, entry.name)
+                    if (entry.isDirectory) {
+                        outputFile.mkdirs()
+                    } else {
+                        outputFile.parentFile?.mkdirs()
+                        zipFile.getInputStream(entry).use { input ->
+                            FileOutputStream(outputFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Нам нужен путь к обложке
+            val coverFile = File(bookDir, "cover.jpg")
+
+            // Создаем доменную модель Book, используя `manifest` из первого прохода
+            val domainBook = Book(
+                id = bookId,
+                title = manifest.bookName,
+                author = manifest.author,
+                localPath = bookDir.absolutePath,
+                coverPath = if (coverFile.exists()) coverFile.absolutePath else null
+            )
+
+            // Сохраняем ее в базу данных
+            bookDao.insertBook(domainBook.toEntity())
+
+            return@withContext Result.success(bookDir)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return@withContext Result.failure(e)
+        }
+        // Временный файл будет удален в `downloadAndInstallBook` или `installBook`
+    }
+
 
     override suspend fun getChapterOriginalText(bookId: String, chapterId: String): Result<String> =
         withContext(Dispatchers.IO) {
