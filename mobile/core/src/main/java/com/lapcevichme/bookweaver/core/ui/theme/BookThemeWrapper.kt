@@ -1,6 +1,5 @@
 package com.lapcevichme.bookweaver.core.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MotionScheme
 import androidx.compose.runtime.Composable
@@ -17,10 +16,10 @@ import com.materialkolor.DynamicMaterialExpressiveTheme
 @Composable
 fun BookThemeWrapper(
     viewModel: BookThemeWrapperViewModel = hiltViewModel(getLocalActivity()),
+    isDark: Boolean,
     content: @Composable () -> Unit
 ) {
     val seedColor by viewModel.themeSeedColor.collectAsStateWithLifecycle()
-    val isDark = isSystemInDarkTheme()
 
     // Используем ту же логику, что и в твоем MainActivity
     DynamicMaterialExpressiveTheme(

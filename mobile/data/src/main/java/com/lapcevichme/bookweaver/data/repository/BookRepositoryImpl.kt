@@ -339,9 +339,13 @@ class BookRepositoryImpl @Inject constructor(
             }
     }
 
-    override suspend fun setActiveBookId(bookId: String) {
+    override suspend fun setActiveBookId(bookId: String?) {
         context.dataStore.edit { settings ->
-            settings[PreferencesKeys.ACTIVE_BOOK_ID] = bookId
+            if (bookId == null) {
+                settings.remove(PreferencesKeys.ACTIVE_BOOK_ID)
+            } else {
+                settings[PreferencesKeys.ACTIVE_BOOK_ID] = bookId
+            }
         }
     }
 
@@ -598,5 +602,4 @@ class BookRepositoryImpl @Inject constructor(
     override suspend fun getLastListenedChapterId(bookId: String): String? = withContext(Dispatchers.IO) {
         return@withContext bookDao.getBookById(bookId)?.lastListenedChapterId
     }
-
 }

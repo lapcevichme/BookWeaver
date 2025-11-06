@@ -1,10 +1,11 @@
-package com.lapcevichme.bookweaver.features.settings
+package com.lapcevichme.bookweaver.features.settings.book
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.usecase.books.DeleteBookUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetBookDetailsUseCase
+import com.lapcevichme.bookweaver.domain.usecase.books.SetActiveBookUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +18,7 @@ import javax.inject.Inject
 class BookSettingsViewModel @Inject constructor(
     private val deleteBookUseCase: DeleteBookUseCase,
     private val getBookDetailsUseCase: GetBookDetailsUseCase,
+    private val setActiveBookUseCase: SetActiveBookUseCase,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -52,6 +54,11 @@ class BookSettingsViewModel @Inject constructor(
     private fun deleteBook() {
         viewModelScope.launch {
             val result = deleteBookUseCase(bookId)
+
+            if (result.isSuccess) {
+                setActiveBookUseCase(null)
+            }
+
             _uiState.update { it.copy(deletionResult = result) }
         }
     }

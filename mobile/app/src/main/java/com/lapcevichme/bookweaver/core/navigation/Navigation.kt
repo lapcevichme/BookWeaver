@@ -16,7 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingActionButton
@@ -57,6 +56,7 @@ import com.lapcevichme.bookweaver.core.ui.components.MiniPlayerBar
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapper
 import com.lapcevichme.bookweaver.core.ui.theme.BookThemeWrapperViewModel
 import com.lapcevichme.bookweaver.core.ui.theme.getLocalActivity
+import com.lapcevichme.bookweaver.domain.model.ThemeSetting
 import com.lapcevichme.bookweaver.features.bookhub.BookHubScreen
 import com.lapcevichme.bookweaver.features.bookhub.BookHubViewModel
 import com.lapcevichme.bookweaver.features.bookinstall.BookInstallationViewModel
@@ -70,9 +70,11 @@ import com.lapcevichme.bookweaver.features.library.LibraryViewModel
 import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.features.main.NavigationEvent
 import com.lapcevichme.bookweaver.features.main.StartupState
+import com.lapcevichme.bookweaver.features.onboarding.OnboardingLibraryScreen
 import com.lapcevichme.bookweaver.features.player.PlayerScreen
 import com.lapcevichme.bookweaver.features.player.PlayerViewModel
-import com.lapcevichme.bookweaver.features.settings.BookSettingsScreen
+import com.lapcevichme.bookweaver.features.settings.app.AppSettingsScreen
+import com.lapcevichme.bookweaver.features.settings.book.BookSettingsScreen
 import com.materialkolor.DynamicMaterialExpressiveTheme
 import kotlinx.coroutines.flow.collectLatest
 import com.lapcevichme.bookweaver.features.library.NavigationEvent as LibraryNavigationEvent
@@ -141,9 +143,20 @@ private val bottomNavItems = listOf(
     Screen.Bottom.Library,
 )
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun AppNavHost() {
+fun AppNavHost(themeSetting: ThemeSetting) {
     val navController = rememberNavController()
+
+    // Это вычисление - источник правды о том, темная тема или нет
+    val isDark = when (themeSetting) {
+        ThemeSetting.LIGHT -> false
+        ThemeSetting.DARK -> true
+        ThemeSetting.SYSTEM -> isSystemInDarkTheme()
+    }
+
+    val defaultSeedColor = Color(0xFF00668B)
+
     val mainViewModel: MainViewModel = hiltViewModel()
 
     val context = LocalContext.current
@@ -333,29 +346,60 @@ fun AppNavHost() {
                 mainViewModel = mainViewModel,
                 playerViewModel = playerViewModel,
                 playerState = playerState,
-                mediaService = mediaService
+                mediaService = mediaService,
+                isDark = isDark,
+                defaultSeedColor = defaultSeedColor
             )
         }
 
         composable(Screen.OnboardingLibrary.route) {
-            OnboardingLibraryScreen(
-                onBookInstalled = {
-                    navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
-                        popUpTo(Screen.OnboardingLibrary.route) { inclusive = true }
+            DynamicMaterialExpressiveTheme(
+                seedColor = defaultSeedColor,
+                isDark = isDark,
+                animate = true,
+                motionScheme = MotionScheme.expressive()
+            ) {
+
+                OnboardingLibraryScreen(
+                    onNavigateToInstall = {
+                        navController.navigate(Screen.InstallBook.route)
                     }
-                }
-            )
+                )
+            }
         }
 
         composable(Screen.InstallBook.route) {
             val viewModel: BookInstallationViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            DynamicMaterialExpressiveTheme(
+                seedColor = defaultSeedColor,
+                isDark = isDark,
+                animate = true,
+                motionScheme = MotionScheme.expressive()
+            ) {
+                InstallBookScreen(
+                    uiState = uiState,
+                    onEvent = viewModel::onEvent,
+                    onInstallationSuccess = {
+                        navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
+                            popUpTo("app_root") { inclusive = true }
+                        }
+                    }
+                )
+            }
+        }
 
-            InstallBookScreen(
-                uiState = uiState,
-                onEvent = viewModel::onEvent,
-                onInstallationSuccess = { navController.popBackStack() }
-            )
+        composable(Screen.AppSettings.route) {
+            DynamicMaterialExpressiveTheme(
+                seedColor = defaultSeedColor,
+                isDark = isDark,
+                animate = true,
+                motionScheme = MotionScheme.expressive()
+            ) {
+                AppSettingsScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -365,7 +409,7 @@ fun AppNavHost() {
             val viewModel: ChapterDetailsViewModel = hiltViewModel(backStackEntry)
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-            BookThemeWrapper {
+            BookThemeWrapper (isDark = isDark) {
                 ChapterDetailsScreen(
                     state = uiState,
                     playerState = playerState,
@@ -380,7 +424,7 @@ fun AppNavHost() {
             route = Screen.Characters.routeWithArgs,
             arguments = Screen.Characters.arguments
         ) { backStackEntry ->
-            BookThemeWrapper {
+            BookThemeWrapper (isDark = isDark) {
                 CharactersScreen(
                     onCharacterClick = { characterId ->
                         val bookId =
@@ -398,7 +442,7 @@ fun AppNavHost() {
             route = Screen.CharacterDetails.routeWithArgs,
             arguments = Screen.CharacterDetails.arguments
         ) {
-            BookThemeWrapper {
+            BookThemeWrapper (isDark = isDark) {
                 CharacterDetailsScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
@@ -409,12 +453,12 @@ fun AppNavHost() {
             route = Screen.BookSettings.routeWithArgs,
             arguments = Screen.BookSettings.arguments
         ) {
-            BookThemeWrapper {
+            BookThemeWrapper (isDark = isDark) {
                 BookSettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onBookDeleted = {
                         navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
-                            popUpTo("app_root") { inclusive = true }
+                            popUpTo(navController.graph.id)
                         }
                     }
                 )
@@ -432,7 +476,9 @@ fun MainScaffold(
     mainViewModel: MainViewModel,
     playerViewModel: PlayerViewModel,
     playerState: PlayerState,
-    mediaService: MediaPlayerService?
+    mediaService: MediaPlayerService?,
+    isDark: Boolean,
+    defaultSeedColor: Color
 ) {
     val bottomNavController = rememberNavController()
 
@@ -443,7 +489,6 @@ fun MainScaffold(
     val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val defaultSeedColor = Color(0xFF00668B)
     val routeToCheck = currentRoute ?: startBottomRoute
     val finalSeedColor = when (routeToCheck) {
         Screen.Bottom.Library.route -> defaultSeedColor
@@ -469,7 +514,7 @@ fun MainScaffold(
 
     DynamicMaterialExpressiveTheme(
         seedColor = finalSeedColor,
-        isDark = isSystemInDarkTheme(),
+        isDark = isDark,
         animate = true,
         motionScheme = MotionScheme.expressive()
     ) {
@@ -598,10 +643,10 @@ fun MainScaffold(
                                 is LibraryNavigationEvent.NavigateToBookHub -> {
                                     bottomNavController.navigate(Screen.Bottom.BookHub.route) {
                                         popUpTo(bottomNavController.graph.findStartDestination().id) {
+                                            inclusive = true
                                             saveState = true
                                         }
                                         launchSingleTop = true
-                                        restoreState = true
                                     }
                                 }
                             }
@@ -635,17 +680,6 @@ fun MainScaffold(
     }
 }
 
-
-// Заглушки для недостающих экранов
-
-@Composable
-fun OnboardingLibraryScreen(onBookInstalled: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Button(onClick = onBookInstalled) {
-            Text("Добавить первую книгу (заглушка)")
-        }
-    }
-}
 
 @Composable
 fun LoreHelperScreenPlaceholder() {

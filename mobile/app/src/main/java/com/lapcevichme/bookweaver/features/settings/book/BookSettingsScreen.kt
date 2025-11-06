@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.features.settings
+package com.lapcevichme.bookweaver.features.settings.book
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer

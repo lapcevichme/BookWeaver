@@ -134,8 +134,8 @@ class MockBookRepository @Inject constructor() : BookRepository {
         return _activeBookId
     }
 
-    override suspend fun setActiveBookId(bookId: String) {
-        _activeBookId.value = bookId
+    override suspend fun setActiveBookId(bookId: String?) {
+        TODO("Not yet implemented")
     }
 
     override suspend fun getActiveBookId(): String? {

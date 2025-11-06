@@ -52,7 +52,7 @@ interface BookRepository {
     ): Result<List<ScenarioEntry>>
 
     fun getActiveBookIdFlow(): Flow<String?>
-    suspend fun setActiveBookId(bookId: String)
+    suspend fun setActiveBookId(bookId: String?)
     suspend fun getActiveBookId(): String?
 
     /**

@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.features.settings
+package com.lapcevichme.bookweaver.features.settings.book
 
 sealed class BookSettingsEvent {
     object DeleteClicked : BookSettingsEvent()

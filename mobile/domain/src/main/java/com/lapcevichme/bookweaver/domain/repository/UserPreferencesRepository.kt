@@ -26,4 +26,15 @@ interface UserPreferencesRepository {
      * Сохранить новую громкость эмбиента.
      */
     suspend fun saveAmbientVolume(volume: Float)
+
+    /**
+     * Получить Flow с ключом текущей темы (например, "light", "dark").
+     * Возвращает null, если не установлено.
+     */
+    fun getThemeSetting(): Flow<String?>
+
+    /**
+     * Сохранить ключ новой темы.
+     */
+    suspend fun saveThemeSetting(themeKey: String)
 }

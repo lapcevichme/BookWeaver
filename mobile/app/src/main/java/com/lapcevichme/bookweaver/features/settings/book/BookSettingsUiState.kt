@@ -1,4 +1,4 @@
-package com.lapcevichme.bookweaver.features.settings
+package com.lapcevichme.bookweaver.features.settings.book
 
 data class BookSettingsUiState(
     val bookTitle: String = "Загрузка...",

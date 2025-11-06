@@ -10,7 +10,7 @@ import javax.inject.Inject
 class SetActiveBookUseCase @Inject constructor(
     private val bookRepository: BookRepository
 ) {
-    suspend operator fun invoke(bookId: String) {
+    suspend operator fun invoke(bookId: String?) {
         bookRepository.setActiveBookId(bookId)
     }
 }
