@@ -20,14 +20,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-// --- ИЗМЕНЕНИЕ ---
-// Добавляем импорт из доменного слоя
 import com.lapcevichme.bookweaver.domain.model.DownloadProgress
-// --- КОНЕЦ ИЗМЕНЕНИЯ ---
-import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /**
  * Обновленный экран установки, который теперь тоже "глупый".
@@ -38,9 +36,11 @@ import kotlin.math.roundToInt
 fun InstallBookScreen(
     uiState: BookInstallationUiState,
     onEvent: (InstallationEvent) -> Unit,
+    onNavigateBack: () -> Unit,
     onInstallationSuccess: () -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
@@ -58,8 +58,15 @@ fun InstallBookScreen(
                 onSuccess = { "Книга успешно установлена!" },
                 onFailure = { "Ошибка: ${it.message}" }
             )
-            snackbarHostState.showSnackbar(message)
-            onEvent(InstallationEvent.ResultHandled) // Сбрасываем результат
+
+            // Запускаем Snackbar в отдельной корутине,
+            // чтобы он не блокировал навигацию
+            scope.launch {
+                snackbarHostState.showSnackbar(message)
+            }
+
+            onEvent(InstallationEvent.ResultHandled)
+
             if (result.isSuccess) {
                 onInstallationSuccess()
             }
@@ -72,7 +79,7 @@ fun InstallBookScreen(
             TopAppBar(
                 title = { Text("Добавить книгу") },
                 navigationIcon = {
-                    IconButton(onClick = onInstallationSuccess) {
+                    IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
                     }
                 }
@@ -192,11 +199,9 @@ fun InstallBookScreen(
                     }
                 }
             }
-
-
             // Блок индикатора загрузки
             AnimatedContent(
-                targetState = uiState.downloadProgress,
+                targetState = uiState.downloadProgress::class,
                 label = "loading-indicator",
                 modifier = Modifier
                     .padding(vertical = 24.dp)
@@ -205,21 +210,23 @@ fun InstallBookScreen(
                 transitionSpec = {
                     fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
                 }
-            ) { progressState ->
+            ) { progressStateClass -> // <-- Теперь это класс
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    when (progressState) {
+                    // Внутри when мы используем актуальное значение из uiState
+                    when (uiState.downloadProgress) {
                         is DownloadProgress.Downloading -> {
+                            val progress = uiState.downloadProgress.percent
                             // Показываем LinearProgressIndicator с процентами
                             LinearProgressIndicator(
-                                progress = { progressState.percent / 100f },
+                                progress = { progress / 100f },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Text(
-                                "Скачивание... ${progressState.percent}%",
+                                "Скачивание... $progress%",
                                 style = MaterialTheme.typography.bodyLarge
                             )
                         }

@@ -392,12 +392,16 @@ fun AppNavHost(themeSetting: ThemeSetting) {
                 InstallBookScreen(
                     uiState = uiState,
                     onEvent = viewModel::onEvent,
+                    onNavigateBack = { navController.popBackStack() },
                     onInstallationSuccess = {
                         navController.navigate("main_scaffold/${Screen.Bottom.Library.route}") {
-                            popUpTo("app_root") { inclusive = true }
+                            popUpTo(navController.graph.id) {
+                                inclusive = true
+                            }
                         }
                     }
                 )
+
             }
         }
 
