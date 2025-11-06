@@ -172,7 +172,8 @@ class BookRepositoryImpl @Inject constructor(
     override fun downloadAndInstallBook(url: String): Flow<DownloadProgress> = flow {
         var tempFile: File? = null
         try {
-            emit(DownloadProgress.Downloading(0))
+            // Начинаем с 0 байт из 0 (пока не знаем размер)
+            emit(DownloadProgress.Downloading(0L, 0L))
 
             val request = Request.Builder().url(url).build()
             val response = httpClient.newCall(request).execute()
@@ -188,24 +189,20 @@ class BookRepositoryImpl @Inject constructor(
                     val buffer = ByteArray(8 * 1024)
                     var bytesRead: Int
                     var totalBytesRead = 0L
-                    var lastEmittedProgress = 0
 
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         output.write(buffer, 0, bytesRead)
                         totalBytesRead += bytesRead
 
-                        if (totalBytes > 0) {
-                            val progress = (totalBytesRead * 100 / totalBytes).toInt()
-                            if (progress > lastEmittedProgress) {
-                                emit(DownloadProgress.Downloading(progress))
-                                lastEmittedProgress = progress
-                            }
-                        }
+                        // Просто отправляем актуальные байты.
+                        emit(DownloadProgress.Downloading(totalBytesRead, totalBytes))
                     }
                 }
             }
 
+            // Файл скачан, начинаем установку
             emit(DownloadProgress.Installing)
+
             val installResult = installBookFromFile(tempFile)
             if (installResult.isFailure) {
                 throw installResult.exceptionOrNull() ?: Exception("Неизвестная ошибка установки")

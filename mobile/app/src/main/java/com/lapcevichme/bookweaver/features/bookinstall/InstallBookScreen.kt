@@ -26,12 +26,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.lapcevichme.bookweaver.domain.model.DownloadProgress
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Обновленный экран установки, который теперь тоже "глупый".
  * Принимает uiState и отдает onEvent.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InstallBookScreen(
     uiState: BookInstallationUiState,
@@ -201,6 +202,8 @@ fun InstallBookScreen(
             }
             // Блок индикатора загрузки
             AnimatedContent(
+                // Следим за классом состояния, а не за значением, чтобы анимация
+                // не срабатывала на каждом обновлении процентов
                 targetState = uiState.downloadProgress::class,
                 label = "loading-indicator",
                 modifier = Modifier
@@ -210,39 +213,82 @@ fun InstallBookScreen(
                 transitionSpec = {
                     fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
                 }
-            ) { progressStateClass -> // <-- Теперь это класс
+            ) { progressStateClass ->
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Внутри when мы используем актуальное значение из uiState
-                    when (uiState.downloadProgress) {
+                    when (val progress = uiState.downloadProgress) {
                         is DownloadProgress.Downloading -> {
-                            val progress = uiState.downloadProgress.percent
-                            // Показываем LinearProgressIndicator с процентами
-                            LinearProgressIndicator(
-                                progress = { progress / 100f },
+                            // Вложенный Column, чтобы текст был ПОД индикатором
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.fillMaxWidth()
-                            )
-                            Text(
-                                "Скачивание... $progress%",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
+                            ) {
+                                val percent: Float
+                                val text: String
+
+                                if (progress.totalBytes > 0) {
+                                    // Сервер дал размер
+                                    percent = (progress.bytesDownloaded.toFloat() / progress.totalBytes.toFloat())
+                                    text = "Скачивание... ${formatBytes(progress.bytesDownloaded)} / ${formatBytes(progress.totalBytes)} (${(percent * 100).roundToInt()}%)"
+                                } else {
+                                    // Сервер не дал размер, показываем только скачанные МБ
+                                    percent = 0f // Будет "бесконечный" LinearProgressIndicator
+                                    text = "Скачивание... ${formatBytes(progress.bytesDownloaded)}"
+                                }
+
+                                if (progress.totalBytes > 0) {
+                                    LinearProgressIndicator(
+                                        progress = { percent },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    // "Бесконечный" прогресс-бар
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = text,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
                         }
                         DownloadProgress.Installing -> {
-                            // Показываем бесконечный CircularProgressIndicator
-                            CircularProgressIndicator()
-                            Text("Установка...", style = MaterialTheme.typography.bodyLarge)
+                            // Вложенный Column, чтобы текст был ПОД индикатором
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                CircularProgressIndicator()
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Установка...", style = MaterialTheme.typography.bodyLarge)
+                            }
                         }
                         DownloadProgress.Idle -> {
                             // Ничего не показываем, когда бездействуем
+                            // Spacer нужен, чтобы `heightIn(min = 48.dp)` работал
                             Spacer(modifier = Modifier.height(48.dp))
                         }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
         }
+        Spacer(modifier = Modifier.height(16.dp))
     }
+}
+
+// TODO - в core
+/**
+ * Форматирует байты в читаемый вид (КБ, МБ, ГБ)
+ */
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kBytes = bytes / 1024.0
+    if (kBytes < 1024) return "${String.format("%.1f", kBytes)} KB"
+    val mBytes = kBytes / 1024.0
+    if (mBytes < 1024) return "${String.format("%.1f", mBytes)} MB"
+    val gBytes = mBytes / 1024.0
+    return "${String.format("%.1f", gBytes)} GB"
 }
