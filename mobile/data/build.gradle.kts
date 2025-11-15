@@ -60,4 +60,11 @@ dependencies {
 
     implementation(libs.material.kolor)
     ksp(libs.androidx.room.compiler)
+
+    implementation(libs.retrofit)
+
+    implementation(libs.logging.interceptor)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.retrofit2.kotlinx.serialization.converter)
+
 }
