@@ -1,56 +1,77 @@
 package com.lapcevichme.bookweaver.data.database
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
+import com.lapcevichme.bookweaver.data.database.entities.BookEntity
+import com.lapcevichme.bookweaver.data.database.entities.ChapterEntity
+import com.lapcevichme.bookweaver.domain.model.DownloadState
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object (DAO) для работы с таблицей книг.
- */
 @Dao
 interface BookDao {
-    /**
-     * Возвращает Flow, который автоматически эммитит новый список
-     * при любом изменении в таблице "books".
-     */
+
+    // --- Book Methods ---
+
     @Query("SELECT * FROM books ORDER BY title ASC")
     fun getAllBooks(): Flow<List<BookEntity>>
 
-    /**
-     * Добавляет или обновляет книгу в базе.
-     */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBook(book: BookEntity)
+    @Upsert
+    suspend fun upsertBook(book: BookEntity)
 
-    /**
-     * Удаляет книгу из базы по ее ID.
-     */
     @Query("DELETE FROM books WHERE id = :bookId")
     suspend fun deleteBook(bookId: String)
 
-    /**
-     * Возвращает Flow только с цветом темы для конкретной книги.
-     */
     @Query("SELECT themeColor FROM books WHERE id = :bookId")
     fun getBookThemeColor(bookId: String): Flow<Int?>
 
-    /**
-     * Обновляет цвет темы для конкретной книги.
-     */
     @Query("UPDATE books SET themeColor = :color WHERE id = :bookId")
     suspend fun updateThemeColor(bookId: String, color: Int)
 
-    /**
-     * Обновляет прогресс прослушивания для конкретной книги.
-     */
     @Query("UPDATE books SET lastListenedChapterId = :chapterId, lastListenedPosition = :position WHERE id = :bookId")
     suspend fun updateListenProgress(bookId: String, chapterId: String, position: Long)
 
-    /**
-     * Возвращает одну книгу по ID.
-     */
     @Query("SELECT * FROM books WHERE id = :bookId LIMIT 1")
     suspend fun getBookById(bookId: String): BookEntity?
+
+    @Query("UPDATE books SET source = 'SERVER', serverHost = :serverHost, remoteCoverUrl = :remoteCoverUrl, remoteManifestVersion = :remoteVersion WHERE id = :bookId")
+    suspend fun updateBookSource(bookId: String, serverHost: String, remoteCoverUrl: String?, remoteVersion: Int)
+
+    @Query("UPDATE books SET title = :newTitle, author = :newAuthor, remoteManifestVersion = :newVersion WHERE id = :bookId")
+    suspend fun updateBookMetadata(bookId: String, newTitle: String, newAuthor: String?, newVersion: Int)
+
+    // --- Chapter Methods ---
+
+    @Upsert
+    suspend fun upsertChapters(chapters: List<ChapterEntity>)
+
+    @Query("SELECT * FROM chapters WHERE bookId = :bookId ORDER BY chapterIndex ASC")
+    fun getChaptersForBook(bookId: String): Flow<List<ChapterEntity>>
+
+    @Query("SELECT * FROM chapters WHERE id = :chapterId LIMIT 1")
+    suspend fun getChapter(chapterId: String): ChapterEntity?
+
+    @Query(
+        """
+        UPDATE chapters 
+        SET 
+            downloadState = :state, 
+            localAudioPath = :localAudioPath, 
+            localScenarioPath = :localScenarioPath, 
+            localSubtitlesPath = :localSubtitlesPath,
+            localOriginalTextPath = :localOriginalTextPath
+        WHERE id = :chapterId
+        """
+    )
+    suspend fun updateChapterDownloadPaths(
+        chapterId: String,
+        state: DownloadState,
+        localAudioPath: String?,
+        localScenarioPath: String?,
+        localSubtitlesPath: String?,
+        localOriginalTextPath: String?
+    )
+
+    @Query("UPDATE chapters SET downloadState = :state WHERE id = :chapterId")
+    suspend fun updateChapterDownloadState(chapterId: String, state: DownloadState)
 }
