@@ -29,87 +29,35 @@ import javax.inject.Singleton
 @Singleton
 class MockBookRepository @Inject constructor() : BookRepository {
 
-    private val mockBooks = mutableListOf(
-        Book(
-            id = "mock-book-1",
-            title = "Монолог фармацевта: Приключения Маомао",
-            localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-1",
-            coverPath = null,
-            author = null
-        ),
-        Book(
-            id = "mock-book-2",
-            title = "Стальной Алхимик: Философский камень",
-            localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-2",
-            coverPath = null,
-            author = null
-        ),
-        Book(
-            id = "mock-book-3",
-            title = "Атака Титанов: Падение Шиганшины",
-            localPath = "/data/data/com.lapcevichme.bookweaver/files/books/mock-book-3",
-            coverPath = null,
-            author = null
-        )
-    )
 
     private val _activeBookId = MutableStateFlow<String?>("mock-book-1")
     private val _activeChapterId = MutableStateFlow<String?>("vol_1_chap_1")
 
 
-    override fun getLocalBooks(): Flow<List<Book>> = flow {
-        delay(1500) // Имитация загрузки из сети или с диска
-        emit(mockBooks)
+    override fun getBooks(): Flow<List<Book>> = flow {
+
     }
 
     override suspend fun getBookDetails(bookId: String): Result<BookDetails> {
-        val book = mockBooks.find { it.id == bookId }
-            ?: return Result.failure(Exception("Mock book not found"))
+        return TODO("Provide the return value")
+    }
 
-        val mockManifest = BookManifest(
-            bookName = book.title,
-            author = "Неизвестный автор",
-            characterVoices = emptyMap(),
-            defaultNarratorVoice = "narrator_default"
-        )
+    override suspend fun getCharacters(bookId: String): Result<List<BookCharacter>> {
+        TODO("Not yet implemented")
+    }
 
-        val mockCharacters = listOf(
-            BookCharacter(
-                id = UUID.randomUUID(),
-                name = "Главный Герой",
-                description = "Полное описание главного героя со спойлерами.",
-                spoilerFreeDescription = "Описание без спойлеров.",
-                aliases = listOf("ГГ"),
-                chapterMentions = emptyMap()
-            )
-        )
+    override suspend fun getCharacterDetails(
+        bookId: String,
+        characterId: String
+    ): Result<BookCharacter> {
+        TODO("Not yet implemented")
+    }
 
-        val mockSummaries = mapOf(
-            "vol_1_chap_1" to ChapterSummary(
-                chapterId = "vol_1_chap_1",
-                teaser = "Глава 1: Начало пути",
-                synopsis = "Детальное описание событий первой главы."
-            )
-        )
-
-        val mockChapters = listOf(
-            Chapter(
-                id = "vol_1_chap_1",
-                title = "Глава 1: Начало пути",
-                audioDirectoryPath = "/fake/path/audio",
-                scenarioPath = "/fake/path/scenario.json",
-                subtitlesPath = "/fake/path/subtitles.json"
-            )
-        )
-
-        return Result.success(
-            BookDetails(
-                manifest = mockManifest,
-                bookCharacters = mockCharacters,
-                summaries = mockSummaries,
-                chapters = mockChapters
-            )
-        )
+    override suspend fun getChapterSummary(
+        bookId: String,
+        chapterId: String
+    ): Result<ChapterSummary> {
+        TODO("Not yet implemented")
     }
 
     override fun downloadAndInstallBook(url: String): Flow<DownloadProgress> {
@@ -151,26 +99,7 @@ class MockBookRepository @Inject constructor() : BookRepository {
         bookId: String,
         chapterId: String
     ): Result<PlayerChapterInfo> {
-        delay(100)
-        val book = mockBooks.find { it.id == bookId }
-        val chapterTitle = "Глава 1: Начало пути (Мок)"
-
-        val mockMedia = ChapterMedia(
-            // Путь к JSON с субтитрами, который будет парсить сервис
-            subtitlesPath = "/fake/path/subtitles.json",
-            // Путь к папке, где сервис будет искать аудиофайлы (fake_audio_X.wav)
-            audioDirectoryPath = "/fake/path/audio"
-        )
-
-        return Result.success(
-            PlayerChapterInfo(
-                bookTitle = book?.title ?: "Моковая Книга",
-                chapterTitle = chapterTitle,
-                media = mockMedia,
-                coverPath = null,
-                lastListenedPosition = TODO()
-            )
-        )
+        return TODO("Provide the return value")
     }
 
     override suspend fun setActiveChapterId(chapterId: String?) {
@@ -222,6 +151,17 @@ class MockBookRepository @Inject constructor() : BookRepository {
         TODO("Not yet implemented")
     }
 
+    override suspend fun syncLibraryWithRemote(): Result<Unit> {
+        TODO("Not yet implemented")
+    }
+
+    override fun downloadChapter(
+        bookId: String,
+        chapterId: String
+    ): Flow<DownloadProgress> {
+        TODO("Not yet implemented")
+    }
+
 //    override suspend fun downloadAndInstallBook(url: String): Result<File> {
 //        delay(2000) // Симуляция долгой загрузки
 //        if (url.contains("fail")) {
@@ -240,18 +180,8 @@ class MockBookRepository @Inject constructor() : BookRepository {
 //    }
 
     override suspend fun installBook(inputStream: InputStream): Result<File> {
-        delay(1500)
 
-        // В моковой реализации нам не важен контент, просто симулируем успех
-        val newBook = Book(
-            id = "installed_${UUID.randomUUID()}",
-            title = "Установленная из файла книга",
-            localPath = "/mock/installed",
-            coverPath = null,
-            author = null
-        )
-        mockBooks.add(newBook)
-        return Result.success(File(newBook.localPath))
+        return TODO("Provide the return value")
     }
 
     override suspend fun getChapterOriginalText(bookId: String, chapterId: String): Result<String> {
@@ -270,12 +200,7 @@ class MockBookRepository @Inject constructor() : BookRepository {
     }
 
     override suspend fun deleteBook(bookId: String): Result<Unit> {
-        delay(500)
-        val removed = mockBooks.removeIf { it.id == bookId }
-        return if (removed) {
-            Result.success(Unit)
-        } else {
-            Result.failure(Exception("Книга для удаления не найдена"))
-        }
+
+        return TODO("Provide the return value")
     }
 }

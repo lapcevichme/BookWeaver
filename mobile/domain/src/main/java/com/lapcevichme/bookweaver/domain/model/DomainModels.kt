@@ -6,19 +6,15 @@ import java.util.UUID
 
 /**
  * Упрощенная модель книги для отображения в библиотеке.
- *
- * @param id Уникальный идентификатор книги (например, название папки "kusuriya-no-hitorigoto-ln-novel").
- * @param title Человекочитаемое название книги.
- * @param author Автор книги.
- * @param coverPath Локальный путь к файлу обложки.
- * @param localPath Путь к корневой папке распакованной книги на устройстве.
+ * localPath, coverPath может быть null, если книга "в облаке"
  */
 data class Book(
     val id: String,
     val title: String,
     val author: String?,
+    val localPath: String?,
     val coverPath: String?,
-    val localPath: String
+    val source: BookSource
 )
 
 /**
@@ -32,37 +28,32 @@ data class BookDetails(
     val chapters: List<Chapter>
 )
 
+
 /**
  * Метаданные всей книги. Аналог BookManifest из бэкенда.
- *
- * @param bookName Название проекта книги.
- * @param author Автор книги.
- * @param characterVoices Сопоставление ID персонажа и ID голоса.
- * @param defaultNarratorVoice Голос рассказчика по умолчанию.
  */
 data class BookManifest(
     val bookName: String,
     val author: String?,
     val characterVoices: Map<String, String> = emptyMap(),
-    val defaultNarratorVoice: String
+    val defaultNarratorVoice: String,
+    val coverUrl: String? = null
 )
 
 /**
  * Модель главы книги.
- *
- * @param id Идентификатор главы (например, "vol_1_chap_1").
- * @param title Название главы (можно взять из `ChapterSummary.teaser`).
- * @param audioDirectoryPath Путь к папке с аудиофайлами главы (например, ".../vol_1_chap_1/audio").
- * @param scenarioPath Путь к файлу сценария (scenario.json).
- * @param subtitlesPath Путь к файлу субтитров (subtitles.json).
+ * audioDirectoryPath, scenarioPath, subtitlesPath могут быть null, если книга "в облаке"
  */
 data class Chapter(
     val id: String,
     val title: String,
-    val audioDirectoryPath: String,
-    val scenarioPath: String,
-    val subtitlesPath: String?
+    val downloadState: DownloadState,
+    val audioDirectoryPath: String?,
+    val scenarioPath: String?,
+    val subtitlesPath: String?,
+    val volumeNumber: Int? = null
 )
+
 
 /**
  * Краткое содержание главы. Аналог ChapterSummary.
