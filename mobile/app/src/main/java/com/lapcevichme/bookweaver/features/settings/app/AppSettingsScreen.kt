@@ -13,6 +13,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,7 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lapcevichme.bookweaver.domain.model.ThemeSetting
 
@@ -36,7 +38,8 @@ import com.lapcevichme.bookweaver.domain.model.ThemeSetting
 @Composable
 fun AppSettingsScreen(
     viewModel: AppSettingsViewModel = hiltViewModel(),
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToConnection: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -61,7 +64,6 @@ fun AppSettingsScreen(
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- БЛОК НАСТРОЕК ТЕМЫ ---
             Text(
                 text = "Внешний вид",
                 style = MaterialTheme.typography.labelLarge,
@@ -96,7 +98,45 @@ fun AppSettingsScreen(
                     )
                 }
             }
-            // --- КОНЕЦ БЛОКА ---
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "Подключение",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToConnection() },
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Icon(Icons.Default.Cloud, contentDescription = "Сервер")
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Сервер BookWeaver", style = MaterialTheme.typography.bodyLarge)
+                        val status = uiState.serverConnection?.host ?: "Не подключено"
+                        Text(
+                            text = status,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = "Настроить",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

@@ -1,26 +1,31 @@
 package com.lapcevichme.bookweaver.features.library
 
 import com.lapcevichme.bookweaver.domain.model.Book
+import com.lapcevichme.bookweaver.domain.model.BookSource
 
 /**
- * UI-специфичная модель книги.
- * Содержит только те данные, которые нужны для отображения на экране библиотеки.
+ * Модель книги для UI-слоя.
+ * Содержит поля, необходимые для отображения в списке.
  */
 data class UiBook(
     val id: String,
     val title: String,
     val author: String,
-    val coverPath: String?
+    val coverPath: String?,
+    val localPath: String?,
+    val source: BookSource
 )
 
 /**
- * Функция-маппер для преобразования domain-модели в UI-модель.
+ * Маппер из доменной модели Book в UiBook.
  */
 fun Book.toUiBook(): UiBook {
     return UiBook(
         id = this.id,
         title = this.title,
-        author = this.author ?: "Автор неизвестен",
-        coverPath = this.coverPath
+        author = this.author ?: "Неизвестный автор",
+        coverPath = this.coverPath,
+        localPath = this.localPath,
+        source = this.source
     )
 }

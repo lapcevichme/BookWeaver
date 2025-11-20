@@ -68,6 +68,7 @@ import com.lapcevichme.bookweaver.features.chapterdetails.ChapterDetailsScreen
 import com.lapcevichme.bookweaver.features.chapterdetails.ChapterDetailsViewModel
 import com.lapcevichme.bookweaver.features.characterdetails.CharacterDetailsScreen
 import com.lapcevichme.bookweaver.features.characters.CharactersScreen
+import com.lapcevichme.bookweaver.features.connection.ConnectionScreen
 import com.lapcevichme.bookweaver.features.library.LibraryScreen
 import com.lapcevichme.bookweaver.features.library.LibraryViewModel
 import com.lapcevichme.bookweaver.features.main.MainViewModel
@@ -127,6 +128,8 @@ sealed class Screen(val route: String) {
         val arguments = listOf(navArgument(bookIdArg) { type = NavType.StringType })
         fun createRoute(bookId: String) = "$route/$bookId"
     }
+
+    object Connection : Screen("connection")
 
 
     // --- Экраны внутри BottomNav ---
@@ -227,7 +230,10 @@ fun AppNavHost(themeSetting: ThemeSetting) {
 
         // Сценарий 1: Активная команда
         if (command != null) {
-            Log.d("AppNavHost_Sync", "SCENARIO 1: Active LoadCommand: Play=${command.playWhenReady}, Seek=${command.seekToPositionMs}")
+            Log.d(
+                "AppNavHost_Sync",
+                "SCENARIO 1: Active LoadCommand: Play=${command.playWhenReady}, Seek=${command.seekToPositionMs}"
+            )
             if (chapterInfo == null || bookId == null || chapterId == null) {
                 Log.e("AppNavHost_Sync", "LoadCommand failed: chapterInfo or IDs are null")
                 return@LaunchedEffect
@@ -247,7 +253,10 @@ fun AppNavHost(themeSetting: ThemeSetting) {
                 if (command.playWhenReady) {
                     service.play()
                 }
-                Log.d("AppNavHost_Sync", "Command sent to service. Waiting for PlayerState change to consume.")
+                Log.d(
+                    "AppNavHost_Sync",
+                    "Command sent to service. Waiting for PlayerState change to consume."
+                )
 
             } else {
                 // Новая глава. Загружаем.
@@ -371,7 +380,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             DynamicMaterialExpressiveTheme(
                 seedColor = defaultSeedColor,
                 isDark = isDark,
-                animate = true,
+                animate = false, // ОТКЛЮЧЕНО для производительности
                 motionScheme = MotionScheme.expressive()
             ) {
 
@@ -389,7 +398,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             DynamicMaterialExpressiveTheme(
                 seedColor = defaultSeedColor,
                 isDark = isDark,
-                animate = true,
+                animate = false, // ОТКЛЮЧЕНО для производительности
                 motionScheme = MotionScheme.expressive()
             ) {
                 InstallBookScreen(
@@ -412,10 +421,26 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             DynamicMaterialExpressiveTheme(
                 seedColor = defaultSeedColor,
                 isDark = isDark,
-                animate = true,
+                animate = false, // ОТКЛЮЧЕНО для производительности
                 motionScheme = MotionScheme.expressive()
             ) {
                 AppSettingsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToConnection = {
+                        navController.navigate(Screen.Connection.route)
+                    }
+                )
+            }
+        }
+
+        composable(Screen.Connection.route) {
+            DynamicMaterialExpressiveTheme(
+                seedColor = defaultSeedColor,
+                isDark = isDark,
+                animate = false, // ОТКЛЮЧЕНО для производительности
+                motionScheme = MotionScheme.expressive()
+            ) {
+                ConnectionScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -428,7 +453,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             val viewModel: ChapterDetailsViewModel = hiltViewModel(backStackEntry)
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-            BookThemeWrapper (isDark = isDark) {
+            BookThemeWrapper(isDark = isDark) {
                 ChapterDetailsScreen(
                     state = uiState,
                     playerState = playerState,
@@ -443,7 +468,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             route = Screen.Characters.routeWithArgs,
             arguments = Screen.Characters.arguments
         ) { backStackEntry ->
-            BookThemeWrapper (isDark = isDark) {
+            BookThemeWrapper(isDark = isDark) {
                 CharactersScreen(
                     onCharacterClick = { characterId ->
                         val bookId =
@@ -461,7 +486,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             route = Screen.CharacterDetails.routeWithArgs,
             arguments = Screen.CharacterDetails.arguments
         ) {
-            BookThemeWrapper (isDark = isDark) {
+            BookThemeWrapper(isDark = isDark) {
                 CharacterDetailsScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
@@ -472,7 +497,7 @@ fun AppNavHost(themeSetting: ThemeSetting) {
             route = Screen.BookSettings.routeWithArgs,
             arguments = Screen.BookSettings.arguments
         ) {
-            BookThemeWrapper (isDark = isDark) {
+            BookThemeWrapper(isDark = isDark) {
                 BookSettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onBookDeleted = {
@@ -534,7 +559,7 @@ fun MainScaffold(
     DynamicMaterialExpressiveTheme(
         seedColor = finalSeedColor,
         isDark = isDark,
-        animate = true,
+        animate = false, // ОТКЛЮЧЕНО: вызывает перегрузку компилятора и лаги
         motionScheme = MotionScheme.expressive()
     ) {
         Scaffold(
@@ -648,7 +673,8 @@ fun MainScaffold(
                                 }
                                 launchSingleTop = true
                             }
-                        }
+                        },
+                        onEvent = viewModel::onEvent
                     )
                 }
 

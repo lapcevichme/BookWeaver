@@ -2,17 +2,26 @@ package com.lapcevichme.bookweaver.features.bookhub
 
 import com.lapcevichme.bookweaver.domain.model.BookDetails
 import com.lapcevichme.bookweaver.domain.model.Chapter
+import com.lapcevichme.bookweaver.domain.model.DownloadState
 
 /**
- * UI-модель для главы на экране деталей.
+ * Представление главы для UI-слоя.
+ *
+ * @param id Уникальный идентификатор главы.
+ * @param title Название главы.
+ * @param downloadState Состояние загрузки главы ([DownloadState]).
  */
 data class UiChapter(
     val id: String,
-    val title: String
+    val title: String,
+    val downloadState: DownloadState
 )
 
 /**
- * Новая UI-модель, представляющая один том со списком его глав.
+ * Представление тома книги, содержащего список глав, для UI-слоя.
+ *
+ * @param title Название тома (например, "Том 1").
+ * @param chapters Список глав в этом томе.
  */
 data class UiVolume(
     val title: String,
@@ -20,8 +29,10 @@ data class UiVolume(
 )
 
 /**
- * Обновленная UI-модель для детальной информации о книге.
- * Теперь содержит список томов вместо плоского списка глав.
+ * Представление детальной информации о книге для UI-слоя.
+ *
+ * @param title Название книги.
+ * @param volumes Список томов в книге.
  */
 data class UiBookDetails(
     val title: String,
@@ -29,13 +40,15 @@ data class UiBookDetails(
 )
 
 /**
- * Маппер из domain-модели BookDetails в UI-модель UiBookDetails.
- * Теперь он выполняет группировку глав по томам.
+ * Преобразует доменную модель [BookDetails] в UI-модель [UiBookDetails].
+ *
+ * Группирует главы по номерам томов. Если у главы не указан номер тома (`volumeNumber` is null),
+ * она будет отнесена к первому тому.
  */
 fun BookDetails.toUiBookDetails(): UiBookDetails {
-    // Группируем главы по номеру тома, который извлекаем из ID главы
     val groupedByVolume = this.chapters
-        .groupBy { it.id.substringBefore("_chap").substringAfter("vol_") }
+        .groupBy { it.volumeNumber ?: 1 } // Главы без номера тома относятся к первому.
+        .toSortedMap() // Сортируем тома по их номерам.
         .map { (volumeNumber, chapters) ->
             UiVolume(
                 title = "Том $volumeNumber",
@@ -50,13 +63,15 @@ fun BookDetails.toUiBookDetails(): UiBookDetails {
 }
 
 /**
- * Маппер из domain-модели Chapter в UI-модель UiChapter.
+ * Преобразует доменную модель [Chapter] в UI-модель [UiChapter].
  */
 fun Chapter.toUiChapter(): UiChapter {
-    // Теперь в заголовок выносим только номер главы
-    val chapterNumber = this.title.substringAfter("Глава ")
+    val cleanTitle = this.title.substringAfter("Глава ")
+        .let { if (it.length < this.title.length) "Глава $it" else this.title }
+
     return UiChapter(
         id = this.id,
-        title = "Глава $chapterNumber"
+        title = cleanTitle,
+        downloadState = this.downloadState
     )
 }

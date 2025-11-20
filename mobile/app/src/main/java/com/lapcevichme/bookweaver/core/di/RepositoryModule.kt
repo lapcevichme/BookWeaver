@@ -1,15 +1,11 @@
 package com.lapcevichme.bookweaver.core.di
 
-import com.lapcevichme.bookweaver.data.ServerRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.BookRepositoryImpl
-import com.lapcevichme.bookweaver.data.repository.ConnectionRepositoryImpl
-import com.lapcevichme.bookweaver.data.repository.SettingsRepositoryImpl
+import com.lapcevichme.bookweaver.data.repository.ServerRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.UserPreferencesRepositoryImpl
 import com.lapcevichme.bookweaver.data.repository.mock.MockBookRepository
 import com.lapcevichme.bookweaver.domain.repository.BookRepository
-import com.lapcevichme.bookweaver.domain.repository.ConnectionRepository
 import com.lapcevichme.bookweaver.domain.repository.ServerRepository
-import com.lapcevichme.bookweaver.domain.repository.SettingsRepository
 import com.lapcevichme.bookweaver.domain.repository.UserPreferencesRepository
 import dagger.Binds
 import dagger.Module
@@ -42,14 +38,6 @@ object RepositoryProvidesModule {
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryBindsModule {
-    @Binds
-    @Singleton
-    abstract fun bindConnectionRepository(impl: ConnectionRepositoryImpl): ConnectionRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
-
     @Binds
     @Singleton
     abstract fun bindServerRepository(impl: ServerRepositoryImpl): ServerRepository

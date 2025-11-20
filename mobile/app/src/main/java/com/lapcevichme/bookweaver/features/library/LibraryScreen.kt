@@ -18,12 +18,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -32,24 +33,24 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.lapcevichme.bookweaver.domain.model.BookSource
 import java.io.File
 
 
-/**
- * Полностью переработанный LibraryScreen.
- * Теперь это "глупый" компонент, который принимает состояние (uiState) и
- * сообщает о действиях пользователя через коллбэк onEvent.
- */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LibraryScreen(
@@ -71,28 +72,38 @@ fun LibraryScreen(
             }
         )
 
-        AnimatedContent(
-            targetState = uiState.isLoading,
-            label = "loading-animation",
+        val pullRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
-        ) { isLoading ->
-            if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    LoadingIndicator()
-                }
-            } else {
-                LibraryContent(
-                    books = uiState.books,
-                    bottomContentPadding = bottomContentPadding,
-                    onBookClick = { bookId ->
-                        onEvent(LibraryEvent.BookSelected(bookId))
+                .fillMaxWidth(),
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = { onEvent(LibraryEvent.Refresh) },
+            state = pullRefreshState,
+        ) {
+            AnimatedContent(
+                targetState = uiState.isLoading,
+                label = "loading-animation",
+                modifier = Modifier.fillMaxSize()
+            ) { isLoading ->
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        LoadingIndicator()
                     }
-                )
+                } else {
+                    LibraryContent(
+                        books = uiState.books,
+                        authToken = uiState.authToken,
+                        bottomContentPadding = bottomContentPadding,
+                        onBookClick = { bookId ->
+                            onEvent(LibraryEvent.BookSelected(bookId))
+                        }
+                    )
+                }
             }
         }
     }
@@ -101,6 +112,7 @@ fun LibraryScreen(
 @Composable
 private fun LibraryContent(
     books: List<UiBook>,
+    authToken: String?,
     bottomContentPadding: Dp,
     onBookClick: (bookId: String) -> Unit
 ) {
@@ -112,7 +124,7 @@ private fun LibraryContent(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "На устройстве нет книг.\nНажмите '+' чтобы добавить новую книгу.",
+                text = "На устройстве нет книг.\nНажмите '+' чтобы добавить новую книгу, или\nпотяните вниз для синхронизации с сервером.",
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center
             )
@@ -129,7 +141,11 @@ private fun LibraryContent(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(books, key = { it.id }) { book ->
-                BookItem(book = book, onClick = { onBookClick(book.id) })
+                BookItem(
+                    book = book,
+                    authToken = authToken,
+                    onClick = { onBookClick(book.id) }
+                )
             }
         }
     }
@@ -138,6 +154,7 @@ private fun LibraryContent(
 @Composable
 private fun BookItem(
     book: UiBook,
+    authToken: String?,
     onClick: () -> Unit
 ) {
     Card(
@@ -150,15 +167,55 @@ private fun BookItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = book.coverPath?.let { File(it) },
-                contentDescription = "Обложка книги: ${book.title}",
+            // ЛОГИКА ОТОБРАЖЕНИЯ ОБЛОЖКИ
+            val context = LocalContext.current
+
+            // Умное определение модели для Coil
+            val imageModel = if (book.coverPath?.startsWith("http") == true) {
+                // Это URL
+                ImageRequest.Builder(context)
+                    .data(book.coverPath)
+                    .apply {
+                        if (authToken != null) {
+                            addHeader("Authorization", "Bearer $authToken")
+                        }
+                    }
+                    .crossfade(true)
+                    .build()
+            } else if (book.coverPath != null) {
+                // Это локальный файл
+                File(book.coverPath)
+            } else {
+                // Нет обложки
+                null
+            }
+
+            Box(
                 modifier = Modifier
                     .size(width = 60.dp, height = 90.dp)
                     .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop,
-                // TODO: Добавить плейсхолдер
-            )
+                contentAlignment = Alignment.Center
+            ) {
+                // Плейсхолдер
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawRect(color = androidx.compose.ui.graphics.Color.LightGray)
+                }
+
+                Icon(
+                    imageVector = Icons.Default.Image,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color.White
+                )
+
+                // Сама картинка
+                AsyncImage(
+                    model = imageModel,
+                    contentDescription = "Обложка книги: ${book.title}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    error = rememberVectorPainter(Icons.Default.BrokenImage)
+                )
+            }
 
             Spacer(Modifier.width(16.dp))
 
@@ -178,6 +235,20 @@ private fun BookItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            if (book.source == BookSource.SERVER && book.localPath == null) {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Default.CloudOff,
+                    contentDescription = "Книга не скачана",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
         }
     }
 }
+
+@Composable
+fun rememberVectorPainter(image: androidx.compose.ui.graphics.vector.ImageVector) =
+    androidx.compose.ui.graphics.vector.rememberVectorPainter(image)

@@ -53,7 +53,6 @@ class PlayerViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collectLatest { (bookAndChapter, speed, volume) ->
                     val (bookId, chapterId) = bookAndChapter
-
                     val currentState = _uiState.value
 
                     // Сценарий 1: Книга не выбрана (bookId is null)
@@ -74,7 +73,7 @@ class PlayerViewModel @Inject constructor(
                         return@collectLatest
                     }
 
-                    // --- С этого момента у нас есть bookId: String ---
+                    // С этого момента у нас есть bookId: String
 
                     // Сценарий 2: Книга выбрана, глава - нет (chapterId is null)
                     if (chapterId == null) {
@@ -95,7 +94,7 @@ class PlayerViewModel @Inject constructor(
                         return@collectLatest
                     }
 
-                    // --- С этого момента у нас есть и bookId: String, и chapterId: String ---
+                    // С этого момента у нас есть и bookId: String, и chapterId: String
 
                     val isBookChanged = currentState.bookId != bookId
                     val isHotRestart = currentState.bookId == null
@@ -124,7 +123,7 @@ class PlayerViewModel @Inject constructor(
                         return@collectLatest
                     }
 
-                    // --- Сценарии 4 (Рестарт) и 5 (Смена главы) ---
+                    // Сценарии 4 (Рестарт) и 5 (Смена главы)
 
                     val isSameTarget = !isBookChanged && !isChapterChanged
                     val isAlreadyLoaded = currentState.chapterInfo != null && isSameTarget
@@ -168,6 +167,7 @@ class PlayerViewModel @Inject constructor(
                 }
         }
     }
+
     private fun loadChapterInfo(bookId: String, chapterId: String) {
         viewModelScope.launch {
             _uiState.update {
@@ -180,8 +180,9 @@ class PlayerViewModel @Inject constructor(
             }
             getPlayerChapterInfoUseCase(bookId, chapterId)
                 .onSuccess { info ->
+                    // Если subtitlesPath != null (даже если это плейсхолдер), значит главу можно играть
                     if (info.media.subtitlesPath == null) {
-                        Log.w("PlayerViewModel", "loadChapterInfo: Success, but no subtitlesPath. Chapter has no audio.")
+                        Log.w("PlayerViewModel", "Глава без аудио (subtitlesPath is null).")
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
@@ -190,7 +191,7 @@ class PlayerViewModel @Inject constructor(
                                 bookId = bookId,
                                 chapterId = chapterId,
                                 chapterInfo = info,
-                                clearService = true // !! ФИКС: СКАЗАТЬ СЕРВИСУ ОЧИСТИТЬСЯ !!
+                                clearService = true
                             )
                         }
                     } else {
@@ -233,8 +234,7 @@ class PlayerViewModel @Inject constructor(
                 Log.d("PlayerViewModel", "playChapter: Та же глава, просто обновляем команду")
                 _uiState.update { it.copy(loadCommand = newCommand) }
             } else {
-                Log.w("PlayerViewModel", "playChapter: Та же глава, но у нее нет аудио. Игнор.")
-                _uiState.update { it.copy(error = "У этой главы нет аудио.", clearService = true) } // !! ФИКС: СКАЗАТЬ СЕРВИСУ ОЧИСТИТЬСЯ !!
+                _uiState.update { it.copy(error = "У этой главы нет аудио.", clearService = true) }
             }
         } else {
             Log.d(
@@ -261,9 +261,8 @@ class PlayerViewModel @Inject constructor(
         val currentState = _uiState.value
         val command = currentState.loadCommand
 
-        // 1. Если команды нет, нас это не интересует
+        // Если команды нет, нас это не интересует
         if (command == null) {
-            // !! ФИКС: Но мы *должны* обработать ошибку, о которой мы еще не знаем !!
             if (playerState.error != null && currentState.error == null && !currentState.clearService) {
                 Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error. (No command, just reporting)")
                 _uiState.update { it.copy(error = playerState.error) }
@@ -271,22 +270,21 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // 2. С этого момента у нас ЕСТЬ команда (command != null)
+        // С этого момента у нас ЕСТЬ команда (command != null)
 
         val targetChapterId = currentState.chapterId
         val actualChapterId = playerState.loadedChapterId
 
-        // 3. Обработка ошибки *во время* выполнения команды
+        // Обработка ошибки во время выполнения команды
         if (playerState.error != null) {
             Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error during load command. Clearing command.")
             _uiState.update { it.copy(loadCommand = null, error = playerState.error) }
             return
         }
 
-        // 4. Команда для одной главы, а сервис загрузил другую (или пуст)
+        // Команда для одной главы, а сервис загрузил другую (или пуст)
         if (targetChapterId != actualChapterId) {
-            Log.d("PlayerViewModel", "onPlayerStateChanged: Waiting for chapter. Target: $targetChapterId, Actual: $actualChapterId")
-            return // Команда еще не выполнена, ждем нужную главу
+            return
         }
 
         Log.d("PlayerViewModel", "onPlayerStateChanged: Command processed for $targetChapterId. Clearing command.")
@@ -302,7 +300,9 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun loadChapterInfoForPlay(
-        bookId: String, chapterId: String, loadCommand: LoadCommand
+        bookId: String,
+        chapterId: String,
+        loadCommand: LoadCommand
     ) {
         viewModelScope.launch {
             _uiState.update {
@@ -330,7 +330,7 @@ class PlayerViewModel @Inject constructor(
                                 bookId = bookId,
                                 chapterId = chapterId,
                                 chapterInfo = info,
-                                clearService = true // !! ФИКС: СКАЗАТЬ СЕРВИСУ ОЧИСТИТЬСЯ !!
+                                clearService = true
                             )
                         }
                     } else {
@@ -374,22 +374,24 @@ class PlayerViewModel @Inject constructor(
 
     fun seekTo(positionMs: Long) {
         _uiState.update { currentState ->
-            val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
+            val baseCommand = currentState.loadCommand ?: LoadCommand(
+                playWhenReady = false,
+                seekToPositionMs = null
+            )
             currentState.copy(
-                loadCommand = baseCommand.copy(
-                    seekToPositionMs = positionMs
-                )
+                loadCommand = baseCommand.copy(seekToPositionMs = positionMs)
             )
         }
     }
 
     fun play() {
         _uiState.update { currentState ->
-            val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
+            val baseCommand = currentState.loadCommand ?: LoadCommand(
+                playWhenReady = false,
+                seekToPositionMs = null
+            )
             currentState.copy(
-                loadCommand = baseCommand.copy(
-                    playWhenReady = true
-                )
+                loadCommand = baseCommand.copy(playWhenReady = true)
             )
         }
     }
@@ -402,12 +404,12 @@ class PlayerViewModel @Inject constructor(
     fun seekToAndPlay(positionMs: Long) {
         Log.d("PlayerViewModel", "seekToAndPlay: Установка LoadCommand (play=true, seek=$positionMs)")
         _uiState.update { currentState ->
-            val baseCommand = currentState.loadCommand ?: LoadCommand(playWhenReady = false, seekToPositionMs = null)
+            val baseCommand = currentState.loadCommand ?: LoadCommand(
+                playWhenReady = false,
+                seekToPositionMs = null
+            )
             currentState.copy(
-                loadCommand = baseCommand.copy(
-                    playWhenReady = true,
-                    seekToPositionMs = positionMs
-                )
+                loadCommand = baseCommand.copy(playWhenReady = true, seekToPositionMs = positionMs)
             )
         }
     }

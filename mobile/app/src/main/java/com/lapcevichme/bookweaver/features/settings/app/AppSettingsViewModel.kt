@@ -3,6 +3,7 @@ package com.lapcevichme.bookweaver.features.settings.app
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.model.ThemeSetting
+import com.lapcevichme.bookweaver.domain.repository.ServerRepository
 import com.lapcevichme.bookweaver.domain.usecase.settings.GetThemeSettingUseCase
 import com.lapcevichme.bookweaver.domain.usecase.settings.SaveThemeSettingUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,7 +18,8 @@ import javax.inject.Inject
 @HiltViewModel
 class AppSettingsViewModel @Inject constructor(
     private val getThemeSettingUseCase: GetThemeSettingUseCase,
-    private val saveThemeSettingUseCase: SaveThemeSettingUseCase
+    private val saveThemeSettingUseCase: SaveThemeSettingUseCase,
+    private val serverRepository: ServerRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AppSettingsUiState())
@@ -28,6 +30,12 @@ class AppSettingsViewModel @Inject constructor(
         getThemeSettingUseCase()
             .onEach { themeSetting ->
                 _uiState.update { it.copy(isLoading = false, selectedTheme = themeSetting) }
+            }
+            .launchIn(viewModelScope)
+
+        serverRepository.getServerConnection()
+            .onEach { connection ->
+                _uiState.update { it.copy(serverConnection = connection) }
             }
             .launchIn(viewModelScope)
     }

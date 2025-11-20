@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Settings
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.lapcevichme.bookweaver.domain.model.DownloadState
 
 /**
  * Этот экран теперь является "Хабом" для активной книги.
@@ -28,6 +30,7 @@ import androidx.compose.ui.unit.dp
 fun BookHubScreen(
     uiState: BookDetailsUiState,
     bottomContentPadding: Dp,
+    onEvent: (BookHubEvent) -> Unit,
     onNavigateToCharacters: () -> Unit,
     onNavigateToSettings: (bookId: String) -> Unit,
     onChapterViewDetailsClick: (chapterId: String) -> Unit,
@@ -99,7 +102,8 @@ fun BookHubScreen(
                                 chapter = chapter,
                                 isActive = chapter.id == uiState.activeChapterId,
                                 onViewDetailsClick = { onChapterViewDetailsClick(chapter.id) },
-                                onPlayClick = { onChapterPlayClick(chapter.id) }
+                                onPlayClick = { onChapterPlayClick(chapter.id) },
+                                onDownloadClick = { onEvent(BookHubEvent.OnDownloadChapterClick(chapter.id)) }
                             )
                         }
                     }
@@ -123,6 +127,7 @@ private fun ChapterItem(
     isActive: Boolean,
     onViewDetailsClick: () -> Unit,
     onPlayClick: () -> Unit,
+    onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -147,21 +152,64 @@ private fun ChapterItem(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            if (isActive) {
-                // Показываем иконку, если глава активна
-                Icon(
-                    imageVector = Icons.Default.GraphicEq,
-                    contentDescription = "Сейчас играет",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            } else {
-                // Показываем кнопку "Слушать", если глава не активна
-                IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
+            Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                if (isActive) {
+                    // Глава активна
                     Icon(
-                        imageVector = Icons.Default.Headset,
-                        contentDescription = "Слушать главу",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        imageVector = Icons.Default.GraphicEq,
+                        contentDescription = "Сейчас играет",
+                        tint = MaterialTheme.colorScheme.primary
                     )
+                } else {
+                    // Глава не активна
+                    when (chapter.downloadState) {
+                        DownloadState.DOWNLOADED -> {
+                            // Скачана: Показываем кнопку "Слушать"
+                            IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Headset,
+                                    contentDescription = "Слушать главу",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        DownloadState.NOT_DOWNLOADED -> {
+                            // Не скачана: Показываем "Слушать" и "Скачать"
+                            Row {
+                                // Кнопка "Слушать"
+                                IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Headset,
+                                        contentDescription = "Слушать",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                // Кнопка "Скачать"
+                                IconButton(onClick = onDownloadClick, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Download,
+                                        contentDescription = "Скачать главу",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                        DownloadState.DOWNLOADING -> {
+                            // Качается: Показываем спиннер
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        }
+                        DownloadState.ERROR -> {
+                            // Ошибка: Показываем "Скачать" (для повтора)
+                            IconButton(onClick = onDownloadClick, modifier = Modifier.size(24.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Повторить скачивание",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
