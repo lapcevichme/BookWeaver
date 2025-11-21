@@ -11,7 +11,7 @@ import com.lapcevichme.bookweaver.data.database.entities.ChapterEntity
  */
 @Database(
     entities = [BookEntity::class, ChapterEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(DatabaseConverters::class)

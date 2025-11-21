@@ -47,11 +47,6 @@ class ChapterDetailsViewModel @Inject constructor(
         loadChapterContent()
     }
 
-    /**
-     * Загружает контент главы.
-     * Если PlaybackData (сценарий/аудио) недоступны (404), экран все равно откроется
-     * в режиме чтения текста.
-     */
     private fun loadChapterContent() {
         Log.d(TAG, "Start loading content for $chapterId")
         _uiState.update { it.copy(isLoading = true) }
@@ -75,8 +70,16 @@ class ChapterDetailsViewModel @Inject constructor(
             }
 
             val scenario = playbackDataPair?.first?.map { entry ->
+                val realId = try {
+                    if (entry.id.isEmpty()) UUID.randomUUID()
+                    else UUID.fromString(entry.id)
+                } catch (e: Exception) {
+                    Log.w(TAG, "ID parsing failed for ${entry.id}, generating random")
+                    UUID.randomUUID()
+                }
+
                 ScenarioEntry(
-                    id = UUID.randomUUID(),
+                    id = realId,
                     text = entry.text,
                     speaker = entry.speaker,
                     emotion = entry.emotion,
@@ -92,13 +95,32 @@ class ChapterDetailsViewModel @Inject constructor(
                 originalText = originalText
             )
 
-            val uiDetails = if (playbackDataPair != null) {
+            val audioPath = playbackDataPair?.second
+            val playbackEntries = playbackDataPair?.first ?: emptyList()
+
+            val isPathValid = !audioPath.isNullOrBlank() && !audioPath.equals("none", ignoreCase = true)
+
+            val hasAudio = if (isPathValid) {
+                val hasFileExtension = audioPath.endsWith(".mp3", true) ||
+                        audioPath.endsWith(".wav", true) ||
+                        audioPath.endsWith(".m4a", true) ||
+                        audioPath.endsWith(".ogg", true)
+
+                val hasInnerAudioFiles = playbackEntries.any { it.audioFile.isNotBlank() }
+
+                // Аудио есть, если это Single File (расширение) ИЛИ Playlist (есть внутренние файлы)
+                hasFileExtension || hasInnerAudioFiles
+            } else {
+                false
+            }
+
+            val uiDetails = if (playbackDataPair != null && hasAudio) {
                 details.toUiModelWithAudio(playbackDataPair.first)
             } else {
+                // Принудительно отключаем кликабельность (isPlayable = false)
                 details.toUiModelTextOnly()
             }
 
-            // Ошибка выставляется только если вообще ничего не загрузилось
             if (originalText.isEmpty() && summary == null && scenario.isEmpty()) {
                 _uiState.update {
                     it.copy(

@@ -14,7 +14,8 @@ import com.lapcevichme.bookweaver.domain.model.DownloadState
 data class UiChapter(
     val id: String,
     val title: String,
-    val downloadState: DownloadState
+    val downloadState: DownloadState,
+    val hasAudio: Boolean
 )
 
 /**
@@ -47,7 +48,7 @@ data class UiBookDetails(
  */
 fun BookDetails.toUiBookDetails(): UiBookDetails {
     val groupedByVolume = this.chapters
-        .groupBy { it.volumeNumber ?: 1 } // Главы без номера тома относятся к первому.
+        .groupBy { it.volumeNumber } // Главы без номера тома относятся к первому.
         .toSortedMap() // Сортируем тома по их номерам.
         .map { (volumeNumber, chapters) ->
             UiVolume(
@@ -72,6 +73,7 @@ fun Chapter.toUiChapter(): UiChapter {
     return UiChapter(
         id = this.id,
         title = cleanTitle,
-        downloadState = this.downloadState
+        downloadState = this.downloadState,
+        hasAudio = this.hasAudio
     )
 }

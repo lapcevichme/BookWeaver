@@ -16,7 +16,8 @@ data class ChapterStructureDto(
     val id: String,
     val title: String,
     @SerialName("version") val version: Int = 1,
-    @SerialName("volume_number") val volumeNumber: Int? = null
+    @SerialName("volume_number") val volumeNumber: Int? = null,
+    @SerialName("has_audio") val hasAudio: Boolean = false
 )
 
 // --- API: Characters ---
@@ -90,7 +91,7 @@ data class PingResponseDto(
 
 @Serializable
 data class PlaybackDataResponseDto(
-    @SerialName("audio_url") val audioUrl: String,
+    @SerialName("audio_url") val audioUrl: String? = null,
     @SerialName("duration_ms") val durationMs: Long,
     @SerialName("sync_map") val syncMap: List<PlaybackEntryDto>
 )

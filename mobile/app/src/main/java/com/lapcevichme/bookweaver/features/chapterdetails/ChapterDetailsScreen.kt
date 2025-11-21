@@ -60,6 +60,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -191,29 +192,15 @@ fun ChapterDetailsScreen(
                                             if (!entry.isPlayable) return@ScenarioContent
 
                                             if (isThisChapterPlaying) {
-                                                Log.d(
-                                                    "ChapterDetailsScreen",
-                                                    "onEntryClick: Та же глава. Отправка команды seekAndPlay ${entry.startMs}"
-                                                )
-                                                // playerViewModel.seekTo(entry.startMs)
-                                                //
-                                                // if (!playerState.isPlaying) {
-                                                //     playerViewModel.play()
-                                                // }
                                                 playerViewModel.seekToAndPlay(entry.startMs)
 
                                             } else {
-                                                Log.d(
-                                                    "ChapterDetailsScreen",
-                                                    "onEntryClick: Другая глава. Вызов playChapter(${state.bookId}, ${state.chapterId}, ${entry.startMs})"
-                                                )
                                                 playerViewModel.playChapter(
                                                     bookId = state.bookId,
                                                     chapterId = state.chapterId,
                                                     seekToPositionMs = entry.startMs
                                                 )
                                             }
-                                            mainViewModel.navigateToPlayerTab()
                                         }
                                     )
                                 }
@@ -222,7 +209,6 @@ fun ChapterDetailsScreen(
                             }
                         }
                     }
-                    // Добавим 'else' на случай, если state.details == null, но isLoading == false и error == null
                     else -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("Нет данных для отображения")
@@ -356,27 +342,16 @@ private fun ScenarioContent(
         val targetIndex = scenario.indexOfFirst { it.id == currentPlayingEntryId }
         if (targetIndex == -1) return@LaunchedEffect
 
-        // Не скроллим, если пользователь сам крутит список
         val isScrolling = lazyListState.isScrollInProgress
-        if (isScrolling) {
-            Log.d("ScenarioContent", "User is scrolling. No auto-scroll.")
-            return@LaunchedEffect
-        }
+        if (isScrolling) return@LaunchedEffect
 
-        // Проверяем, виден ли элемент (даже частично)
         val visibleItemsInfo = lazyListState.layoutInfo.visibleItemsInfo
-        if (visibleItemsInfo.isEmpty()) {
-            return@LaunchedEffect // Список еще не отрисовался
-        }
+        if (visibleItemsInfo.isEmpty()) return@LaunchedEffect
+
         val isTargetVisible = visibleItemsInfo.any { it.index == targetIndex }
 
-        // Скроллим, ТОЛЬКО ЕСЛИ элемент уже виден
         if (isTargetVisible) {
-            Log.d("ScenarioContent", "Item $targetIndex is visible. Scrolling to focus.")
-            // Добавляем -100 смещения, чтобы реплика была не у самого края
             lazyListState.animateScrollToItem(targetIndex, scrollOffset = -100)
-        } else {
-            Log.d("ScenarioContent", "Item $targetIndex is NOT visible. No auto-scroll.")
         }
     }
 
@@ -397,12 +372,8 @@ private fun ScenarioContent(
 
                 val highlightColor = MaterialTheme.colorScheme.primary
                 val speakerColor = MaterialTheme.colorScheme.onBackground
-                // Текст по умолчанию (для режима "нет аудио")
                 val defaultTextColor = MaterialTheme.colorScheme.onBackground
-                // Текст, с которым можно взаимодействовать (есть аудио, но не играет)
-                val interactiveTextColor =
-                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                // Текст, который играет сейчас
+                val interactiveTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                 val playingTextColor = MaterialTheme.colorScheme.onBackground
 
                 val annotatedString = buildAnnotatedString {
@@ -416,16 +387,13 @@ private fun ScenarioContent(
                         append(": ")
                     }
 
-                    // Базовый цвет текста зависит от того, есть ли аудио
                     val baseColor = if (entry.isPlayable) interactiveTextColor else defaultTextColor
 
                     if (entry.words.isEmpty()) {
-                        // Если слов нет, просто вставляем текст
                         withStyle(style = SpanStyle(color = if (isPlaying) playingTextColor else baseColor)) {
                             append(entry.text)
                         }
                     } else {
-                        // Если слова есть, строим "караоке"
                         entry.words.forEach { word ->
                             val isCurrentWord = isPlaying &&
                                     currentPosition >= word.start && currentPosition <= word.end
@@ -442,13 +410,11 @@ private fun ScenarioContent(
                             ) {
                                 append(word.word)
                             }
-                            append(" ") // Добавляем пробел между словами
+                            append(" ")
                         }
                     }
                 }
-
-                Text(
-                    text = annotatedString,
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
@@ -456,10 +422,16 @@ private fun ScenarioContent(
                             else MaterialTheme.colorScheme.surface,
                             shape = MaterialTheme.shapes.medium
                         )
+                        .clip(MaterialTheme.shapes.medium)
                         .clickable(enabled = entry.isPlayable) { onEntryClick(entry) }
-                        .padding(8.dp),
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = annotatedString,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
@@ -134,7 +135,6 @@ private fun ChapterItem(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onViewDetailsClick),
-        // Меняем цвет фона для активной главы
         colors = CardDefaults.cardColors(
             containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
         )
@@ -154,38 +154,49 @@ private fun ChapterItem(
 
             Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                 if (isActive) {
-                    // Глава активна
                     Icon(
                         imageVector = Icons.Default.GraphicEq,
                         contentDescription = "Сейчас играет",
                         tint = MaterialTheme.colorScheme.primary
                     )
                 } else {
-                    // Глава не активна
+                    // Логика отображения кнопок с учетом hasAudio
                     when (chapter.downloadState) {
                         DownloadState.DOWNLOADED -> {
-                            // Скачана: Показываем кнопку "Слушать"
-                            IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
+                            if (chapter.hasAudio) {
+                                // Есть аудио -> Показываем Play
+                                IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Headset,
+                                        contentDescription = "Слушать главу",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            } else {
+                                // Нет аудио -> Показываем книгу (читать) или ничего
                                 Icon(
-                                    imageVector = Icons.Default.Headset,
-                                    contentDescription = "Слушать главу",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                    contentDescription = "Только текст",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }
                         DownloadState.NOT_DOWNLOADED -> {
-                            // Не скачана: Показываем "Слушать" и "Скачать"
                             Row {
-                                // Кнопка "Слушать"
-                                IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
-                                    Icon(
-                                        imageVector = Icons.Default.Headset,
-                                        contentDescription = "Слушать",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                // Кнопку Play показываем ТОЛЬКО если есть аудио (стриминг)
+                                if (chapter.hasAudio) {
+                                    IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
+                                        Icon(
+                                            imageVector = Icons.Default.Headset,
+                                            contentDescription = "Слушать",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                // Кнопка "Скачать"
+
+                                // Кнопку Скачать показываем всегда (скачать можно и текст)
                                 IconButton(onClick = onDownloadClick, modifier = Modifier.size(24.dp)) {
                                     Icon(
                                         imageVector = Icons.Default.Download,
@@ -196,11 +207,9 @@ private fun ChapterItem(
                             }
                         }
                         DownloadState.DOWNLOADING -> {
-                            // Качается: Показываем спиннер
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         }
                         DownloadState.ERROR -> {
-                            // Ошибка: Показываем "Скачать" (для повтора)
                             IconButton(onClick = onDownloadClick, modifier = Modifier.size(24.dp)) {
                                 Icon(
                                     imageVector = Icons.Default.Download,

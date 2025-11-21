@@ -48,10 +48,11 @@ data class Chapter(
     val id: String,
     val title: String,
     val downloadState: DownloadState,
-    val audioDirectoryPath: String?,
-    val scenarioPath: String?,
-    val subtitlesPath: String?,
-    val volumeNumber: Int? = null
+    val audioDirectoryPath: String? = null,
+    val scenarioPath: String? = null,
+    val subtitlesPath: String? = null,
+    val volumeNumber: Int = 1,
+    val hasAudio: Boolean = false
 )
 
 

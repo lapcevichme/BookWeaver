@@ -1,8 +1,8 @@
 package com.lapcevichme.bookweaver.data.database.entities
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.lapcevichme.bookweaver.domain.model.DownloadState
 
@@ -15,23 +15,19 @@ import com.lapcevichme.bookweaver.domain.model.DownloadState
             childColumns = ["bookId"],
             onDelete = ForeignKey.CASCADE
         )
-    ]
+    ],
+    indices = [Index(value = ["bookId"])]
 )
 data class ChapterEntity(
-    @PrimaryKey
-    val id: String,
-
-    @ColumnInfo(index = true)
+    @PrimaryKey val id: String,
     val bookId: String,
-
     val title: String,
+    val chapterIndex: Int,
     val downloadState: DownloadState = DownloadState.NOT_DOWNLOADED,
-
-    val localAudioPath: String?,
-    val localScenarioPath: String?,
-    val localSubtitlesPath: String?,
-    val localOriginalTextPath: String?,
-
-    val chapterIndex: Int = 0,
-    val remoteVersion: Int = 1
+    val localAudioPath: String? = null,
+    val localScenarioPath: String? = null,
+    val localSubtitlesPath: String? = null,
+    val localOriginalTextPath: String? = null,
+    val remoteVersion: Int = 1,
+    val hasAudio: Boolean = false
 )

@@ -107,6 +107,14 @@ class BookRepositoryImpl @Inject constructor(
             structure.chapters.forEachIndexed { index, chapterStruct ->
                 val localChapter = localChaptersMap[chapterStruct.id]
 
+                // При локальном использовании: если аудиофайл есть на диске, то hasAudio=true.
+                // Но для серверных глав берем инфу из DTO.
+                val finalHasAudio = if (localChapter?.downloadState == DownloadState.DOWNLOADED) {
+                    true // Раз скачано, считаем что аудио есть (если оно было в пакете)
+                } else {
+                    chapterStruct.hasAudio
+                }
+
                 val entity = ChapterEntity(
                     id = chapterStruct.id,
                     bookId = book.id,
@@ -117,7 +125,8 @@ class BookRepositoryImpl @Inject constructor(
                     localScenarioPath = localChapter?.localScenarioPath,
                     localSubtitlesPath = localChapter?.localSubtitlesPath,
                     localOriginalTextPath = localChapter?.localOriginalTextPath,
-                    remoteVersion = chapterStruct.version
+                    remoteVersion = chapterStruct.version,
+                    hasAudio = finalHasAudio // <-- Сохраняем в БД
                 )
                 entitiesToInsert.add(entity)
 
@@ -128,7 +137,8 @@ class BookRepositoryImpl @Inject constructor(
                     audioDirectoryPath = localChapter?.localAudioPath,
                     scenarioPath = localChapter?.localScenarioPath,
                     subtitlesPath = localChapter?.localSubtitlesPath,
-                    volumeNumber = chapterStruct.volumeNumber
+                    volumeNumber = chapterStruct.volumeNumber ?: 1,
+                    hasAudio = finalHasAudio // <-- Передаем в Domain
                 )
                 domainChapters.add(domainChapter)
             }
@@ -267,6 +277,8 @@ class BookRepositoryImpl @Inject constructor(
 
             val chapterEntities = chapterDirs.mapIndexed { index, chapterDir ->
                 val originalTextFile = File(chapterDir, "original_text.txt")
+                val hasAudio = File(chapterDir, "audio").exists() // Локально проверяем папку
+
                 ChapterEntity(
                     id = chapterDir.name,
                     bookId = book.id,
@@ -280,7 +292,8 @@ class BookRepositoryImpl @Inject constructor(
                     ).takeIf { it.exists() }?.absolutePath,
                     localOriginalTextPath = originalTextFile.absolutePath.takeIf { originalTextFile.exists() },
                     chapterIndex = index,
-                    remoteVersion = 1
+                    remoteVersion = 1,
+                    hasAudio = hasAudio
                 )
             }
             bookDao.upsertChapters(chapterEntities)
@@ -294,7 +307,8 @@ class BookRepositoryImpl @Inject constructor(
                     scenarioPath = entity.localScenarioPath,
                     subtitlesPath = entity.localSubtitlesPath,
                     volumeNumber = entity.id.substringBefore("_chap").substringAfter("vol_")
-                        .toIntOrNull() ?: 1
+                        .toIntOrNull() ?: 1,
+                    hasAudio = entity.hasAudio
                 )
             }
 
@@ -358,16 +372,12 @@ class BookRepositoryImpl @Inject constructor(
             val serverHost = bookEntity.serverHost
                 ?: return@withContext Result.failure(Exception("Книга не привязана к серверу"))
 
-            // Теперь возвращается audioUrl (возможно, уже полный URL на файл)
             val (entries, audioUrl) = remoteDataSource.fetchPlaybackData(bookId, chapterId)
                 .getOrThrow()
 
-            // Умная склейка: если пришел абсолютный URL (напр. S3), используем его.
-            // Если относительный - клеим к хосту.
             val fullAudioUrl = if (audioUrl.startsWith("http")) {
                 audioUrl
             } else {
-                // Убираем лишние слэши при склейке
                 val host = serverHost.removeSuffix("/")
                 val path = audioUrl.removePrefix("/")
                 "$host/$path"
@@ -402,7 +412,6 @@ class BookRepositoryImpl @Inject constructor(
             val subtitleEntryList =
                 json.decodeFromString<List<SubtitleEntry>>(subtitlesFile.readText())
 
-            // В новой логике audioDirectoryPath может быть путем к файлу, но здесь (в легаси) это папка.
             if (!File(audioDirectoryPath).exists()) throw Exception("audio directory not found")
 
             val mergedList = subtitleEntryList.map { subtitleEntry ->
@@ -699,7 +708,6 @@ class BookRepositoryImpl @Inject constructor(
                         ?: throw Exception("БД не консистентна: глава ${chapterId} СКАЧАНА, но localAudioPath is null")
                 )
             } else {
-                // Для удаленных глав пути к файлам не важны, плеер будет использовать remote-источники
                 media = ChapterMedia(
                     subtitlesPath = "REMOTE_PLACEHOLDER",
                     audioDirectoryPath = "REMOTE_PLACEHOLDER"
@@ -712,7 +720,7 @@ class BookRepositoryImpl @Inject constructor(
             val info = PlayerChapterInfo(
                 bookTitle = bookEntity.title,
                 chapterTitle = chapterEntity.title,
-                coverPath = bookEntity.coverPath, // Теперь тут может быть и URL
+                coverPath = bookEntity.coverPath,
                 media = media,
                 lastListenedPosition = lastPosition
             )
@@ -933,8 +941,6 @@ class BookRepositoryImpl @Inject constructor(
     }
 
     override fun downloadChapter(bookId: String, chapterId: String): Flow<DownloadProgress> = flow {
-        // ... (код загрузки можно оставить старым пока мы не переделаем формат скачивания на один файл) ...
-        // Пока сервер отдает ZIP, этот код валиден.
         var tempFile: File? = null
         try {
             emit(DownloadProgress.Downloading(0L, 0L))
