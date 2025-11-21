@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lapcevichme.bookweaver.domain.model.ChapterDetails
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
+import com.lapcevichme.bookweaver.domain.usecase.books.GetChapterOriginalTextUseCase
 import com.lapcevichme.bookweaver.domain.usecase.books.GetChapterSummaryUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetChapterPlaybackDataUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,6 +22,7 @@ import javax.inject.Inject
 class ChapterDetailsViewModel @Inject constructor(
     private val getPlaybackDataUseCase: GetChapterPlaybackDataUseCase,
     private val getChapterSummaryUseCase: GetChapterSummaryUseCase,
+    private val getOriginalTextUseCase: GetChapterOriginalTextUseCase,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -46,21 +48,24 @@ class ChapterDetailsViewModel @Inject constructor(
     }
 
     /**
-     * Загружает контент главы (текст/аудио) и мета-информацию (тизер/синопсис) параллельно.
+     * Загружает контент главы (текст/аудио), оригинал и мета-информацию параллельно.
      */
     private fun loadChapterContent() {
         Log.d(TAG, "Start loading content for $chapterId")
         _uiState.update { it.copy(isLoading = true) }
 
         viewModelScope.launch {
-            // Запускаем два запроса параллельно для скорости
             val playbackDeferred = async { getPlaybackDataUseCase(bookId, chapterId) }
             val summaryDeferred = async { getChapterSummaryUseCase(bookId, chapterId) }
+            val textDeferred = async { getOriginalTextUseCase(bookId, chapterId) }
 
             val playbackResult = playbackDeferred.await()
             val summaryResult = summaryDeferred.await()
+            val textResult = textDeferred.await()
 
             // Обрабатываем основной контент (Scenario/Audio)
+            // Логика: если нет playbackData (сценария), то глава считается не загруженной/сломанной.
+            // Если нет оригинала или summary — это не критично, показываем что есть.
             playbackResult.fold(
                 onSuccess = { (playbackData, _) ->
                     Log.d(TAG, "PlaybackData loaded successfully.")
@@ -77,13 +82,13 @@ class ChapterDetailsViewModel @Inject constructor(
                         )
                     }
 
-                    // Достаем summary, если загрузилось успешно, иначе null
                     val summary = summaryResult.getOrNull()
+                    val originalText = textResult.getOrDefault("")
 
                     val details = ChapterDetails(
                         scenario = scenario,
                         summary = summary,
-                        originalText = "" // TODO вспомнить как я передавал текст
+                        originalText = originalText
                     )
 
                     val uiDetails = details.toUiModelWithAudio(playbackData)

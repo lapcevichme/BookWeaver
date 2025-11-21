@@ -108,7 +108,7 @@ class RemoteDataSource @Inject constructor(
                 Result.success(response.string())
             } catch (e: Exception) {
                 e.printStackTrace()
-                Result.success("")
+                Result.failure(e)
             }
         }
 }
