@@ -48,7 +48,9 @@ class ChapterDetailsViewModel @Inject constructor(
     }
 
     /**
-     * Загружает контент главы (текст/аудио), оригинал и мета-информацию параллельно.
+     * Загружает контент главы.
+     * Если PlaybackData (сценарий/аудио) недоступны (404), экран все равно откроется
+     * в режиме чтения текста.
      */
     private fun loadChapterContent() {
         Log.d(TAG, "Start loading content for $chapterId")
@@ -63,54 +65,56 @@ class ChapterDetailsViewModel @Inject constructor(
             val summaryResult = summaryDeferred.await()
             val textResult = textDeferred.await()
 
-            // Обрабатываем основной контент (Scenario/Audio)
-            // Логика: если нет playbackData (сценария), то глава считается не загруженной/сломанной.
-            // Если нет оригинала или summary — это не критично, показываем что есть.
-            playbackResult.fold(
-                onSuccess = { (playbackData, _) ->
-                    Log.d(TAG, "PlaybackData loaded successfully.")
+            val summary = summaryResult.getOrNull()
+            val originalText = textResult.getOrDefault("")
 
-                    val scenario = playbackData.map { entry ->
-                        ScenarioEntry(
-                            id = UUID.randomUUID(),
-                            text = entry.text,
-                            speaker = entry.speaker,
-                            emotion = entry.emotion,
-                            type = entry.type,
-                            audioFile = entry.audioFile,
-                            ambient = entry.ambient
-                        )
-                    }
+            val playbackDataPair = playbackResult.getOrNull()
 
-                    val summary = summaryResult.getOrNull()
-                    val originalText = textResult.getOrDefault("")
+            if (playbackResult.isFailure) {
+                Log.w(TAG, "Playback data failed (possibly 404), loading in text-only mode: ${playbackResult.exceptionOrNull()?.message}")
+            }
 
-                    val details = ChapterDetails(
-                        scenario = scenario,
-                        summary = summary,
-                        originalText = originalText
-                    )
+            val scenario = playbackDataPair?.first?.map { entry ->
+                ScenarioEntry(
+                    id = UUID.randomUUID(),
+                    text = entry.text,
+                    speaker = entry.speaker,
+                    emotion = entry.emotion,
+                    type = entry.type,
+                    audioFile = entry.audioFile,
+                    ambient = entry.ambient
+                )
+            } ?: emptyList()
 
-                    val uiDetails = details.toUiModelWithAudio(playbackData)
-
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            details = uiDetails,
-                            error = null
-                        )
-                    }
-                },
-                onFailure = { e ->
-                    Log.e(TAG, "Error loading playback data", e)
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "Ошибка загрузки данных главы: ${e.message}"
-                        )
-                    }
-                }
+            val details = ChapterDetails(
+                scenario = scenario,
+                summary = summary,
+                originalText = originalText
             )
+
+            val uiDetails = if (playbackDataPair != null) {
+                details.toUiModelWithAudio(playbackDataPair.first)
+            } else {
+                details.toUiModelTextOnly()
+            }
+
+            // Ошибка выставляется только если вообще ничего не загрузилось
+            if (originalText.isEmpty() && summary == null && scenario.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "Не удалось загрузить данные главы (ни текста, ни сценария)"
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        details = uiDetails,
+                        error = null
+                    )
+                }
+            }
         }
     }
 
