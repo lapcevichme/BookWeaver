@@ -72,8 +72,10 @@ class RemoteDataSource @Inject constructor(
     ): Result<Pair<List<PlaybackEntry>, String>> = withContext(Dispatchers.IO) {
         try {
             val response = apiService.getPlaybackData(bookId, chapterId)
-            val domainEntries = response.entries.map { it.toDomain() }
-            Result.success(Pair(domainEntries, response.audioBaseUrl))
+            // Маппим новый syncMap в старый добрый List<PlaybackEntry>
+            val domainEntries = response.syncMap.map { it.toDomain() }
+            // Возвращаем audioUrl вместо audioBaseUrl
+            Result.success(Pair(domainEntries, response.audioUrl))
         } catch (e: Exception) {
             e.printStackTrace()
             Result.failure(e)

@@ -350,7 +350,7 @@ class BookRepositoryImpl @Inject constructor(
             return@withContext getPlaybackDataFromLocal(
                 bookId,
                 chapterId,
-                chapterEntity.localAudioPath
+                chapterEntity.localAudioPath!!
             )
         }
 
@@ -358,9 +358,20 @@ class BookRepositoryImpl @Inject constructor(
             val serverHost = bookEntity.serverHost
                 ?: return@withContext Result.failure(Exception("Книга не привязана к серверу"))
 
-            val (entries, audioBaseUrl) = remoteDataSource.fetchPlaybackData(bookId, chapterId)
+            // Теперь возвращается audioUrl (возможно, уже полный URL на файл)
+            val (entries, audioUrl) = remoteDataSource.fetchPlaybackData(bookId, chapterId)
                 .getOrThrow()
-            val fullAudioUrl = serverHost + audioBaseUrl
+
+            // Умная склейка: если пришел абсолютный URL (напр. S3), используем его.
+            // Если относительный - клеим к хосту.
+            val fullAudioUrl = if (audioUrl.startsWith("http")) {
+                audioUrl
+            } else {
+                // Убираем лишние слэши при склейке
+                val host = serverHost.removeSuffix("/")
+                val path = audioUrl.removePrefix("/")
+                "$host/$path"
+            }
 
             Result.success(Pair(entries, fullAudioUrl))
         } catch (e: Exception) {
@@ -391,6 +402,7 @@ class BookRepositoryImpl @Inject constructor(
             val subtitleEntryList =
                 json.decodeFromString<List<SubtitleEntry>>(subtitlesFile.readText())
 
+            // В новой логике audioDirectoryPath может быть путем к файлу, но здесь (в легаси) это папка.
             if (!File(audioDirectoryPath).exists()) throw Exception("audio directory not found")
 
             val mergedList = subtitleEntryList.map { subtitleEntry ->
@@ -821,7 +833,8 @@ class BookRepositoryImpl @Inject constructor(
 
             if (bookEntity.source == BookSource.SERVER) {
                 val serverHost = bookEntity.serverHost
-                val ambientUrl = "$serverHost/static/ambient/$ambientName.mp3"
+                val host = serverHost?.removeSuffix("/")
+                val ambientUrl = "$host/static/ambient/$ambientName.mp3"
                 return@withContext Result.success(ambientUrl)
             }
 
@@ -874,7 +887,9 @@ class BookRepositoryImpl @Inject constructor(
                 val remoteBookId =
                     remoteBookDto.bookName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").lowercase()
                 val localBook = localBooksMap[remoteBookId]
-                val remoteCoverUrl = "${connection.host}/static/books/${remoteBookId}/cover.jpg"
+
+                val host = connection.host.removeSuffix("/")
+                val remoteCoverUrl = "$host/static/books/${remoteBookId}/cover.jpg"
 
                 if (localBook == null) {
                     val newEntity = BookEntity(
@@ -886,7 +901,7 @@ class BookRepositoryImpl @Inject constructor(
                         remoteCoverUrl = remoteCoverUrl,
                         remoteManifestVersion = remoteBookDto.version,
                         localPath = null,
-                        coverPath = remoteCoverUrl, // Используем URL как путь
+                        coverPath = remoteCoverUrl,
                         themeColor = null,
                         lastListenedChapterId = null,
                         lastListenedPosition = 0L
@@ -900,8 +915,6 @@ class BookRepositoryImpl @Inject constructor(
                         remoteVersion = remoteBookDto.version
                     )
                 } else {
-                    // Если книга уже есть и привязана к серверу, обновляем метаданные
-                    // Полезно, если, например, изменился IP-адрес сервера
                     val updatedEntity = localBook.copy(
                         title = remoteBookDto.bookName,
                         author = remoteBookDto.author,
@@ -920,6 +933,8 @@ class BookRepositoryImpl @Inject constructor(
     }
 
     override fun downloadChapter(bookId: String, chapterId: String): Flow<DownloadProgress> = flow {
+        // ... (код загрузки можно оставить старым пока мы не переделаем формат скачивания на один файл) ...
+        // Пока сервер отдает ZIP, этот код валиден.
         var tempFile: File? = null
         try {
             emit(DownloadProgress.Downloading(0L, 0L))

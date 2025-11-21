@@ -12,5 +12,6 @@ data class PlayerState(
     val currentSubtitle: CharSequence = "",
     val subtitlesEnabled: Boolean = true,
     val error: String? = null,
-    val loadedChapterId: String = ""
+    val loadedChapterId: String = "",
+    val isLoading: Boolean = false
 )

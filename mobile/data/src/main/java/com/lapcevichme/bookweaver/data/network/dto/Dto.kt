@@ -86,26 +86,26 @@ data class PingResponseDto(
     @SerialName("server_name") val serverName: String
 )
 
-// --- Playback Data ---
+// --- Playback Data (SINGLE FILE FORMAT) ---
 
 @Serializable
 data class PlaybackDataResponseDto(
-    val entries: List<PlaybackEntryDto>,
-    @SerialName("audio_base_url") val audioBaseUrl: String
+    @SerialName("audio_url") val audioUrl: String,
+    @SerialName("duration_ms") val durationMs: Long,
+    @SerialName("sync_map") val syncMap: List<PlaybackEntryDto>
 )
 
 @Serializable
 data class PlaybackEntryDto(
-    val id: String,
-    @SerialName("audio_file") val audioFile: String,
+    val id: String? = null,
     val text: String,
     @SerialName("start_ms") val startMs: Long,
     @SerialName("end_ms") val endMs: Long,
-    val words: List<DomainWordEntryDto>,
-    val speaker: String,
-    val ambient: String,
-    val emotion: String?,
-    val type: String
+    val words: List<DomainWordEntryDto> = emptyList(),
+    val speaker: String = "Narrator",
+    val ambient: String = "none",
+    val emotion: String? = null,
+    val type: String = "narration"
 )
 
 @Serializable

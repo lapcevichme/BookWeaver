@@ -24,8 +24,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ConcatenatingMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import com.lapcevichme.bookweaver.core.PlayerState
@@ -50,6 +52,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 
@@ -59,23 +62,12 @@ class MediaPlayerService : Service() {
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    @Inject
-    lateinit var getChapterPlaybackDataUseCase: GetChapterPlaybackDataUseCase
-
-    @Inject
-    lateinit var getAmbientTrackPathUseCase: GetAmbientTrackPathUseCase
-
-    @Inject
-    lateinit var saveListenProgressUseCase: SaveListenProgressUseCase
-
-    @Inject
-    lateinit var getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase
-
-    @Inject
-    lateinit var getAmbientVolumeUseCase: GetAmbientVolumeUseCase
-
-    @Inject
-    lateinit var serverRepository: ServerRepository
+    @Inject lateinit var getChapterPlaybackDataUseCase: GetChapterPlaybackDataUseCase
+    @Inject lateinit var getAmbientTrackPathUseCase: GetAmbientTrackPathUseCase
+    @Inject lateinit var saveListenProgressUseCase: SaveListenProgressUseCase
+    @Inject lateinit var getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase
+    @Inject lateinit var getAmbientVolumeUseCase: GetAmbientVolumeUseCase
+    @Inject lateinit var serverRepository: ServerRepository
 
     private lateinit var player: ExoPlayer
     private lateinit var ambientPlayer: ExoPlayer
@@ -86,14 +78,11 @@ class MediaPlayerService : Service() {
     private var currentChapterId: String? = null
 
     private var currentPlaybackData: List<PlaybackEntry> = emptyList()
-
     private var currentAmbientName: String = "none"
-    private var currentAudioDirectoryPath: String = ""
     private var ambientVolume: Float = 0.5f
 
     private var currentMediaItemIndex = 0
     private var basePositionOffsetMs = 0L
-
     private var totalChapterDurationMs = 0L
 
     private val _playerStateFlow = MutableStateFlow(PlayerState())
@@ -120,7 +109,6 @@ class MediaPlayerService : Service() {
     }
 
     override fun onBind(intent: Intent): IBinder = binder
-
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -162,10 +150,8 @@ class MediaPlayerService : Service() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY && player.duration > 0) {
-                    if (totalChapterDurationMs == 0L && currentPlaybackData.size == 1) {
+                    if (player.currentTimeline.windowCount == 1) {
                         totalChapterDurationMs = player.duration
-                        Log.d(TAG, "Duration updated from single file source: $totalChapterDurationMs ms")
-                        updatePlayerState()
                     }
                 }
 
@@ -179,9 +165,10 @@ class MediaPlayerService : Service() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                currentMediaItemIndex = player.currentMediaItemIndex
-                basePositionOffsetMs = currentPlaybackData.getOrNull(currentMediaItemIndex)?.startMs ?: 0L
-
+                if (player.currentTimeline.windowCount > 1) {
+                    currentMediaItemIndex = player.currentMediaItemIndex
+                    basePositionOffsetMs = currentPlaybackData.getOrNull(currentMediaItemIndex)?.startMs ?: 0L
+                }
                 checkAmbient()
                 updatePlayerState()
             }
@@ -280,115 +267,71 @@ class MediaPlayerService : Service() {
         basePositionOffsetMs = 0L
         totalChapterDurationMs = 0L
         currentAmbientName = "none"
-        currentAudioDirectoryPath = ""
+
+        // Сбрасываем текущую обложку (bitmap), чтобы не показывать старую
+        placeholderBitmap = null
+
+        _playerStateFlow.value = _playerStateFlow.value.copy(
+            isLoading = true,
+            fileName = chapterTitle,
+            loadedChapterId = chapterId,
+            albumArt = null
+        )
 
         serviceScope.launch {
             getChapterPlaybackDataUseCase(bookId, chapterId).fold(
-                onSuccess = { (playbackData, audioDirectoryPath) ->
+                onSuccess = { (playbackData, audioPath) ->
                     if (playbackData.isEmpty()) {
                         _playerStateFlow.value = PlayerState(error = "Нет данных для воспроизведения")
                         return@fold
                     }
 
                     currentPlaybackData = playbackData
-                    currentAudioDirectoryPath = audioDirectoryPath
-                    // Если сервер прислал 0, то totalChapterDurationMs останется 0
                     totalChapterDurationMs = playbackData.lastOrNull()?.endMs ?: 0L
 
-                    val isStreaming = audioDirectoryPath.startsWith("http")
-                    val cleanBaseUrl = if (isStreaming) audioDirectoryPath.removeSuffix("/") else audioDirectoryPath
+                    val isRemote = audioPath.startsWith("http")
+                    val isSingleFile = (isRemote && (audioPath.endsWith(".mp3") || audioPath.endsWith(".m4a") || audioPath.endsWith(".wav"))) ||
+                            (!isRemote && File(audioPath).isFile)
 
-                    val connection = serverRepository.getCurrentConnection()
-                    val headers = mutableMapOf<String, String>()
-                    if (connection != null) {
-                        headers["Authorization"] = "Bearer ${connection.token}"
-                    }
-
-                    val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                        .setUserAgent("BookWeaver-Android")
-                        .setDefaultRequestProperties(headers)
-                    val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
-                    val mediaSources = mutableListOf<MediaSource>()
-
-                    for (entry in playbackData) {
-                        if (entry.audioFile.isBlank()) continue
-
-                        val mediaItem: MediaItem = if (isStreaming) {
-                            MediaItem.fromUri("$cleanBaseUrl/${entry.audioFile}")
+                    val mediaSource = if (isSingleFile) {
+                        prepareSingleFileMediaSource(audioPath, isRemote)
+                    } else {
+                        if (isRemote) {
+                            prepareRemotePlaylistMediaSource(playbackData, audioPath)
                         } else {
-                            val file = File(audioDirectoryPath, entry.audioFile)
-                            if (!file.exists()) continue
-                            MediaItem.fromUri(file.toUri())
+                            prepareLocalPlaylistMediaSource(playbackData, audioPath)
                         }
-                        mediaSources.add(mediaSourceFactory.createMediaSource(mediaItem))
                     }
 
-                    if (mediaSources.isEmpty()) {
+                    if (mediaSource == null) {
                         stopAndClear()
-                        _playerStateFlow.value = PlayerState(error = "Аудиофайлы не найдены.")
+                        _playerStateFlow.value = PlayerState(error = "Не удалось подготовить аудио.")
                         return@fold
                     }
 
-                    player.setMediaSources(mediaSources)
+                    withContext(Dispatchers.Main) {
+                        player.setMediaSource(mediaSource)
 
-                    if (seekToPositionMs != null) {
-                        seekTo(seekToPositionMs)
-                    } else {
-                        checkAmbient()
-                    }
-
-                    player.playWhenReady = playWhenReady
-                    player.prepare()
-
-                    // --- ФИКС 1: УТЕЧКА СОКЕТОВ ПРИ ЗАГРУЗКЕ КАРТИНКИ ---
-                    var loadedBitmap: Bitmap? = null
-                    if (coverPath != null) {
-                        if (coverPath.startsWith("http") || coverPath.startsWith("/")) {
-                            val fullUrl = if (coverPath.startsWith("/")) {
-                                val host = connection?.host ?: ""
-                                "$host$coverPath"
+                        if (seekToPositionMs != null && seekToPositionMs > 0) {
+                            if (isSingleFile) {
+                                player.seekTo(seekToPositionMs)
                             } else {
-                                coverPath
-                            }
-
-                            withContext(Dispatchers.IO) {
-                                try {
-                                    // Используем use, чтобы InputStream и Connection точно закрылись!
-                                    val url = URL(fullUrl)
-                                    val urlConnection = url.openConnection()
-
-                                    if (connection?.token != null) {
-                                        urlConnection.setRequestProperty("Authorization", "Bearer ${connection.token}")
-                                    }
-                                    
-                                    // Добавляем таймауты, чтобы не вешать поток
-                                    urlConnection.connectTimeout = 5000
-                                    urlConnection.readTimeout = 5000
-
-                                    urlConnection.getInputStream().use { stream ->
-                                        loadedBitmap = BitmapFactory.decodeStream(stream)
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to load cover from URL: $fullUrl", e)
-                                }
+                                seekTo(seekToPositionMs)
                             }
                         } else {
-                            try {
-                                loadedBitmap = BitmapFactory.decodeFile(coverPath)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to load cover file", e)
-                            }
+                            checkAmbient()
                         }
-                        placeholderBitmap = loadedBitmap
-                    }
-                    // -----------------------------------------------------
 
-                    _playerStateFlow.value = PlayerState(
+                        player.playWhenReady = playWhenReady
+                        player.prepare()
+                    }
+
+                    loadCover(coverPath, isRemote, audioPath)
+
+                    _playerStateFlow.value = _playerStateFlow.value.copy(
+                        isLoading = false,
                         fileName = chapterTitle,
-                        albumArt = loadedBitmap,
-                        subtitlesEnabled = true,
                         duration = totalChapterDurationMs,
-                        currentPosition = seekToPositionMs ?: 0L,
                         loadedChapterId = chapterId
                     )
                     updateNotification()
@@ -396,10 +339,66 @@ class MediaPlayerService : Service() {
                 onFailure = { e ->
                     Log.e(TAG, "Error setting media", e)
                     stopAndClear()
-                    _playerStateFlow.value = PlayerState(error = "Ошибка загрузки аудио.")
+                    _playerStateFlow.value = PlayerState(error = "Ошибка: ${e.message}")
                 }
             )
         }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun prepareSingleFileMediaSource(path: String, isRemote: Boolean): MediaSource {
+        basePositionOffsetMs = 0L
+        currentMediaItemIndex = 0
+        val mediaItem = MediaItem.fromUri(path)
+        val dataSourceFactory: androidx.media3.datasource.DataSource.Factory = if (isRemote) {
+            val connection = serverRepository.getCurrentConnection()
+            val headers = if (connection != null) mapOf("Authorization" to "Bearer ${connection.token}") else emptyMap()
+            DefaultHttpDataSource.Factory()
+                .setUserAgent("BookWeaver-Android")
+                .setDefaultRequestProperties(headers)
+        } else {
+            DefaultDataSource.Factory(this@MediaPlayerService)
+        }
+        return DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
+    }
+
+    @OptIn(UnstableApi::class)
+    private suspend fun prepareLocalPlaylistMediaSource(
+        playbackData: List<PlaybackEntry>,
+        basePath: String
+    ): MediaSource? = withContext(Dispatchers.IO) {
+        val sources = mutableListOf<MediaSource>()
+        val dataSourceFactory = DefaultMediaSourceFactory(this@MediaPlayerService)
+        for (entry in playbackData) {
+            if (entry.audioFile.isBlank()) continue
+            val file = File(basePath, entry.audioFile)
+            if (!file.exists()) continue
+            sources.add(dataSourceFactory.createMediaSource(MediaItem.fromUri(file.toUri())))
+        }
+        if (sources.isEmpty()) return@withContext null
+        return@withContext ConcatenatingMediaSource(*sources.toTypedArray())
+    }
+
+    @OptIn(UnstableApi::class)
+    private suspend fun prepareRemotePlaylistMediaSource(
+        playbackData: List<PlaybackEntry>,
+        baseUrl: String
+    ): MediaSource? = withContext(Dispatchers.IO) {
+        val sources = mutableListOf<MediaSource>()
+        val connection = serverRepository.getCurrentConnection()
+        val headers = if (connection != null) mapOf("Authorization" to "Bearer ${connection.token}") else emptyMap()
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("BookWeaver-Android")
+            .setDefaultRequestProperties(headers)
+        val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
+        val cleanBaseUrl = baseUrl.removeSuffix("/")
+        for (entry in playbackData) {
+            if (entry.audioFile.isBlank()) continue
+            val url = "$cleanBaseUrl/${entry.audioFile}"
+            sources.add(mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)))
+        }
+        if (sources.isEmpty()) return@withContext null
+        return@withContext ConcatenatingMediaSource(*sources.toTypedArray())
     }
 
     fun play() { player.play(); if (ambientPlayer.mediaItemCount > 0) ambientPlayer.play() }
@@ -407,33 +406,35 @@ class MediaPlayerService : Service() {
     fun togglePlayPause() { if (player.isPlaying) pause() else play() }
 
     fun seekTo(position: Long) {
-        if (currentPlaybackData.isEmpty()) return
-
-        // Если длительность 0, разрешаем мотать до "бесконечности",
-        // плеер сам найдет ближайший сегмент.
-        val safeDuration = if (totalChapterDurationMs > 0) totalChapterDurationMs else Long.MAX_VALUE
-        val clampedPosition = position.coerceIn(0L, safeDuration)
-
-        val targetItemIndex = currentPlaybackData.indexOfLast { clampedPosition >= it.startMs }
-            .coerceAtLeast(0)
-
-        val targetItem = currentPlaybackData.getOrNull(targetItemIndex) ?: currentPlaybackData.first()
-        val relativePosition = (clampedPosition - targetItem.startMs).coerceAtLeast(0L)
-
-        basePositionOffsetMs = targetItem.startMs
-        currentMediaItemIndex = targetItemIndex
-
-        player.seekTo(targetItemIndex, relativePosition)
+        val isSingleFile = player.currentTimeline.windowCount <= 1
+        if (isSingleFile) {
+            player.seekTo(position)
+        } else {
+            if (currentPlaybackData.isEmpty()) return
+            val safeDuration = if (totalChapterDurationMs > 0) totalChapterDurationMs else Long.MAX_VALUE
+            val clampedPosition = position.coerceIn(0L, safeDuration)
+            val targetItemIndex = currentPlaybackData.indexOfLast { clampedPosition >= it.startMs }.coerceAtLeast(0)
+            val targetItem = currentPlaybackData.getOrNull(targetItemIndex) ?: currentPlaybackData.first()
+            val relativePosition = (clampedPosition - targetItem.startMs).coerceAtLeast(0L)
+            basePositionOffsetMs = targetItem.startMs
+            currentMediaItemIndex = targetItemIndex
+            player.seekTo(targetItemIndex, relativePosition)
+        }
         checkAmbient()
-
         if (player.playbackState != Player.STATE_IDLE) {
             updatePlayerState()
-            triggerSave(position = clampedPosition, isDebounce = true, isFinalSave = false)
+            triggerSave(position = position, isDebounce = true, isFinalSave = false)
         }
     }
 
     private fun checkAmbient() {
-        val entry = currentPlaybackData.getOrNull(currentMediaItemIndex) ?: return
+        val currentPosition = _playerStateFlow.value.currentPosition
+        val entry = currentPlaybackData.firstOrNull {
+            currentPosition >= it.startMs && currentPosition < it.endMs
+        } ?: currentPlaybackData.getOrNull(currentMediaItemIndex)
+
+        if (entry == null) return
+
         val newAmbientName = entry.ambient
         if (newAmbientName != currentAmbientName) {
             currentAmbientName = newAmbientName
@@ -445,7 +446,6 @@ class MediaPlayerService : Service() {
     private fun updateAmbientPlayer(ambientName: String) {
         ambientPlayer.stop()
         ambientPlayer.clearMediaItems()
-
         if (ambientName == "none" || currentBookId == null) return
 
         serviceScope.launch {
@@ -458,17 +458,24 @@ class MediaPlayerService : Service() {
                         if (connection != null) {
                             headers["Authorization"] = "Bearer ${connection.token}"
                         }
-                        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                            .setUserAgent("BookWeaver-Android")
-                            .setDefaultRequestProperties(headers)
-                        val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
-
+                        val dataSourceFactory: androidx.media3.datasource.DataSource.Factory = if (path.startsWith("http")) {
+                            DefaultHttpDataSource.Factory()
+                                .setUserAgent("BookWeaver-Android")
+                                .setDefaultRequestProperties(headers)
+                        } else {
+                            DefaultDataSource.Factory(this@MediaPlayerService)
+                        }
+                        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
                         val mediaSource: MediaSource = if (path.startsWith("http")) {
                             mediaSourceFactory.createMediaSource(MediaItem.fromUri(path))
                         } else {
-                            mediaSourceFactory.createMediaSource(MediaItem.fromUri(File(path).toUri()))
+                            val file = File(path)
+                            if (file.exists()) {
+                                mediaSourceFactory.createMediaSource(MediaItem.fromUri(file.toUri()))
+                            } else {
+                                return@fold
+                            }
                         }
-
                         ambientPlayer.setMediaSource(mediaSource)
                         ambientPlayer.volume = ambientVolume
                         ambientPlayer.playWhenReady = player.isPlaying
@@ -487,23 +494,29 @@ class MediaPlayerService : Service() {
         updatePlayerState()
     }
 
-    fun stopAndClear() {
+    fun stopAndClear(resetUI: Boolean = true) {
         triggerSave(position = _playerStateFlow.value.currentPosition, isDebounce = false, isFinalSave = true)
-        _playerStateFlow.value = PlayerState()
-        player.pause(); player.stop(); player.clearMediaItems()
-        ambientPlayer.pause(); ambientPlayer.stop(); ambientPlayer.clearMediaItems()
-        currentBookId = null; currentChapterId = null
-        currentPlaybackData = emptyList()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        player.stop()
+        player.clearMediaItems()
+        ambientPlayer.stop()
+        ambientPlayer.clearMediaItems()
+        if (resetUI) {
+            _playerStateFlow.value = PlayerState()
+            currentBookId = null; currentChapterId = null
+            currentPlaybackData = emptyList()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
     }
 
     private fun updatePlayerState() {
-        // Если мы в состоянии IDLE и длительность 0, лучше ничего не трогать, чтобы не сломать UI
         if (player.playbackState == Player.STATE_IDLE && totalChapterDurationMs == 0L) return
 
-        val currentItemOffset = currentPlaybackData.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
-        basePositionOffsetMs = currentItemOffset
-        val absolutePosition = basePositionOffsetMs + player.currentPosition
+        val absolutePosition = if (player.currentTimeline.windowCount <= 1) {
+            player.currentPosition
+        } else {
+            val currentItemOffset = currentPlaybackData.getOrNull(player.currentMediaItemIndex)?.startMs ?: 0L
+            currentItemOffset + player.currentPosition
+        }
 
         val currentSubtitleText: CharSequence = if (_playerStateFlow.value.subtitlesEnabled) {
             val currentEntry = currentPlaybackData.firstOrNull {
@@ -522,7 +535,6 @@ class MediaPlayerService : Service() {
 
         _playerStateFlow.value = _playerStateFlow.value.copy(
             isPlaying = player.isPlaying,
-            // Если тайминги 0, мы показываем duration 0 (indeterminate), но НЕ 19 сек.
             duration = if (totalChapterDurationMs > 0) totalChapterDurationMs else 0L,
             currentPosition = absolutePosition,
             playbackSpeed = player.playbackParameters.speed,
@@ -548,6 +560,85 @@ class MediaPlayerService : Service() {
             return spannable
         } catch (e: Exception) {
             return entry.text
+        }
+    }
+
+    private suspend fun loadCover(path: String?, isRemote: Boolean, baseRemoteUrl: String?) {
+        if (path.isNullOrEmpty()) {
+            placeholderBitmap = null
+            withContext(Dispatchers.Main) {
+                _playerStateFlow.value = _playerStateFlow.value.copy(albumArt = null)
+                updateNotification()
+            }
+            return
+        }
+
+        withContext(Dispatchers.IO) {
+            try {
+                var bitmap: Bitmap? = null
+
+                // Явно проверяем, является ли это URL
+                if (path.startsWith("http")) {
+                    val connection = serverRepository.getCurrentConnection()
+                    val url = URL(path)
+                    val conn = url.openConnection() as HttpURLConnection
+
+                    if (connection != null) {
+                        conn.setRequestProperty("Authorization", "Bearer ${connection.token}")
+                    }
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    conn.connect()
+
+                    // Проверяем код ответа
+                    if (conn.responseCode == 200) {
+                        conn.inputStream.use {
+                            bitmap = BitmapFactory.decodeStream(it)
+                        }
+                    } else {
+                        Log.w(TAG, "Failed to load cover: ${conn.responseCode} ${conn.responseMessage}")
+                    }
+                }
+                // Если не http, проверяем файл локально
+                else if (File(path).exists()) {
+                    bitmap = BitmapFactory.decodeFile(path)
+                }
+                // Если файл не найден, но включен remote режим - пробуем собрать URL (fallback)
+                else if (isRemote) {
+                    val host = baseRemoteUrl?.substringBefore("/static") ?: ""
+                    val cleanHost = host.removeSuffix("/")
+                    val cleanPath = path.removePrefix("/")
+                    val fullUrl = "$cleanHost/$cleanPath"
+
+                    if (fullUrl.startsWith("http")) {
+                        val connection = serverRepository.getCurrentConnection()
+                        val url = URL(fullUrl)
+                        val conn = url.openConnection() as HttpURLConnection
+                        if (connection != null) {
+                            conn.setRequestProperty("Authorization", "Bearer ${connection.token}")
+                        }
+                        conn.connect()
+                        if (conn.responseCode == 200) {
+                            conn.inputStream.use { bitmap = BitmapFactory.decodeStream(it) }
+                        }
+                    }
+                }
+
+                placeholderBitmap = bitmap
+
+                withContext(Dispatchers.Main) {
+                    _playerStateFlow.value = _playerStateFlow.value.copy(albumArt = bitmap)
+                    updateNotification()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Cover load failed: $path", e)
+                // Можно сбросить обложку, если загрузка не удалась
+                placeholderBitmap = null
+                withContext(Dispatchers.Main) {
+                    _playerStateFlow.value = _playerStateFlow.value.copy(albumArt = null)
+                    updateNotification()
+                }
+            }
         }
     }
 

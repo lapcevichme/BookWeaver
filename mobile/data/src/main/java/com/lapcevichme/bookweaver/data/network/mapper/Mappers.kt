@@ -14,6 +14,7 @@ import com.lapcevichme.bookweaver.domain.model.PlaybackEntry
 import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import java.util.UUID
 
+
 internal fun BookManifestDto.toDomain(): BookManifest = BookManifest(
     bookName = this.bookName,
     author = this.author,
@@ -62,8 +63,8 @@ internal fun DomainWordEntryDto.toDomain(): DomainWordEntry = DomainWordEntry(
 )
 
 internal fun PlaybackEntryDto.toDomain(): PlaybackEntry = PlaybackEntry(
-    id = this.id,
-    audioFile = this.audioFile,
+    id = this.id ?: UUID.randomUUID().toString(),
+    audioFile = "",
     text = this.text,
     startMs = this.startMs,
     endMs = this.endMs,
