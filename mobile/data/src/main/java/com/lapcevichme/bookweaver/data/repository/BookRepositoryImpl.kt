@@ -107,10 +107,9 @@ class BookRepositoryImpl @Inject constructor(
             structure.chapters.forEachIndexed { index, chapterStruct ->
                 val localChapter = localChaptersMap[chapterStruct.id]
 
-                // При локальном использовании: если аудиофайл есть на диске, то hasAudio=true.
-                // Но для серверных глав берем инфу из DTO.
+                // Приоритет: если скачано локально - верим файловой системе, иначе верим серверу
                 val finalHasAudio = if (localChapter?.downloadState == DownloadState.DOWNLOADED) {
-                    true // Раз скачано, считаем что аудио есть (если оно было в пакете)
+                    localChapter.hasAudio // Берем сохраненное значение (которое мы обновим при скачивании)
                 } else {
                     chapterStruct.hasAudio
                 }
@@ -126,7 +125,7 @@ class BookRepositoryImpl @Inject constructor(
                     localSubtitlesPath = localChapter?.localSubtitlesPath,
                     localOriginalTextPath = localChapter?.localOriginalTextPath,
                     remoteVersion = chapterStruct.version,
-                    hasAudio = finalHasAudio // <-- Сохраняем в БД
+                    hasAudio = finalHasAudio
                 )
                 entitiesToInsert.add(entity)
 
@@ -138,7 +137,7 @@ class BookRepositoryImpl @Inject constructor(
                     scenarioPath = localChapter?.localScenarioPath,
                     subtitlesPath = localChapter?.localSubtitlesPath,
                     volumeNumber = chapterStruct.volumeNumber ?: 1,
-                    hasAudio = finalHasAudio // <-- Передаем в Domain
+                    hasAudio = finalHasAudio
                 )
                 domainChapters.add(domainChapter)
             }
@@ -277,7 +276,7 @@ class BookRepositoryImpl @Inject constructor(
 
             val chapterEntities = chapterDirs.mapIndexed { index, chapterDir ->
                 val originalTextFile = File(chapterDir, "original_text.txt")
-                val hasAudio = File(chapterDir, "audio").exists() // Локально проверяем папку
+                val hasAudio = File(chapterDir, "audio").exists()
 
                 ChapterEntity(
                     id = chapterDir.name,
@@ -985,15 +984,23 @@ class BookRepositoryImpl @Inject constructor(
                 }
             }
 
+            val audioDir = File(chapterDir, "audio")
+            val hasLocalAudio = audioDir.exists() && (audioDir.listFiles()?.isNotEmpty() == true)
+
             val originalTextFile = File(chapterDir, "original_text.txt")
+            val hasLocalText = originalTextFile.exists()
+
+            val localAudioPath = if (hasLocalAudio) audioDir.absolutePath else null
+            val localOriginalTextPath = if (hasLocalText) originalTextFile.absolutePath else null
 
             bookDao.updateChapterDownloadPaths(
                 chapterId = chapterId,
                 state = DownloadState.DOWNLOADED,
-                localAudioPath = File(chapterDir, "audio").absolutePath,
+                localAudioPath = localAudioPath,
                 localScenarioPath = File(chapterDir, "scenario.json").absolutePath,
                 localSubtitlesPath = File(chapterDir, "subtitles.json").absolutePath,
-                localOriginalTextPath = originalTextFile.absolutePath.takeIf { originalTextFile.exists() }
+                localOriginalTextPath = localOriginalTextPath,
+                hasAudio = hasLocalAudio
             )
 
         } catch (e: Exception) {

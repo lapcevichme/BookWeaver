@@ -26,6 +26,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ConcatenatingMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -92,6 +93,8 @@ class MediaPlayerService : Service() {
     private var lastSaveTimeMs: Long = 0
     private val SAVE_THROTTLE_MS = 10_000L
     private val SAVE_DEBOUNCE_MS = 1_000L
+    private val CONNECTION_TIMEOUT_MS = 30_000
+    private val READ_TIMEOUT_MS = 30_000
 
     companion object {
         private const val TAG = "AudioPlayerServiceLog"
@@ -115,7 +118,20 @@ class MediaPlayerService : Service() {
         super.onCreate()
         createNotificationChannel()
 
-        player = ExoPlayer.Builder(this).build()
+        // Настройка буферизации для улучшения работы в медленных сетях
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                30_000, // Минимальный буфер (30 сек)
+                120_000, // Максимальный буфер (2 мин)
+                2_000,  // Буфер для старта (2 сек)
+                5_000   // Буфер после ребаферинга (5 сек)
+            )
+            .build()
+
+        player = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .build()
+
         ambientPlayer = ExoPlayer.Builder(this).build()
         ambientPlayer.repeatMode = Player.REPEAT_MODE_ONE
 
@@ -326,8 +342,6 @@ class MediaPlayerService : Service() {
                         player.prepare()
                     }
 
-                    loadCover(coverPath, isRemote, audioPath)
-
                     _playerStateFlow.value = _playerStateFlow.value.copy(
                         isLoading = false,
                         fileName = chapterTitle,
@@ -335,6 +349,10 @@ class MediaPlayerService : Service() {
                         loadedChapterId = chapterId
                     )
                     updateNotification()
+
+                    // Загружаем обложку в фоне. Она обновит стейт сама, когда (и если) загрузится.
+                    // Если сервер медленный, это не заблокирует управление плеером.
+                    loadCover(coverPath, isRemote, audioPath)
                 },
                 onFailure = { e ->
                     Log.e(TAG, "Error setting media", e)
@@ -355,6 +373,8 @@ class MediaPlayerService : Service() {
             val headers = if (connection != null) mapOf("Authorization" to "Bearer ${connection.token}") else emptyMap()
             DefaultHttpDataSource.Factory()
                 .setUserAgent("BookWeaver-Android")
+                .setConnectTimeoutMs(CONNECTION_TIMEOUT_MS)
+                .setReadTimeoutMs(READ_TIMEOUT_MS)
                 .setDefaultRequestProperties(headers)
         } else {
             DefaultDataSource.Factory(this@MediaPlayerService)
@@ -389,6 +409,8 @@ class MediaPlayerService : Service() {
         val headers = if (connection != null) mapOf("Authorization" to "Bearer ${connection.token}") else emptyMap()
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("BookWeaver-Android")
+            .setConnectTimeoutMs(CONNECTION_TIMEOUT_MS)
+            .setReadTimeoutMs(READ_TIMEOUT_MS)
             .setDefaultRequestProperties(headers)
         val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
         val cleanBaseUrl = baseUrl.removeSuffix("/")
@@ -446,10 +468,17 @@ class MediaPlayerService : Service() {
     private fun updateAmbientPlayer(ambientName: String) {
         ambientPlayer.stop()
         ambientPlayer.clearMediaItems()
-        if (ambientName == "none" || currentBookId == null) return
+
+        // Сохраняем локальную копию ID книги.
+        // Это предотвращает краш, если currentBookId станет null (через stopAndClear) пока корутина запускается.
+        val bookId = currentBookId
+
+        if (ambientName == "none" || bookId == null) return
 
         serviceScope.launch {
-            getAmbientTrackPathUseCase(currentBookId!!, ambientName).fold(
+            if (bookId != currentBookId) return@launch
+
+            getAmbientTrackPathUseCase(bookId, ambientName).fold(
                 onSuccess = { path ->
                     if (path == null) return@fold
                     try {
@@ -461,6 +490,8 @@ class MediaPlayerService : Service() {
                         val dataSourceFactory: androidx.media3.datasource.DataSource.Factory = if (path.startsWith("http")) {
                             DefaultHttpDataSource.Factory()
                                 .setUserAgent("BookWeaver-Android")
+                                .setConnectTimeoutMs(CONNECTION_TIMEOUT_MS)
+                                .setReadTimeoutMs(READ_TIMEOUT_MS)
                                 .setDefaultRequestProperties(headers)
                         } else {
                             DefaultDataSource.Factory(this@MediaPlayerService)
@@ -586,8 +617,10 @@ class MediaPlayerService : Service() {
                     if (connection != null) {
                         conn.setRequestProperty("Authorization", "Bearer ${connection.token}")
                     }
-                    conn.connectTimeout = 5000
-                    conn.readTimeout = 5000
+
+                    conn.connectTimeout = CONNECTION_TIMEOUT_MS
+                    conn.readTimeout = READ_TIMEOUT_MS
+
                     conn.connect()
 
                     // Проверяем код ответа
@@ -617,6 +650,10 @@ class MediaPlayerService : Service() {
                         if (connection != null) {
                             conn.setRequestProperty("Authorization", "Bearer ${connection.token}")
                         }
+
+                        conn.connectTimeout = CONNECTION_TIMEOUT_MS
+                        conn.readTimeout = READ_TIMEOUT_MS
+
                         conn.connect()
                         if (conn.responseCode == 200) {
                             conn.inputStream.use { bitmap = BitmapFactory.decodeStream(it) }

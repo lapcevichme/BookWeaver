@@ -36,15 +36,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.lapcevichme.bookweaver.domain.model.BookSource
 
 
@@ -94,6 +97,7 @@ fun LibraryScreen(
                 } else {
                     LibraryContent(
                         books = uiState.books,
+                        authToken = uiState.authToken,
                         bottomContentPadding = bottomContentPadding,
                         onBookClick = { bookId ->
                             onEvent(LibraryEvent.BookSelected(bookId))
@@ -108,6 +112,7 @@ fun LibraryScreen(
 @Composable
 private fun LibraryContent(
     books: List<UiBook>,
+    authToken: String?,
     bottomContentPadding: Dp,
     onBookClick: (bookId: String) -> Unit
 ) {
@@ -138,6 +143,7 @@ private fun LibraryContent(
             items(books, key = { it.id }) { book ->
                 BookItem(
                     book = book,
+                    authToken = authToken,
                     onClick = { onBookClick(book.id) }
                 )
             }
@@ -148,6 +154,7 @@ private fun LibraryContent(
 @Composable
 private fun BookItem(
     book: UiBook,
+    authToken: String?,
     onClick: () -> Unit
 ) {
     Card(
@@ -160,7 +167,20 @@ private fun BookItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val model = book.coverPath ?: book.localPath?.let { "$it/cover.jpg" }
+            val modelPath = book.coverPath ?: book.localPath?.let { "$it/cover.jpg" }
+            val context = LocalContext.current
+
+            val imageRequest = remember(modelPath, authToken) {
+                ImageRequest.Builder(context)
+                    .data(modelPath)
+                    .apply {
+                        if (authToken != null && modelPath?.startsWith("http") == true) {
+                            addHeader("Authorization", "Bearer $authToken")
+                        }
+                    }
+                    .crossfade(true)
+                    .build()
+            }
 
             Box(
                 modifier = Modifier
@@ -179,9 +199,8 @@ private fun BookItem(
                     tint = androidx.compose.ui.graphics.Color.White
                 )
 
-                // Сама картинка
                 AsyncImage(
-                    model = model,
+                    model = imageRequest,
                     contentDescription = "Обложка книги: ${book.title}",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,

@@ -59,7 +59,8 @@ interface BookDao {
             localAudioPath = :localAudioPath, 
             localScenarioPath = :localScenarioPath, 
             localSubtitlesPath = :localSubtitlesPath,
-            localOriginalTextPath = :localOriginalTextPath
+            localOriginalTextPath = :localOriginalTextPath,
+            hasAudio = :hasAudio
         WHERE id = :chapterId
         """
     )
@@ -69,7 +70,8 @@ interface BookDao {
         localAudioPath: String?,
         localScenarioPath: String?,
         localSubtitlesPath: String?,
-        localOriginalTextPath: String?
+        localOriginalTextPath: String?,
+        hasAudio: Boolean
     )
 
     @Query("UPDATE chapters SET downloadState = :state WHERE id = :chapterId")

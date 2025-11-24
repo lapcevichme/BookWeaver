@@ -168,6 +168,14 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun retry() {
+        val currentState = _uiState.value
+        if (currentState.bookId != null && currentState.chapterId != null) {
+            _uiState.update { it.copy(clearService = true) }
+            loadChapterInfo(currentState.bookId, currentState.chapterId)
+        }
+    }
+
     private fun loadChapterInfo(bookId: String, chapterId: String) {
         viewModelScope.launch {
             _uiState.update {

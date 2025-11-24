@@ -28,6 +28,7 @@ import javax.inject.Inject
 
 sealed interface BookHubEvent {
     data class OnDownloadChapterClick(val chapterId: String) : BookHubEvent
+    data object OnRetry : BookHubEvent
 }
 
 @HiltViewModel
@@ -45,24 +46,25 @@ class BookHubViewModel @Inject constructor(
         data class Error(val throwable: Throwable) : BookDetailsResult
     }
 
-    // Flow, который реагирует ТОЛЬКО на смену activeBookId и грузит детали
-    private val bookDetailsResultFlow: Flow<BookDetailsResult> = getActiveBookFlowUseCase()
+    // Триггер для повтора запроса. Меняем значение -> flow перезапускается
+    private val _retryTrigger = MutableStateFlow(0)
+
+    // Flow, который реагирует на смену activeBookId ИЛИ на сигнал retry
+    private val bookDetailsResultFlow: Flow<BookDetailsResult> = combine(
+        getActiveBookFlowUseCase(),
+        _retryTrigger
+    ) { activeBookId, _ -> activeBookId }
         .flatMapLatest { activeBookId ->
             if (activeBookId == null) {
-                // Если ID книги null, эммитим успех с null-деталями
                 flowOf(BookDetailsResult.Success(null))
             } else {
-                // Если ID есть, грузим детали
                 flow {
                     val result = getBookDetailsUseCase(activeBookId)
                     result.fold(
-                        // Успешно загрузили и сразу смаппили в UI модель
                         onSuccess = { emit(BookDetailsResult.Success(it.toUiBookDetails())) },
-                        // Ошибка при загрузке
                         onFailure = { emit(BookDetailsResult.Error(it)) }
                     )
                 }.onStart {
-                    // Показываем индикатор загрузки В НАЧАЛЕ этого flow
                     emit(BookDetailsResult.Loading)
                 }
             }
@@ -139,6 +141,9 @@ class BookHubViewModel @Inject constructor(
         when (event) {
             is BookHubEvent.OnDownloadChapterClick -> {
                 downloadChapter(event.chapterId)
+            }
+            is BookHubEvent.OnRetry -> {
+                _retryTrigger.update { it + 1 }
             }
         }
     }
