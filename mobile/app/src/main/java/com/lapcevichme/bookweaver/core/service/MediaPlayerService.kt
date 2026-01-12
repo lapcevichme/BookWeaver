@@ -37,6 +37,7 @@ import com.lapcevichme.bookweaver.domain.repository.ServerRepository
 import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientTrackPathUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetChapterPlaybackDataUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetIllustrationsEnabledUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SaveListenProgressUseCase
 import dagger.hilt.android.AndroidEntryPoint
@@ -68,6 +69,7 @@ class MediaPlayerService : Service() {
     @Inject lateinit var saveListenProgressUseCase: SaveListenProgressUseCase
     @Inject lateinit var getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase
     @Inject lateinit var getAmbientVolumeUseCase: GetAmbientVolumeUseCase
+    @Inject lateinit var getIllustrationsEnabledUseCase: GetIllustrationsEnabledUseCase
     @Inject lateinit var serverRepository: ServerRepository
 
     private lateinit var player: ExoPlayer
@@ -77,6 +79,7 @@ class MediaPlayerService : Service() {
 
     private var currentBookId: String? = null
     private var currentChapterId: String? = null
+    private var currentChapterDir: File? = null
 
     private var currentPlaybackData: List<PlaybackEntry> = emptyList()
     private var currentAmbientName: String = "none"
@@ -118,13 +121,12 @@ class MediaPlayerService : Service() {
         super.onCreate()
         createNotificationChannel()
 
-        // Настройка буферизации для улучшения работы в медленных сетях
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                30_000, // Минимальный буфер (30 сек)
-                120_000, // Максимальный буфер (2 мин)
-                2_000,  // Буфер для старта (2 сек)
-                5_000   // Буфер после ребаферинга (5 сек)
+                30_000,
+                120_000,
+                2_000,
+                5_000
             )
             .build()
 
@@ -215,6 +217,13 @@ class MediaPlayerService : Service() {
                 ambientPlayer.volume = volume
             }
         }
+
+        serviceScope.launch {
+            getIllustrationsEnabledUseCase().collectLatest { enabled ->
+                _playerStateFlow.value = _playerStateFlow.value.copy(illustrationsEnabled = enabled)
+                updatePlayerState()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -278,13 +287,16 @@ class MediaPlayerService : Service() {
 
         currentBookId = bookId
         currentChapterId = chapterId
+        currentChapterDir = if (!coverPath.isNullOrEmpty() && !coverPath.startsWith("http")) {
+            null
+        } else null
+        
         currentPlaybackData = emptyList()
         currentMediaItemIndex = 0
         basePositionOffsetMs = 0L
         totalChapterDurationMs = 0L
         currentAmbientName = "none"
 
-        // Сбрасываем текущую обложку (bitmap), чтобы не показывать старую
         placeholderBitmap = null
 
         _playerStateFlow.value = _playerStateFlow.value.copy(
@@ -304,6 +316,11 @@ class MediaPlayerService : Service() {
 
                     currentPlaybackData = playbackData
                     totalChapterDurationMs = playbackData.lastOrNull()?.endMs ?: 0L
+
+                    if (!audioPath.startsWith("http")) {
+                        val audioFile = File(audioPath)
+                        currentChapterDir = if (audioFile.isDirectory) audioFile else audioFile.parentFile
+                    }
 
                     val isRemote = audioPath.startsWith("http")
                     val isSingleFile = (isRemote && (audioPath.endsWith(".mp3") || audioPath.endsWith(".m4a") || audioPath.endsWith(".wav"))) ||
@@ -350,8 +367,6 @@ class MediaPlayerService : Service() {
                     )
                     updateNotification()
 
-                    // Загружаем обложку в фоне. Она обновит стейт сама, когда (и если) загрузится.
-                    // Если сервер медленный, это не заблокирует управление плеером.
                     loadCover(coverPath, isRemote, audioPath)
                 },
                 onFailure = { e ->
@@ -469,8 +484,6 @@ class MediaPlayerService : Service() {
         ambientPlayer.stop()
         ambientPlayer.clearMediaItems()
 
-        // Сохраняем локальную копию ID книги.
-        // Это предотвращает краш, если currentBookId станет null (через stopAndClear) пока корутина запускается.
         val bookId = currentBookId
 
         if (ambientName == "none" || bookId == null) return
@@ -533,7 +546,7 @@ class MediaPlayerService : Service() {
         ambientPlayer.clearMediaItems()
         if (resetUI) {
             _playerStateFlow.value = PlayerState()
-            currentBookId = null; currentChapterId = null
+            currentBookId = null; currentChapterId = null; currentChapterDir = null
             currentPlaybackData = emptyList()
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
@@ -549,12 +562,13 @@ class MediaPlayerService : Service() {
             currentItemOffset + player.currentPosition
         }
 
+        val currentEntry = currentPlaybackData.firstOrNull {
+            absolutePosition >= it.startMs && absolutePosition < it.endMs
+        } ?: currentPlaybackData.lastOrNull {
+            it == currentPlaybackData.last() && absolutePosition >= it.startMs
+        }
+
         val currentSubtitleText: CharSequence = if (_playerStateFlow.value.subtitlesEnabled) {
-            val currentEntry = currentPlaybackData.firstOrNull {
-                absolutePosition >= it.startMs && absolutePosition < it.endMs
-            } ?: currentPlaybackData.lastOrNull {
-                it == currentPlaybackData.last() && absolutePosition >= it.startMs
-            }
             if (currentEntry != null && currentEntry.words.isNotEmpty()) {
                 buildKaraokeSubtitle(currentEntry, absolutePosition)
             } else {
@@ -564,14 +578,46 @@ class MediaPlayerService : Service() {
             ""
         }
 
+        // Бетка изображений
+        var imageSrc: String? = null
+        if (_playerStateFlow.value.illustrationsEnabled) {
+            val lastImageEntry = currentPlaybackData.lastOrNull {
+                it.type == "image" && absolutePosition >= it.startMs && !it.imageSrc.isNullOrEmpty()
+            }
+            if (lastImageEntry != null) {
+                imageSrc = resolveImageSrc(lastImageEntry.imageSrc!!)
+            }
+        }
+
         _playerStateFlow.value = _playerStateFlow.value.copy(
             isPlaying = player.isPlaying,
             duration = if (totalChapterDurationMs > 0) totalChapterDurationMs else 0L,
             currentPosition = absolutePosition,
             playbackSpeed = player.playbackParameters.speed,
             currentSubtitle = currentSubtitleText,
+            currentImageSrc = imageSrc,
             loadedChapterId = currentChapterId ?: ""
         )
+    }
+
+    private fun resolveImageSrc(rawSrc: String): String {
+        if (rawSrc.startsWith("http") || rawSrc.startsWith("file://") || rawSrc.startsWith("/")) {
+            return rawSrc
+        }
+
+        val chapterDir = currentChapterDir
+        if (chapterDir != null && chapterDir.exists()) {
+            try {
+                val resolvedFile = File(chapterDir, rawSrc).canonicalFile
+                if (resolvedFile.exists()) {
+                    return resolvedFile.absolutePath
+                }
+            } catch (e: Exception) {
+                Log.e("MediaPlayerService", "Error resolving image path: $rawSrc", e)
+            }
+        }
+
+        return rawSrc
     }
 
     private fun buildKaraokeSubtitle(entry: PlaybackEntry, absolutePosition: Long): CharSequence {
@@ -608,7 +654,6 @@ class MediaPlayerService : Service() {
             try {
                 var bitmap: Bitmap? = null
 
-                // Явно проверяем, является ли это URL
                 if (path.startsWith("http")) {
                     val connection = serverRepository.getCurrentConnection()
                     val url = URL(path)
@@ -623,7 +668,6 @@ class MediaPlayerService : Service() {
 
                     conn.connect()
 
-                    // Проверяем код ответа
                     if (conn.responseCode == 200) {
                         conn.inputStream.use {
                             bitmap = BitmapFactory.decodeStream(it)
@@ -632,11 +676,9 @@ class MediaPlayerService : Service() {
                         Log.w(TAG, "Failed to load cover: ${conn.responseCode} ${conn.responseMessage}")
                     }
                 }
-                // Если не http, проверяем файл локально
                 else if (File(path).exists()) {
                     bitmap = BitmapFactory.decodeFile(path)
                 }
-                // Если файл не найден, но включен remote режим - пробуем собрать URL (fallback)
                 else if (isRemote) {
                     val host = baseRemoteUrl?.substringBefore("/static") ?: ""
                     val cleanHost = host.removeSuffix("/")
@@ -669,7 +711,6 @@ class MediaPlayerService : Service() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Cover load failed: $path", e)
-                // Можно сбросить обложку, если загрузка не удалась
                 placeholderBitmap = null
                 withContext(Dispatchers.Main) {
                     _playerStateFlow.value = _playerStateFlow.value.copy(albumArt = null)
