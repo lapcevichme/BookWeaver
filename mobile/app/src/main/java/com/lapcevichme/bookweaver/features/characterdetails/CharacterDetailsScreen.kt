@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
@@ -84,9 +82,6 @@ fun CharacterDetailsScreen(
     }
 }
 
-/**
- * Основной контент экрана, теперь с разделением на спойлеры.
- */
 @Composable
 private fun CharacterDetailsContent(
     details: UiCharacterDetails,
@@ -97,12 +92,9 @@ private fun CharacterDetailsContent(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Безопасная информация
         item {
-            // Безопасное описание
             Text(details.spoilerFreeDescription, style = MaterialTheme.typography.bodyLarge)
 
-            // Псевдонимы
             if (details.aliases.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
                 Text("Также известен как:", style = MaterialTheme.typography.titleMedium)
@@ -114,7 +106,6 @@ private fun CharacterDetailsContent(
             }
         }
 
-        // Спойлеры
         item {
             ExpandableSpoilerCard(
                 summaryTitle = "Полное описание (Спойлеры!)",
@@ -150,11 +141,6 @@ private fun CharacterDetailsContent(
     }
 }
 
-/**
- * Элемент для одного упоминания в главе.
- * Теперь он не имеет разделителя, т.к. разделитель
- * управляется в цикле выше.
- */
 @Composable
 private fun ChapterMentionItem(mention: UiChapterMention) {
     Column {

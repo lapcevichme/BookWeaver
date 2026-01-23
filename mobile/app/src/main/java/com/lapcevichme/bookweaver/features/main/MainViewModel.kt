@@ -18,9 +18,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 
-/**
- * ViewModel для определения стартового маршрута на основе реальных данных.
- */
 @HiltViewModel
 class MainViewModel @Inject constructor(
     getLocalBooksUseCase: GetLocalBooksUseCase,
@@ -33,32 +30,26 @@ class MainViewModel @Inject constructor(
     private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
     val navigationEvent = _navigationEvent.asSharedFlow()
 
-    /**
-     * Предоставляет текущую настройку темы для UI (MainActivity)
-     */
     val themeSetting = getThemeSettingUseCase()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = ThemeSetting.SYSTEM // Начинаем с системной по умолчанию
+            initialValue = ThemeSetting.SYSTEM
         )
 
 
     init {
         viewModelScope.launch {
-            // Используем combine, чтобы получить последние данные из обоих источников
             combine(
                 getLocalBooksUseCase(),
                 getActiveBookFlowUseCase()
             ) { localBooks, activeBookId ->
-                // Определяем состояние на основе полученных данных
                 when {
                     localBooks.isEmpty() -> StartupState.NoBooks
                     activeBookId == null -> StartupState.GoToLibrary
                     else -> StartupState.GoToBookHub
                 }
             }.collect { state ->
-                // Обновляем состояние для UI
                 _startupState.value = state
             }
         }

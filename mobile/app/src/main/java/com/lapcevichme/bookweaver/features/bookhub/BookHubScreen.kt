@@ -22,10 +22,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.lapcevichme.bookweaver.domain.model.DownloadState
 
-/**
- * Этот экран теперь является "Хабом" для активной книги.
- * Он не знает о NavController, а только сообщает о событиях навигации через коллбэки.
- */
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
     ExperimentalMaterial3ExpressiveApi::class
 )
@@ -44,11 +41,9 @@ fun BookHubScreen(
             TopAppBar(
                 title = { Text(uiState.bookDetails?.title ?: "Загрузка...", maxLines = 1) },
                 actions = {
-                    // Кнопка для перехода к персонажам
                     IconButton(onClick = onNavigateToCharacters, enabled = uiState.bookId != null) {
                         Icon(Icons.Default.AccountCircle, contentDescription = "Персонажи")
                     }
-                    // Кнопка для перехода в настройки книги
                     IconButton(
                         onClick = { uiState.bookId?.let { onNavigateToSettings(it) } },
                         enabled = uiState.bookId != null
@@ -60,7 +55,7 @@ fun BookHubScreen(
         }
     ) { padding ->
         when {
-            uiState.isLoading && uiState.bookDetails == null -> { // Показываем индикатор только при первой загрузке
+            uiState.isLoading && uiState.bookDetails == null -> {
                 Box(Modifier
                     .fillMaxSize()
                     .padding(padding), contentAlignment = Alignment.Center) {
@@ -134,7 +129,6 @@ fun BookHubScreen(
                     }
                 }
             }
-            // Случай, когда книга не выбрана (bookId == null), но ошибки нет
             else -> {
                 Box(Modifier
                     .fillMaxSize()
@@ -184,11 +178,9 @@ private fun ChapterItem(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 } else {
-                    // Логика отображения кнопок с учетом hasAudio
                     when (chapter.downloadState) {
                         DownloadState.DOWNLOADED -> {
                             if (chapter.hasAudio) {
-                                // Есть аудио -> Показываем Play
                                 IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
                                     Icon(
                                         imageVector = Icons.Default.Headset,
@@ -197,7 +189,6 @@ private fun ChapterItem(
                                     )
                                 }
                             } else {
-                                // Нет аудио -> Показываем книгу (читать) или ничего
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.MenuBook,
                                     contentDescription = "Только текст",
@@ -208,7 +199,6 @@ private fun ChapterItem(
                         }
                         DownloadState.NOT_DOWNLOADED -> {
                             Row {
-                                // Кнопку Play показываем ТОЛЬКО если есть аудио (стриминг)
                                 if (chapter.hasAudio) {
                                     IconButton(onClick = onPlayClick, modifier = Modifier.size(24.dp)) {
                                         Icon(
@@ -220,7 +210,6 @@ private fun ChapterItem(
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }
 
-                                // Кнопку Скачать показываем всегда (скачать можно и текст)
                                 IconButton(onClick = onDownloadClick, modifier = Modifier.size(24.dp)) {
                                     Icon(
                                         imageVector = Icons.Default.Download,

@@ -46,10 +46,8 @@ class BookHubViewModel @Inject constructor(
         data class Error(val throwable: Throwable) : BookDetailsResult
     }
 
-    // Триггер для повтора запроса. Меняем значение -> flow перезапускается
     private val _retryTrigger = MutableStateFlow(0)
 
-    // Flow, который реагирует на смену activeBookId ИЛИ на сигнал retry
     private val bookDetailsResultFlow: Flow<BookDetailsResult> = combine(
         getActiveBookFlowUseCase(),
         _retryTrigger
@@ -75,7 +73,6 @@ class BookHubViewModel @Inject constructor(
 
     private val _downloadProgress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
 
-    // Комбинируем Flow деталей, Flow активной главы и Flow ID книги
     val uiState: StateFlow<BookDetailsUiState> = combine(
         bookDetailsResultFlow,
         getActiveChapterFlowUseCase(),
@@ -98,7 +95,6 @@ class BookHubViewModel @Inject constructor(
                         chapters = volume.chapters.map { chapter ->
                             val progress = downloadProgressMap[chapter.id]
                             if (progress is DownloadProgress.Downloading) {
-                                // Если глава качается, принудительно ставим ей статус DOWNLOADING
                                 chapter.copy(downloadState = DownloadState.DOWNLOADING)
                             } else {
                                 chapter
@@ -130,29 +126,22 @@ class BookHubViewModel @Inject constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            // Начальное состояние - загрузка (пока первый combine не выполнится)
             initialValue = BookDetailsUiState(isLoading = true)
         )
 
-    /**
-     * Обрабатывает UI-события, приходящие от BookHubScreen.
-     */
     fun onEvent(event: BookHubEvent) {
         when (event) {
             is BookHubEvent.OnDownloadChapterClick -> {
                 downloadChapter(event.chapterId)
             }
+
             is BookHubEvent.OnRetry -> {
                 _retryTrigger.update { it + 1 }
             }
         }
     }
 
-    /**
-     * Запускает скачивание главы и отслеживает прогресс.
-     */
     private fun downloadChapter(chapterId: String) {
-        // Получаем bookId из текущего uiState
         val bookId = uiState.value.bookId
         if (bookId == null) {
             Log.e("BookHubViewModel", "Невозможно скачать главу, bookId is null")
@@ -162,13 +151,10 @@ class BookHubViewModel @Inject constructor(
         viewModelScope.launch {
             downloadChapterUseCase(bookId, chapterId)
                 .collect { progress ->
-                    // Обновляем карту прогресса, чтобы UI мог показать спиннер
                     _downloadProgress.update { currentMap ->
                         currentMap + (chapterId to progress)
                     }
 
-                    // Когда скачивание завершится (успех или ошибка),
-                    // убираем главу из карты прогресса.
                     if (progress !is DownloadProgress.Downloading) {
                         _downloadProgress.update { currentMap ->
                             currentMap - chapterId

@@ -2,28 +2,21 @@ package com.lapcevichme.bookweaver.features.characterdetails
 
 import com.lapcevichme.bookweaver.domain.model.BookCharacter
 
-/**
- * UI-модель для одного упоминания персонажа в главе.
- */
+
 data class UiChapterMention(
     val chapterTitle: String,
     val summary: String
 )
 
-/**
- * UI-модель для детальной информации о персонаже.
- */
 data class UiCharacterDetails(
     val name: String,
-    val description: String, // Полное описание со спойлерами
-    val spoilerFreeDescription: String, // Описание БЕЗ спойлеров
+    val description: String,
+    val spoilerFreeDescription: String,
     val aliases: List<String>,
     val chapterMentions: List<UiChapterMention>
 )
 
-/**
- * Маппер из domain-модели Character в UI-модель UiCharacterDetails.
- */
+
 fun BookCharacter.toUiCharacterDetails(): UiCharacterDetails {
     val mentions = this.chapterMentions.map { (chapterId, summary) ->
         UiChapterMention(

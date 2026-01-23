@@ -1,8 +1,5 @@
 package com.lapcevichme.bookweaver.features.main
 
-/**
- * Определяет, какой экран показать при запуске.
- */
 sealed class StartupState {
     object Loading : StartupState()
     object NoBooks : StartupState() // В приложении нет ни одной книги

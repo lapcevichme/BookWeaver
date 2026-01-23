@@ -49,6 +49,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import java.io.File
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +62,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -69,9 +72,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import coil.compose.AsyncImage
 import com.lapcevichme.bookweaver.core.PlayerState
 import com.lapcevichme.bookweaver.features.main.MainViewModel
 import com.lapcevichme.bookweaver.features.player.PlayerViewModel
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
@@ -92,7 +97,6 @@ fun ChapterDetailsScreen(
 
     val context = LocalContext.current
 
-    // Логика буфера обмена
     var copiedText by remember { mutableStateOf<String?>(null) }
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -187,6 +191,7 @@ fun ChapterDetailsScreen(
                                     ScenarioContent(
                                         scenario = state.details.scenario,
                                         currentPosition = positionForThisChapter,
+                                        basePath = state.details.basePath,
                                         onEntryClick = { entry ->
 
                                             if (!entry.isPlayable) return@ScenarioContent
@@ -205,7 +210,7 @@ fun ChapterDetailsScreen(
                                     )
                                 }
 
-                                2 -> OriginalTextContent(state.details.originalText)
+                                2 -> OriginalTextContent(state.details.originalText, state.details.basePath)
                             }
                         }
                     }
@@ -217,7 +222,6 @@ fun ChapterDetailsScreen(
                 }
             }
 
-            // Карточка буфера обмена
             CopiedTextActionsCard(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 copiedText = copiedText ?: "",
@@ -315,18 +319,17 @@ private fun SummaryContent(teaser: String, synopsis: String) {
 private fun ScenarioContent(
     scenario: List<UiScenarioEntry>,
     currentPosition: Long,
+    basePath: String?,
     onEntryClick: (UiScenarioEntry) -> Unit
 ) {
     val lazyListState = rememberLazyListState()
 
     val currentPlayingEntryId by remember(currentPosition, scenario) {
         derivedStateOf {
-            // Не ищем, если нет аудио
             if (scenario.none { it.isPlayable }) return@derivedStateOf null
 
             scenario.firstOrNull { entry ->
                 val isLastEntry = scenario.lastOrNull()?.id == entry.id
-                // Логика для последнего элемента: включаем endMs
                 if (isLastEntry) {
                     currentPosition >= entry.startMs && currentPosition <= entry.endMs
                 } else {
@@ -371,24 +374,13 @@ private fun ScenarioContent(
                 })
 
                 val highlightColor = MaterialTheme.colorScheme.primary
-                val speakerColor = MaterialTheme.colorScheme.onBackground
+                val speakerColor = MaterialTheme.colorScheme.primary
                 val defaultTextColor = MaterialTheme.colorScheme.onBackground
                 val interactiveTextColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                 val playingTextColor = MaterialTheme.colorScheme.onBackground
+                val baseColor = if (entry.isPlayable) interactiveTextColor else defaultTextColor
 
                 val annotatedString = buildAnnotatedString {
-                    withStyle(
-                        style = SpanStyle(
-                            fontWeight = FontWeight.Bold,
-                            color = if (isPlaying) highlightColor else speakerColor
-                        )
-                    ) {
-                        append(entry.speaker)
-                        append(": ")
-                    }
-
-                    val baseColor = if (entry.isPlayable) interactiveTextColor else defaultTextColor
-
                     if (entry.words.isEmpty()) {
                         withStyle(style = SpanStyle(color = if (isPlaying) playingTextColor else baseColor)) {
                             append(entry.text)
@@ -414,31 +406,106 @@ private fun ScenarioContent(
                         }
                     }
                 }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             if (isPlaying) MaterialTheme.colorScheme.surfaceVariant
-                            else MaterialTheme.colorScheme.surface,
+                            else Color.Transparent,
                             shape = MaterialTheme.shapes.medium
                         )
                         .clip(MaterialTheme.shapes.medium)
                         .clickable(enabled = entry.isPlayable) { onEntryClick(entry) }
                         .padding(8.dp)
                 ) {
-                    Text(
-                        text = annotatedString,
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                    Column(Modifier.fillMaxWidth()) {
+                        if (entry.type == "image" && entry.imageSrc != null) {
+                            val resolvedPath = remember(entry.imageSrc, basePath) {
+                                if (basePath == null || entry.imageSrc.startsWith("http") || entry.imageSrc.startsWith("/")) {
+                                    entry.imageSrc
+                                } else {
+                                    val baseDir = File(basePath).parentFile
+                                    if (baseDir != null) {
+                                        File(baseDir, entry.imageSrc).canonicalPath
+                                    } else {
+                                        entry.imageSrc
+                                    }
+                                }
+                            }
+
+                            AsyncImage(
+                                model = if (resolvedPath.startsWith("http")) resolvedPath else "file://$resolvedPath",
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(MaterialTheme.shapes.small),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        val showSpeaker = entry.speaker.isNotBlank() && 
+                                entry.speaker != "Narrator" && 
+                                entry.speaker != "Рассказчик"
+
+                        if (showSpeaker) {
+                            Text(
+                                text = entry.speaker,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = speakerColor,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                        }
+
+                        if (entry.text.isNotBlank()) {
+                            if (entry.words.isEmpty()) {
+                                MarkdownText(
+                                    markdown = entry.text,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        color = if (isPlaying) playingTextColor else baseColor
+                                    )
+                                )
+                            } else {
+                                Text(
+                                    text = annotatedString,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                        }
+                    }
                 }
+
             }
         }
     }
 }
 
 @Composable
-private fun OriginalTextContent(text: String) {
+private fun OriginalTextContent(text: String, basePath: String?) {
+    val processedText = remember(text, basePath) {
+        val trimmedText = text.trim()
+        if (basePath == null) trimmedText
+        else {
+            val baseDir = File(basePath).parentFile ?: return@remember trimmedText
+            val pattern = Regex("""!\[(.*?)\]\((.*?)\)""")
+            pattern.replace(trimmedText) { matchResult ->
+                val alt = matchResult.groupValues[1]
+                val path = matchResult.groupValues[2]
+                if (path.startsWith("http") || path.startsWith("/")) {
+                    matchResult.value
+                } else {
+                    val absolutePath = File(baseDir, path).canonicalPath
+                    "![$alt](file://$absolutePath)"
+                }
+            }
+        }
+    }
+
     SelectionContainer {
         Column(
             Modifier
@@ -446,7 +513,12 @@ private fun OriginalTextContent(text: String) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            Text(text, style = MaterialTheme.typography.bodyLarge)
+            MarkdownText(
+                markdown = processedText,
+                style = MaterialTheme.typography.bodyLarge,
+                linkColor = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground
+            )
         }
     }
 }
