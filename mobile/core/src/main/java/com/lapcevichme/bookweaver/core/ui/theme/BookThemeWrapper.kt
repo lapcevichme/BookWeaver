@@ -8,10 +8,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.materialkolor.DynamicMaterialExpressiveTheme
 
-/**
- * Обертка, которая применяет DynamicMaterialExpressiveTheme,
- * получая seedColor из BookThemeWrapperViewModel.
- */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BookThemeWrapper(
@@ -21,14 +17,11 @@ fun BookThemeWrapper(
 ) {
     val seedColor by viewModel.themeSeedColor.collectAsStateWithLifecycle()
 
-    // Используем ту же логику, что и в твоем MainActivity
     DynamicMaterialExpressiveTheme(
         seedColor = seedColor,
         isDark = isDark,
         animate = true,
         motionScheme = MotionScheme.expressive()
-        // Ты можешь добавить сюда `content` для `darkColorScheme` и `lightColorScheme`
-        // если хочешь использовать стандартный dynamicColor, когда seedColor == defaultSeedColor
     ) {
         content()
     }

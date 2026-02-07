@@ -5,10 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
-/**
- * Безопасно находит ComponentActivity из LocalContext.
- * Это более надежный способ, чем (LocalContext.current as ComponentActivity).
- */
+
 @Composable
 fun getLocalActivity(): ComponentActivity {
     var context = LocalContext.current
@@ -18,6 +15,5 @@ fun getLocalActivity(): ComponentActivity {
         }
         context = context.baseContext
     }
-    // Этого никогда не должно случиться в работающем приложении
     throw IllegalStateException("No ComponentActivity found in context. Это очень странно.")
 }

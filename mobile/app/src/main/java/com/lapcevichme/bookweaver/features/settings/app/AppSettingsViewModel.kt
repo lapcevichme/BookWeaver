@@ -26,7 +26,6 @@ class AppSettingsViewModel @Inject constructor(
     val uiState = _uiState.asStateFlow()
 
     init {
-        // Сразу подписываемся на изменения темы
         getThemeSettingUseCase()
             .onEach { themeSetting ->
                 _uiState.update { it.copy(isLoading = false, selectedTheme = themeSetting) }
@@ -51,7 +50,6 @@ class AppSettingsViewModel @Inject constructor(
     private fun saveTheme(theme: ThemeSetting) {
         viewModelScope.launch {
             saveThemeSettingUseCase(theme)
-            // Состояние UI обновится автоматически благодаря Flow в init {}
         }
     }
 }

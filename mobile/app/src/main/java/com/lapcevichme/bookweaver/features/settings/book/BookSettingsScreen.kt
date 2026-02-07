@@ -41,11 +41,9 @@ fun BookSettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Показываем Snackbar при результате удаления
     LaunchedEffect(uiState.deletionResult) {
         uiState.deletionResult?.let { result ->
             if (result.isSuccess) {
-                // Если успешно, вызываем коллбэк для навигации на главный экран
                 onBookDeleted()
             } else {
                 val message = "Ошибка удаления: ${result.exceptionOrNull()?.message}"

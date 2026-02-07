@@ -20,10 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/**
- * Приятный экран онбординга, который видит пользователь,
- * если у него нет книг.
- */
 @Composable
 fun OnboardingLibraryScreen(
     onNavigateToInstall: () -> Unit

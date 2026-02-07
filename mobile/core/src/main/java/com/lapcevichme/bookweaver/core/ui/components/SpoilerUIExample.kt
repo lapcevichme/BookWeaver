@@ -37,9 +37,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 
-/**
- * Пример многоразового Composable для "разворачивающегося" спойлера.
- */
 @Composable
 fun ExpandableSpoilerCard(
     modifier: Modifier = Modifier,
@@ -51,7 +48,6 @@ fun ExpandableSpoilerCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            // Эта анимация плавно меняет размер самой карточки
             .animateContentSize(animationSpec = tween(300)),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
@@ -75,7 +71,6 @@ fun ExpandableSpoilerCard(
                 )
             }
 
-            // `AnimatedVisibility` плавно показывает или скрывает содержимое
             AnimatedVisibility(visible = isExpanded) {
                 Column {
                     Spacer(modifier = Modifier.height(12.dp))
@@ -90,9 +85,6 @@ fun ExpandableSpoilerCard(
     }
 }
 
-/**
- * Пример многоразового Composable для "размытого" спойлера.
- */
 @Composable
 fun BlurredSpoilerText(
     modifier: Modifier = Modifier,
@@ -107,22 +99,18 @@ fun BlurredSpoilerText(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-            // ИСПРАВЛЕНИЕ: Теперь это "переключатель" (toggle)
-            .clickable { isHidden = !isHidden }, // Клик по блоку убирает/возвращает размытие
+            .clickable { isHidden = !isHidden },
         contentAlignment = Alignment.Center
     ) {
-        // Применяем размытие и анимацию к тексту
         Text(
             text = spoilerText,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .padding(16.dp)
-                // `blur` применяет эффект размытия
                 .blur(radius = blurRadius)
         )
 
-        // Поверх размытого текста показываем подсказку
         AnimatedVisibility(visible = isHidden, modifier = Modifier.align(Alignment.Center)) {
             Text(
                 text = "(Нажмите, чтобы показать спойлер)",
@@ -135,9 +123,7 @@ fun BlurredSpoilerText(
 }
 
 
-/**
- * Демонстрационный экран для обоих типов спойлеров
- */
+
 @Composable
 fun SpoilerDemoScreen() {
     val longSpoilerText = "В этой главе происходит ключевое событие: " +
@@ -168,7 +154,6 @@ fun SpoilerDemoScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- Пример 1 ---
             Text(
                 "Способ 1: Разворачивающаяся карточка",
                 style = MaterialTheme.typography.bodyLarge,
@@ -180,7 +165,6 @@ fun SpoilerDemoScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- Пример 2 ---
             Text(
                 "Способ 2: Размытый текст",
                 style = MaterialTheme.typography.bodyLarge,

@@ -36,9 +36,7 @@ class ConnectionViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Вызывается, когда сканер распознал QR-код.
-     */
+
     fun onQrCodeScanned(qrContent: String) {
         _uiState.update { it.copy(isLoading = true, lastError = null) }
 
@@ -60,9 +58,6 @@ class ConnectionViewModel @Inject constructor(
         }
     }
 
-    /**
-     * "Забыть" текущий сервер.
-     */
     fun onDisconnect() {
         viewModelScope.launch {
             serverRepository.clearServerConnection()

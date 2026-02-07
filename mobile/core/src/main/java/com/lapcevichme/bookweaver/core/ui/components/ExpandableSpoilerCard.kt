@@ -28,10 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/**
- * Наш универсальный Composable для "разворачивающегося" спойлера (Спойлер 1-го типа).
- * Эта версия более гибкая, т.к. принимает @Composable content.
- */
 @Composable
 fun ExpandableSpoilerCard(
     modifier: Modifier = Modifier,

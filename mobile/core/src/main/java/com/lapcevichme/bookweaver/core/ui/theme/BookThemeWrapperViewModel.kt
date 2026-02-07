@@ -14,10 +14,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
-/**
- * Эта VM отвечает ТОЛЬКО за предоставление цвета темы
- * для текущей активной книги.
- */
 @HiltViewModel
 class BookThemeWrapperViewModel @Inject constructor(
     getActiveBookFlowUseCase: GetActiveBookFlowUseCase,
@@ -32,7 +28,6 @@ class BookThemeWrapperViewModel @Inject constructor(
             getBookThemeColorUseCase(activeBookId)
         }
         .map { colorInt ->
-            // Если цвет в кэше есть (для этой книги), используем его, иначе - цвет по умолчанию
             if (colorInt != null) Color(colorInt) else defaultSeedColor
         }
         .stateIn(
