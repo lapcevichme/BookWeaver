@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BookDao {
 
-    // --- Book Methods ---
+    // Books
 
     @Query("SELECT * FROM books ORDER BY title ASC")
     fun getAllBooks(): Flow<List<BookEntity>>
@@ -40,7 +40,7 @@ interface BookDao {
     @Query("UPDATE books SET title = :newTitle, author = :newAuthor, remoteManifestVersion = :newVersion WHERE id = :bookId")
     suspend fun updateBookMetadata(bookId: String, newTitle: String, newAuthor: String?, newVersion: Int)
 
-    // --- Chapter Methods ---
+    // Chapter
 
     @Upsert
     suspend fun upsertChapters(chapters: List<ChapterEntity>)

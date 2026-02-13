@@ -4,11 +4,6 @@ import androidx.room.TypeConverter
 import com.lapcevichme.bookweaver.domain.model.BookSource
 import com.lapcevichme.bookweaver.domain.model.DownloadState
 
-/**
- * Конвертеры типов для Room.
- * "Учат" Room сохранять и читать наши Enum классы
- * (BookSource и DownloadState) в виде строк.
- */
 class DatabaseConverters {
 
     @TypeConverter

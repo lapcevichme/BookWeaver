@@ -98,8 +98,8 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(
         @Named("DynamicHostInterceptor") dynamicHostInterceptor: Interceptor,
-        @Named("CacheInterceptor") cacheInterceptor: Interceptor, // Инжектим наш новый интерцептор
-        cache: Cache // Инжектим кэш
+        @Named("CacheInterceptor") cacheInterceptor: Interceptor,
+        cache: Cache
     ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC

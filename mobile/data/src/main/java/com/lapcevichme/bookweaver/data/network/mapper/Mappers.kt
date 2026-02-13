@@ -15,13 +15,27 @@ import com.lapcevichme.bookweaver.domain.model.ScenarioEntry
 import java.util.UUID
 
 
-internal fun BookManifestDto.toDomain(): BookManifest = BookManifest(
-    bookName = this.bookName,
-    author = this.author,
-    characterVoices = this.characterVoices,
-    defaultNarratorVoice = this.defaultNarratorVoice ?: "narrator_default",
-    coverUrl = this.posterUrl
-)
+internal fun BookManifestDto.toDomain(): BookManifest {
+    return if (this.meta != null) {
+        BookManifest(
+            bookName = this.meta.title,
+            author = this.meta.author,
+            characterVoices = emptyMap(),
+            defaultNarratorVoice = "narrator_default",
+            coverUrl = this.meta.cover,
+            totalDurationMs = this.meta.totalDurationMs
+        )
+    } else {
+        // Legacy
+        BookManifest(
+            bookName = this.bookName,
+            author = this.author,
+            characterVoices = this.characterVoices,
+            defaultNarratorVoice = this.defaultNarratorVoice ?: "narrator_default",
+            coverUrl = this.posterUrl
+        )
+    }
+}
 
 internal fun CharacterDto.toDomain(): BookCharacter = BookCharacter(
     id = try {
@@ -49,11 +63,12 @@ internal fun ScenarioEntryDto.toDomain(): ScenarioEntry = ScenarioEntry(
         UUID.randomUUID()
     },
     type = this.type,
-    text = this.text,
-    speaker = this.speaker,
+    text = this.text ?: "",
+    speaker = this.speaker ?: "Narrator",
     emotion = this.emotion,
     ambient = this.ambient,
-    audioFile = this.audioFile
+    audioFile = this.audioFile ?: "",
+    imageSrc = this.src
 )
 
 internal fun DomainWordEntryDto.toDomain(): DomainWordEntry = DomainWordEntry(
@@ -65,12 +80,14 @@ internal fun DomainWordEntryDto.toDomain(): DomainWordEntry = DomainWordEntry(
 internal fun PlaybackEntryDto.toDomain(): PlaybackEntry = PlaybackEntry(
     id = this.id ?: UUID.randomUUID().toString(),
     audioFile = "",
-    text = this.text,
+    text = this.text ?: "",
     startMs = this.startMs,
     endMs = this.endMs,
     words = this.words.map { it.toDomain() },
-    speaker = this.speaker,
+    speaker = this.speaker ?: "Narrator",
     ambient = this.ambient,
     emotion = this.emotion,
-    type = this.type
+    type = this.type,
+    sfx = this.sfx,
+    imageSrc = this.src
 )

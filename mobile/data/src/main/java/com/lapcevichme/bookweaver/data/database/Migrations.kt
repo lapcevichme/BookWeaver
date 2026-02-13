@@ -31,7 +31,6 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
  */
 val MIGRATION_3_4 = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // 1. Пересоздаем таблицу books с новыми полями и nullable типами
         db.execSQL("ALTER TABLE books RENAME TO books_old")
 
         db.execSQL(
@@ -53,7 +52,6 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
             """
         )
 
-        // Копируем данные
         db.execSQL(
             """
             INSERT INTO books (id, title, author, localPath, coverPath, themeColor, lastListenedChapterId, lastListenedPosition) 
@@ -64,7 +62,6 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 
         db.execSQL("DROP TABLE books_old")
 
-        // 2. Создаем таблицу chapters
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS chapters (

@@ -15,9 +15,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-/**
- * Hilt-модуль для предоставления зависимостей базы данных (Database и DAO).
- */
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
