@@ -3,6 +3,7 @@ package com.lapcevichme.bookweaver.domain.model
 import java.util.UUID
 
 // TODO: подумать насчет nullability всех полей.
+// Респект джемини за удобные коммы
 
 /**
  * Упрощенная модель книги для отображения в библиотеке.
@@ -37,7 +38,8 @@ data class BookManifest(
     val author: String?,
     val characterVoices: Map<String, String> = emptyMap(),
     val defaultNarratorVoice: String,
-    val coverUrl: String? = null
+    val coverUrl: String? = null,
+    val totalDurationMs: Long = 0L
 )
 
 /**
@@ -52,7 +54,8 @@ data class Chapter(
     val scenarioPath: String? = null,
     val subtitlesPath: String? = null,
     val volumeNumber: Int = 1,
-    val hasAudio: Boolean = false
+    val hasAudio: Boolean = false,
+    val dataPath: String? = null
 )
 
 
@@ -78,25 +81,27 @@ data class BookCharacter(
 )
 
 /**
- * Одна запись (строка) в сценарии. Аналог ScenarioEntry.
+ * Одна запись в сценарии. Аналог ScenarioEntry.
  */
 data class ScenarioEntry(
     val id: UUID,
-    val type: String, // "dialogue" или "narration"
+    val type: String, // "dialogue", "narration" или "image"
     val text: String,
     val speaker: String,
     val emotion: String?,
     val ambient: String = "none",
-    val audioFile: String?
+    val audioFile: String?,
+    val imageSrc: String? = null
 )
 
 /**
- * Domain-модель, объединяющая всю информацию о главе.
+ * Модель объединяющая всю информацию о главе.
  */
 data class ChapterDetails(
     val summary: ChapterSummary?,
     val scenario: List<ScenarioEntry>,
-    val originalText: String
+    val originalText: String,
+    val dataPath: String? = null
 )
 
 /**
@@ -121,7 +126,7 @@ data class PlayerChapterInfo(
 
 
 /**
- * Чистая доменная модель для одного слова в субтитрах.
+ * Модель для одного слова в субтитрах.
  */
 data class DomainWordEntry(
     val word: String,
@@ -130,7 +135,6 @@ data class DomainWordEntry(
 )
 
 /**
- * Чистая доменная "объединенная" модель.
  * Содержит ВСЕ данные, необходимые для воспроизведения.
  */
 data class PlaybackEntry(
@@ -143,5 +147,7 @@ data class PlaybackEntry(
     val speaker: String,
     val ambient: String,
     val emotion: String?,
-    val type: String
+    val type: String,
+    val sfx: String? = null,
+    val imageSrc: String? = null
 )

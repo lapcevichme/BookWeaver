@@ -4,10 +4,6 @@ import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 
-/**
- * "Чистый" UseCase для получения потока с цветом
- * для КОНКРЕТНОЙ книги.
- */
 class GetBookThemeColorUseCase @Inject constructor(
     private val bookRepository: BookRepository
 ) {

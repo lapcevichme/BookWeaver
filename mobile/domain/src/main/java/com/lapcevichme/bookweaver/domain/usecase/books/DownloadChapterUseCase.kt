@@ -5,10 +5,6 @@ import com.lapcevichme.bookweaver.domain.repository.BookRepository
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 
-/**
- * UseCase для запуска скачивания одной главы.
- * Возвращает Flow, по которому можно следить за прогрессом.
- */
 class DownloadChapterUseCase @Inject constructor(
     private val bookRepository: BookRepository
 ) {

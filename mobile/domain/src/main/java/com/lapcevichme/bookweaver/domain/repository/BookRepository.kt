@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.Flow
 import java.io.File
 import java.io.InputStream
 
+// Респект джемини за удобные коммы
+
 interface BookRepository {
     /**
      * Получить поток (Flow) со списком всех локально сохраненных книг.
@@ -203,4 +205,9 @@ interface BookRepository {
      * @return Flow с прогрессом загрузки главы.
      */
     fun downloadChapter(bookId: String, chapterId: String): Flow<DownloadProgress>
-}
+
+    /**
+     * Получает путь к директории или основному файлу данных главы.
+     */
+    suspend fun getChapterDataPath(bookId: String, chapterId: String): String?
+    }

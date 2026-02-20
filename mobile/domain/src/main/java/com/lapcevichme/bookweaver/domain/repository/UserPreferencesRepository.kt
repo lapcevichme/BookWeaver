@@ -5,6 +5,8 @@ import kotlinx.coroutines.flow.Flow
 /**
  * Интерфейс репозитория для хранения настроек пользователя.
  */
+// Респект джемини за удобные коммы
+
 interface UserPreferencesRepository {
 
     /**
@@ -37,4 +39,14 @@ interface UserPreferencesRepository {
      * Сохранить ключ новой темы.
      */
     suspend fun saveThemeSetting(themeKey: String)
+
+    /**
+     * Получить Flow с флагом включения иллюстраций.
+     */
+    fun getIllustrationsEnabled(): Flow<Boolean>
+
+    /**
+     * Сохранить флаг включения иллюстраций.
+     */
+    suspend fun saveIllustrationsEnabled(enabled: Boolean)
 }
