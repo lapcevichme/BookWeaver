@@ -17,6 +17,7 @@ appcompat = "1.7.1"
 loggingInterceptor = "5.3.0"
 material = "1.13.0"
 materialIconsCore = "1.7.8"
+markdown = "0.5.1"
 # NEVER UPDATE THIS FUCKING LIB, IDK WHY IT DOESNT WORK ON NEWER VERSIONS
 materialKolor = "4.0.0"
 
@@ -69,6 +70,7 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 logging-interceptor = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "loggingInterceptor" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+markdown = { module = "com.github.jeziellago:compose-markdown", version.ref = "markdown" }
 androidx-navigation-runtime-android = { group = "androidx.navigation", name = "navigation-runtime-android", version.ref = "navigationRuntimeAndroid" }
 androidx-navigation-compose-android = { group = "androidx.navigation", name = "navigation-compose-android", version.ref = "navigationComposeAndroid" }
 androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigationCompose" }

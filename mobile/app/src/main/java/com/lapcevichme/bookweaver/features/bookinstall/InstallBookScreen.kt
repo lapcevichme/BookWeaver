@@ -28,10 +28,6 @@ import com.lapcevichme.bookweaver.domain.model.DownloadProgress
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/**
- * Обновленный экран установки, который теперь тоже "глупый".
- * Принимает uiState и отдает onEvent.
- */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InstallBookScreen(
@@ -60,8 +56,6 @@ fun InstallBookScreen(
                 onFailure = { "Ошибка: ${it.message}" }
             )
 
-            // Запускаем Snackbar в отдельной корутине,
-            // чтобы он не блокировал навигацию
             scope.launch {
                 snackbarHostState.showSnackbar(message)
             }
@@ -200,16 +194,13 @@ fun InstallBookScreen(
                     }
                 }
             }
-            // Блок индикатора загрузки
             AnimatedContent(
-                // Следим за классом состояния, а не за значением, чтобы анимация
-                // не срабатывала на каждом обновлении процентов
                 targetState = uiState.downloadProgress::class,
                 label = "loading-indicator",
                 modifier = Modifier
                     .padding(vertical = 24.dp)
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp), // Задаем минимальную высоту
+                    .heightIn(min = 48.dp),
                 transitionSpec = {
                     fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
                 }
@@ -220,7 +211,6 @@ fun InstallBookScreen(
                 ) {
                     when (val progress = uiState.downloadProgress) {
                         is DownloadProgress.Downloading -> {
-                            // Вложенный Column, чтобы текст был ПОД индикатором
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.fillMaxWidth()
@@ -229,12 +219,10 @@ fun InstallBookScreen(
                                 val text: String
 
                                 if (progress.totalBytes > 0) {
-                                    // Сервер дал размер
                                     percent = (progress.bytesDownloaded.toFloat() / progress.totalBytes.toFloat())
                                     text = "Скачивание... ${formatBytes(progress.bytesDownloaded)} / ${formatBytes(progress.totalBytes)} (${(percent * 100).roundToInt()}%)"
                                 } else {
-                                    // Сервер не дал размер, показываем только скачанные МБ
-                                    percent = 0f // Будет "бесконечный" LinearProgressIndicator
+                                    percent = 0f
                                     text = "Скачивание... ${formatBytes(progress.bytesDownloaded)}"
                                 }
 
@@ -244,7 +232,6 @@ fun InstallBookScreen(
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 } else {
-                                    // "Бесконечный" прогресс-бар
                                     LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
                                 }
 
@@ -256,7 +243,6 @@ fun InstallBookScreen(
                             }
                         }
                         DownloadProgress.Installing -> {
-                            // Вложенный Column, чтобы текст был ПОД индикатором
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.fillMaxWidth()
@@ -267,8 +253,6 @@ fun InstallBookScreen(
                             }
                         }
                         DownloadProgress.Idle -> {
-                            // Ничего не показываем, когда бездействуем
-                            // Spacer нужен, чтобы `heightIn(min = 48.dp)` работал
                             Spacer(modifier = Modifier.height(48.dp))
                         }
                     }
@@ -280,9 +264,6 @@ fun InstallBookScreen(
 }
 
 // TODO - в core
-/**
- * Форматирует байты в читаемый вид (КБ, МБ, ГБ)
- */
 private fun formatBytes(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val kBytes = bytes / 1024.0

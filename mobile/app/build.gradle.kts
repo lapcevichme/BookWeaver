@@ -101,6 +101,7 @@ dependencies {
     implementation(libs.androidx.media)
 
     implementation(libs.material.kolor)
+    implementation(libs.markdown)
 
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)

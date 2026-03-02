@@ -28,7 +28,6 @@ class BookInstallationViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(BookInstallationUiState())
     val uiState = _uiState.asStateFlow()
 
-    // Обработчик всех событий с UI
     fun onEvent(event: InstallationEvent) {
         when (event) {
             is InstallationEvent.UrlChanged -> _uiState.update { it.copy(urlInput = event.url) }
@@ -62,7 +61,6 @@ class BookInstallationViewModel @Inject constructor(
                         DownloadProgress.Installing -> {
                             _uiState.update { it.copy(downloadProgress = progress) }
                         }
-                        // 'Idle' не должен приходить из UseCase, но на всякий случай
                         DownloadProgress.Idle -> {
                             _uiState.update { it.copy(downloadProgress = DownloadProgress.Idle) }
                         }
@@ -80,8 +78,6 @@ class BookInstallationViewModel @Inject constructor(
     private fun installFromUri(uri: Uri?) {
         if (uri == null) return
         viewModelScope.launch {
-            // Установка из файла - это быстрый процесс,
-            // поэтому мы просто покажем "Установка..."
             _uiState.update {
                 it.copy(
                     downloadProgress = DownloadProgress.Installing,
@@ -89,7 +85,6 @@ class BookInstallationViewModel @Inject constructor(
                 )
             }
             try {
-                // Преобразование Uri -> InputStream происходит здесь, в presentation слое
                 context.contentResolver.openInputStream(uri)?.use { inputStream ->
                     val result = installBookUseCase(inputStream)
                     _uiState.update {

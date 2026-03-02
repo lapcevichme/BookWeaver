@@ -32,7 +32,6 @@ class LibraryViewModel @Inject constructor(
     private val setActiveChapterUseCase: SetActiveChapterUseCase,
     private val getLastListenedChapterIdUseCase: GetLastListenedChapterIdUseCase,
     private val generateBookThemeUseCase: GenerateBookThemeUseCase,
-    // 1. Инжектим репозиторий для доступа к токену
     private val serverRepository: ServerRepository
 ) : ViewModel() {
 
@@ -45,14 +44,12 @@ class LibraryViewModel @Inject constructor(
     val uiState: StateFlow<LibraryUiState> = combine(
         _asyncState,
         getBooksUseCase().map { domainBooks -> domainBooks.map { it.toUiBook() } },
-        // 2. Добавляем поток соединения в combine
         serverRepository.getServerConnection()
     ) { asyncState, books, connection ->
         LibraryUiState(
             isLoading = asyncState.isLoading,
             isRefreshing = asyncState.isRefreshing,
             books = books,
-            // 3. Передаем токен в UI State. Теперь LibraryScreen сможет добавлять заголовок.
             authToken = connection?.token
         )
     }
