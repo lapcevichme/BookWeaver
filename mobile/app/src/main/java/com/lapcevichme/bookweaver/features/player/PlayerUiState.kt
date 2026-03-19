@@ -17,7 +17,8 @@ data class PlayerUiState(
     val loadCommand: LoadCommand? = null,
     val clearService: Boolean = false,
     val playbackSpeed: Float = 1.0f,
-    val ambientVolume: Float = 0.5f
+    val ambientVolume: Float = 0.5f,
+    val illustrationsEnabled: Boolean = false
 )
 
 

@@ -11,6 +11,8 @@ data class PlayerState(
     val playbackSpeed: Float = 1.0f,
     val currentSubtitle: CharSequence = "",
     val subtitlesEnabled: Boolean = true,
+    val illustrationsEnabled: Boolean = false,
+    val currentImageSrc: String? = null,
     val error: String? = null,
     val loadedChapterId: String = "",
     val isLoading: Boolean = false

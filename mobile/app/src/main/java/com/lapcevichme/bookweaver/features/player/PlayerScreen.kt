@@ -49,6 +49,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -72,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.lapcevichme.bookweaver.core.service.MediaPlayerService
 import com.lapcevichme.bookweaver.core.PlayerState
 import kotlinx.coroutines.launch
@@ -150,9 +152,9 @@ private fun AudioPlayerScreenUI(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val speedSheetState = rememberModalBottomSheetState()
-    val settingsSheetState = rememberModalBottomSheetState() //
+    val settingsSheetState = rememberModalBottomSheetState()
     var showSpeedSheet by remember { mutableStateOf(false) }
-    var showSettingsSheet by remember { mutableStateOf(false) } //
+    var showSettingsSheet by remember { mutableStateOf(false) }
 
     fun formatTime(millis: Long): String {
         if (millis < 0) return "00:00"
@@ -199,7 +201,7 @@ private fun AudioPlayerScreenUI(
             verticalArrangement = Arrangement.Top
         ) {
 
-            // Блок обложки
+            // Блок обложки / Иллюстрации
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.8f)
@@ -208,7 +210,14 @@ private fun AudioPlayerScreenUI(
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
-                if (playerState.albumArt != null) {
+                if (playerState.illustrationsEnabled && !playerState.currentImageSrc.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = playerState.currentImageSrc,
+                        contentDescription = "Иллюстрация к сцене",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else if (playerState.albumArt != null) {
                     Image(
                         bitmap = playerState.albumArt!!.asImageBitmap(),
                         contentDescription = "Обложка альбома",
@@ -352,7 +361,7 @@ private fun AudioPlayerScreenUI(
                             fontSize = 16.sp
                         )
                     }
-                    IconButton(onClick = { showSettingsSheet = true }) { //
+                    IconButton(onClick = { showSettingsSheet = true }) {
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = "Настройки",
@@ -442,6 +451,30 @@ private fun AudioPlayerScreenUI(
                         },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Переключатель иллюстраций
+                Text(
+                    "Иллюстрации (Экспериментально)",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Показывать иллюстрации вместо обложки",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Switch(
+                        checked = playerUiState.illustrationsEnabled,
+                        onCheckedChange = { enabled ->
+                            viewModel.onIllustrationsEnabledChanged(enabled)
+                        }
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))

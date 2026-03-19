@@ -7,9 +7,11 @@ import com.lapcevichme.bookweaver.core.PlayerState
 import com.lapcevichme.bookweaver.domain.usecase.books.GetActiveBookFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetActiveChapterFlowUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetAmbientVolumeUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.GetIllustrationsEnabledUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.GetPlayerChapterInfoUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SaveAmbientVolumeUseCase
+import com.lapcevichme.bookweaver.domain.usecase.player.SaveIllustrationsEnabledUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SavePlaybackSpeedUseCase
 import com.lapcevichme.bookweaver.domain.usecase.player.SetActiveChapterUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,11 +36,21 @@ class PlayerViewModel @Inject constructor(
     private val getPlaybackSpeedUseCase: GetPlaybackSpeedUseCase,
     private val savePlaybackSpeedUseCase: SavePlaybackSpeedUseCase,
     private val getAmbientVolumeUseCase: GetAmbientVolumeUseCase,
-    private val saveAmbientVolumeUseCase: SaveAmbientVolumeUseCase
+    private val saveAmbientVolumeUseCase: SaveAmbientVolumeUseCase,
+    private val getIllustrationsEnabledUseCase: GetIllustrationsEnabledUseCase,
+    private val saveIllustrationsEnabledUseCase: SaveIllustrationsEnabledUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState = _uiState.asStateFlow()
+
+    private data class PlayerInitParams(
+        val bookId: String?,
+        val chapterId: String?,
+        val playbackSpeed: Float,
+        val ambientVolume: Float,
+        val illustrationsEnabled: Boolean
+    )
 
     init {
         viewModelScope.launch {
@@ -46,16 +58,21 @@ class PlayerViewModel @Inject constructor(
                 getActiveBookFlowUseCase(),
                 getActiveChapterFlowUseCase(),
                 getPlaybackSpeedUseCase(),
-                getAmbientVolumeUseCase()
-            ) { bookId, chapterId, speed, volume ->
-                Triple(Pair(bookId, chapterId), speed, volume)
+                getAmbientVolumeUseCase(),
+                getIllustrationsEnabledUseCase()
+            ) { bookId, chapterId, speed, volume, illustrations ->
+                PlayerInitParams(bookId, chapterId, speed, volume, illustrations)
             }
                 .distinctUntilChanged()
-                .collectLatest { (bookAndChapter, speed, volume) ->
-                    val (bookId, chapterId) = bookAndChapter
+                .collectLatest { params ->
+                    val bookId = params.bookId
+                    val chapterId = params.chapterId
+                    val speed = params.playbackSpeed
+                    val volume = params.ambientVolume
+                    val illustrations = params.illustrationsEnabled
                     val currentState = _uiState.value
 
-                    // Сценарий 1: Книга не выбрана (bookId is null)
+                    // Сценарий 1: Книга не выбрана
                     if (bookId == null) {
                         _uiState.update {
                             it.copy(
@@ -67,15 +84,15 @@ class PlayerViewModel @Inject constructor(
                                 loadCommand = null,
                                 clearService = true,
                                 playbackSpeed = speed,
-                                ambientVolume = volume
+                                ambientVolume = volume,
+                                illustrationsEnabled = illustrations
                             )
                         }
                         return@collectLatest
                     }
 
-                    // С этого момента у нас есть bookId: String
 
-                    // Сценарий 2: Книга выбрана, глава - нет (chapterId is null)
+                    // Сценарий 2: Книга выбрана, глава - нет
                     if (chapterId == null) {
                         Log.d("PlayerViewModel", "INIT: Book selected, but no chapter.")
                         _uiState.update {
@@ -88,19 +105,18 @@ class PlayerViewModel @Inject constructor(
                                 loadCommand = null,
                                 clearService = true,
                                 playbackSpeed = speed,
-                                ambientVolume = volume
+                                ambientVolume = volume,
+                                illustrationsEnabled = illustrations
                             )
                         }
                         return@collectLatest
                     }
 
-                    // С этого момента у нас есть и bookId: String, и chapterId: String
-
                     val isBookChanged = currentState.bookId != bookId
                     val isHotRestart = currentState.bookId == null
                     val isChapterChanged = currentState.chapterId != chapterId
 
-                    // Сценарий 3: РЕАЛЬНАЯ смена книги (не "горячий" рестарт)
+                    // Сценарий 3: РЕАЛЬНАЯ смена книги
                     if (isBookChanged && !isHotRestart) {
                         Log.d(
                             "PlayerViewModel",
@@ -116,7 +132,8 @@ class PlayerViewModel @Inject constructor(
                                 loadCommand = null,
                                 clearService = true,
                                 playbackSpeed = speed,
-                                ambientVolume = volume
+                                ambientVolume = volume,
+                                illustrationsEnabled = illustrations
                             )
                         }
                         loadChapterInfo(bookId, chapterId)
@@ -133,9 +150,9 @@ class PlayerViewModel @Inject constructor(
                     // Сценарий 4.1: "Горячий" перезапуск или избыточная эмиссия
                     if (isAlreadyLoaded || isPassiveLoading) {
                         Log.d("PlayerViewModel", "INIT: Skip. Already loaded/loading.")
-                        if (currentState.playbackSpeed != speed || currentState.ambientVolume != volume) {
+                        if (currentState.playbackSpeed != speed || currentState.ambientVolume != volume || currentState.illustrationsEnabled != illustrations) {
                             _uiState.update {
-                                it.copy(playbackSpeed = speed, ambientVolume = volume)
+                                it.copy(playbackSpeed = speed, ambientVolume = volume, illustrationsEnabled = illustrations)
                             }
                         }
                         return@collectLatest
@@ -160,7 +177,8 @@ class PlayerViewModel @Inject constructor(
                             loadCommand = null,
                             clearService = false,
                             playbackSpeed = speed,
-                            ambientVolume = volume
+                            ambientVolume = volume,
+                            illustrationsEnabled = illustrations
                         )
                     }
                     loadChapterInfo(bookId, chapterId)
@@ -188,7 +206,6 @@ class PlayerViewModel @Inject constructor(
             }
             getPlayerChapterInfoUseCase(bookId, chapterId)
                 .onSuccess { info ->
-                    // Если subtitlesPath != null (даже если это плейсхолдер), значит главу можно играть
                     if (info.media.subtitlesPath == null) {
                         Log.w("PlayerViewModel", "Глава без аудио (subtitlesPath is null).")
                         _uiState.update {
@@ -253,23 +270,15 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Вызывается "Диспетчером", когда команда seek/play для УЖЕ ЗАГРУЖЕННОЙ
-     * главы была выполнена.
-     */
     fun onMediaSet() {
         Log.d("PlayerViewModel", "onMediaSet: Clearing LoadCommand (SYNC)")
         _uiState.update { it.copy(loadCommand = null) }
     }
 
-    /**
-     * Вызывается "Диспетчером" при каждом изменении PlayerState из сервиса.
-     */
     fun onPlayerStateChanged(playerState: PlayerState) {
         val currentState = _uiState.value
         val command = currentState.loadCommand
 
-        // Если команды нет, нас это не интересует
         if (command == null) {
             if (playerState.error != null && currentState.error == null && !currentState.clearService) {
                 Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error. (No command, just reporting)")
@@ -278,19 +287,15 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // С этого момента у нас ЕСТЬ команда (command != null)
-
         val targetChapterId = currentState.chapterId
         val actualChapterId = playerState.loadedChapterId
 
-        // Обработка ошибки во время выполнения команды
         if (playerState.error != null) {
             Log.w("PlayerViewModel", "onPlayerStateChanged: Service reported an error during load command. Clearing command.")
             _uiState.update { it.copy(loadCommand = null, error = playerState.error) }
             return
         }
 
-        // Команда для одной главы, а сервис загрузил другую (или пуст)
         if (targetChapterId != actualChapterId) {
             return
         }
@@ -300,9 +305,6 @@ class PlayerViewModel @Inject constructor(
     }
 
 
-    /**
-     * Вызывается из MainScaffold, когда команда `clearService` была выполнена.
-     */
     fun onServiceCleared() {
         _uiState.update { it.copy(clearService = false) }
     }
@@ -380,6 +382,12 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun onIllustrationsEnabledChanged(enabled: Boolean) {
+        viewModelScope.launch {
+            saveIllustrationsEnabledUseCase(enabled)
+        }
+    }
+
     fun seekTo(positionMs: Long) {
         _uiState.update { currentState ->
             val baseCommand = currentState.loadCommand ?: LoadCommand(
@@ -404,11 +412,7 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Атомарно устанавливает команду на перемотку и воспроизведение.
-     * Используется из ChapterDetailsScreen, чтобы избежать race condition
-     * между раздельными вызовами seekTo() и play().
-     */
+    // Костыль для race condition
     fun seekToAndPlay(positionMs: Long) {
         Log.d("PlayerViewModel", "seekToAndPlay: Установка LoadCommand (play=true, seek=$positionMs)")
         _uiState.update { currentState ->
