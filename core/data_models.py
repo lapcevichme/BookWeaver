@@ -3,6 +3,7 @@
 Поддерживает SQLModel для БД. В этой архитектуре каждая книга имеет свою БД.
 """
 import json
+import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Literal, Any, Union
 from uuid import UUID, uuid4
@@ -21,6 +22,29 @@ class BookStatus(str, Enum):
     COMPLETED = "completed"
     HIATUS = "hiatus"
     ABANDONED = "abandoned"
+
+    @classmethod
+    def parse(cls, value: Any) -> "BookStatus":
+        """Статус из любого источника: наши значения или русские статусы сайтов (ranobelib: «Онгоинг»)."""
+        if isinstance(value, cls):
+            return value
+        key = str(value or "").strip().lower()
+        for status in cls:
+            if key == status.value:
+                return status
+        for status, words in _BOOK_STATUS_ALIASES.items():
+            if any(key.startswith(w) for w in words):
+                return status
+        logging.getLogger(__name__).warning(f"Неизвестный статус книги {value!r}, считаем ongoing")
+        return cls.ONGOING
+
+
+_BOOK_STATUS_ALIASES = {
+    BookStatus.ONGOING: ("онгоинг", "продолжается", "выходит", "в процессе"),
+    BookStatus.COMPLETED: ("завершен", "завершён", "закончен", "окончен"),
+    BookStatus.HIATUS: ("заморожен", "приостановлен"),
+    BookStatus.ABANDONED: ("заброшен", "брошен"),
+}
 
 class ChapterStatus(str, Enum):
     DRAFT = "draft"
@@ -493,6 +517,11 @@ class ManifestMeta(PydanticBaseModel):
     status: BookStatus = BookStatus.ONGOING
     source_url: Optional[str] = None
     version: str = "1.0.0"
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Any) -> BookStatus:
+        return BookStatus.parse(v)
     total_duration_ms: int = 0
     cover_image: Optional[str] = None
     language: str = "ru"

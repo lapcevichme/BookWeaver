@@ -6,6 +6,22 @@ from core import path_manager
 from utils import file_utils
 from utils.setup_logging import setup_logging
 
+
+def _parse_tags(value: Any) -> list:
+    """Теги из metadata.json: список или строка-список (ranobelib пишет "['Медицина', ...]")."""
+    if isinstance(value, list):
+        return [str(t) for t in value]
+    if isinstance(value, str) and value.strip():
+        import ast
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, (list, tuple)):
+                return [str(t) for t in parsed]
+        except (ValueError, SyntaxError):
+            pass
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return []
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +47,7 @@ def init_manifest(
     # Создаем папку проекта и инициализируем БД
     path_manager.ensure_book_dirs(book_name)
     
-    from core.data_models import Book, Chapter
+    from core.data_models import Book, BookStatus, Chapter
     from sqlmodel import Session, select
 
     with repo.get_session() as session:
@@ -43,8 +59,8 @@ def init_manifest(
                 title=metadata.get("title", book_name),
                 author=metadata.get("author", "Unknown Author"),
                 description=metadata.get("description", ""),
-                status=metadata.get("status", "ongoing"),
-                tags=metadata.get("tags", []),
+                status=BookStatus.parse(metadata.get("status")).value,
+                tags=_parse_tags(metadata.get("tags")),
                 language=metadata.get("language", "ru"),
                 cover_image_path=metadata.get("cover_image")
             )
