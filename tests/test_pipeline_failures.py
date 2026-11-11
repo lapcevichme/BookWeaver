@@ -229,5 +229,42 @@ class TestFullCycleFailures(unittest.TestCase):
         self.assertEqual([c.kwargs["chapter_num"] for c in app.scenario_pipeline.run.call_args_list], [0, 1])
 
 
+class TestFullCycleSkipsReadyChapters(unittest.TestCase):
+    def _app(self):
+        import main
+        cls = next(v for v in vars(main).values() if isinstance(v, type) and hasattr(v, "run_full_cycle"))
+        app = cls.__new__(cls)
+        app.summary_pipeline = MagicMock()
+        app.character_pipeline = MagicMock()
+        app.scenario_pipeline = MagicMock()
+        return app
+
+    def _repo(self, statuses):
+        chapters = _chapters(len(statuses), done=range(len(statuses)))
+        for c, st in zip(chapters, statuses):
+            c.status = st
+        repo = MagicMock()
+        repo.get_all_chapters.return_value = chapters
+        return repo
+
+    def test_ready_chapters_are_skipped(self):
+        app, repo = self._app(), self._repo(["scenario_ready", "draft", "audio_ready"])
+        with patch("core.book_repository.BookRepository", return_value=repo):
+            result = app.run_full_cycle("book")
+        self.assertEqual([c.kwargs["chapter_num"] for c in app.scenario_pipeline.run.call_args_list], [1])
+        self.assertEqual(result["scenario_skipped"], ["vol_1_chap_0", "vol_1_chap_2"])
+        repo.set_cache.assert_not_called()
+
+    def test_force_rebuilds_from_scratch_and_warns_about_audio(self):
+        app, repo = self._app(), self._repo(["scenario_ready", "audio_ready"])
+        with patch("core.book_repository.BookRepository", return_value=repo), \
+                self.assertLogs("main", level="WARNING") as logs:
+            result = app.run_full_cycle("book", force_scenario=True)
+        self.assertEqual(len(app.scenario_pipeline.run.call_args_list), 2)
+        self.assertEqual(result["scenario_skipped"], [])
+        self.assertIn(("vol_1_chap_1", "raw_scenario", None), [c.args for c in repo.set_cache.call_args_list])
+        self.assertTrue(any("vol_1_chap_1" in m and "аудио" in m for m in logs.output))
+
+
 if __name__ == "__main__":
     unittest.main()

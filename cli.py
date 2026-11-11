@@ -2,7 +2,8 @@
 BookWeaver CLI: команды без интерактива — для агентов, скриптов и человека.
 
     uv run cli.py import <файл.epub>
-    uv run cli.py run <книга> [--stages summary,chars,scenario] [--max-chapters N]
+    uv run cli.py run <книга> [--stages summary,chars,scenario] [--max-chapters N] [--force]
+                                            # готовые главы пропускаются; --force — заново
     uv run cli.py tts <книга> vol_1_chap_1 [vol_1_chap_2 ...]
     uv run cli.py export <книга>
     uv run cli.py status <книга>
@@ -224,10 +225,11 @@ def cmd_run(args) -> dict:
     if unknown:
         raise CliError(f"Неизвестные этапы: {', '.join(sorted(unknown))}. Доступны: {', '.join(STAGES)}")
     _repo(args.book)
-    _app().run_full_cycle(args.book, skip_summary="summary" not in stages, skip_chars="chars" not in stages,
+    done = _app().run_full_cycle(args.book, skip_summary="summary" not in stages, skip_chars="chars" not in stages,
                           skip_scenario="scenario" not in stages, max_chapters=args.max_chapters,
-                          progress_callback=_progress)
-    return {"book": args.book, "stages": stages, "max_chapters": args.max_chapters, "result": "ok"}
+                          progress_callback=_progress, force_scenario=args.force) or {}
+    return {"book": args.book, "stages": stages, "max_chapters": args.max_chapters, "result": "ok",
+            "scenario_skipped": done.get("scenario_skipped", [])}
 
 
 def cmd_tts(args) -> dict:
@@ -407,6 +409,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("book")
     p.add_argument("--stages", default="summary,chars,scenario", help="через запятую (по умолчанию все)")
     p.add_argument("--max-chapters", type=int, default=None, help="обработать только первые N глав")
+    p.add_argument("--force", action="store_true",
+                   help="переделать сценарии готовых глав с нуля (у озвученных аудио отвяжется от реплик)")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("tts", parents=[common], help="озвучка глав")

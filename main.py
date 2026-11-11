@@ -52,14 +52,20 @@ class Application:
         converter.run()
         return converter.book_name
 
+    SCENARIO_DONE_STATUSES = {"scenario_ready", "audio_ready", "tts_ready", "completed"}
+
     def run_full_cycle(self, book_name: str,
                        skip_summary: bool = False,
                        skip_chars: bool = False,
                        skip_scenario: bool = False,
                        generate_images: bool = False,
                        max_chapters: Optional[int] = None,
-                       progress_callback: Optional[Callable] = None):
+                       progress_callback: Optional[Callable] = None,
+                       force_scenario: bool = False):
         """
+        Главы с готовым сценарием (scenario_ready и дальше) не трогаются: пересборка стирает
+        у реплик audio_file и тайминги слов, а эмоции размечаются заново. force_scenario=True
+        сбрасывает кэш сценария и звука и делает такие главы с нуля.
         Запускает последовательную генерацию: Саммари -> Персонажи -> Сценарии (с опциональным лимитом глав max_chapters).
         """
         def update_progress(progress: float, stage: str, message: str):
@@ -84,6 +90,7 @@ class Application:
         # Неполный этап не останавливает цикл (успешные главы полезны дальше),
         # но итог обязан это показать. Любая другая ошибка останавливает цикл.
         incomplete: list[PipelineIncompleteError] = []
+        scenario_skipped: list[str] = []
 
         def run_stage(fn, *args, **kwargs):
             try:
@@ -129,10 +136,22 @@ class Application:
 
             total_chaps = len(chapter_ids)
             failed_scenarios = {}
+            status_by_id = {c.id: getattr(c.status, "value", c.status) for c in (db_chapters or [])}
 
             for i, (vol, chap) in enumerate(chapter_ids, 1):
                 chap_progress = i / total_chaps
                 chapter_id = f"vol_{vol}_chap_{chap}"
+                status = status_by_id.get(chapter_id)
+                if status in self.SCENARIO_DONE_STATUSES:
+                    if not force_scenario:
+                        scenario_skipped.append(chapter_id)
+                        logger.info(f"⏭ {chapter_id}: сценарий уже готов ({status}), пропуск. Переделать: force.")
+                        continue
+                    if status != "scenario_ready":
+                        logger.warning(f"⚠️ {chapter_id} ({status}): пересборка отвяжет аудио от реплик, "
+                                       f"после нее нужна повторная озвучка.")
+                    for cache_name in ("raw_scenario", "ambient"):
+                        repo.set_cache(chapter_id, cache_name, None)
                 update_progress((current_stage_idx - 1 + chap_progress) / total_stages, "Scenario", f"Глава {i}/{total_chaps}: {chapter_id}")
                 try:
                     self.scenario_pipeline.run(book_name=book_name, volume_num=vol, chapter_num=chap)
@@ -144,6 +163,9 @@ class Application:
             if failed_scenarios:
                 incomplete.append(PipelineIncompleteError("Сценарии", total_chaps, failed_scenarios))
 
+        if scenario_skipped:
+            logger.info(f"Сценарии пропущены (уже готовы): {', '.join(scenario_skipped)}")
+
         if incomplete:
             summary = " | ".join(str(e) for e in incomplete)
             update_progress(1.0, "Ошибка", f"Полный цикл для '{book_name}' завершен НЕ полностью: {summary}")
@@ -151,6 +173,7 @@ class Application:
                                           {f"{e.stage}/{ch}": r for e in incomplete for ch, r in e.failed.items()},
                                           message=f"Полный цикл завершен НЕ полностью: {summary}")
         update_progress(1.0, "Завершено", f"Полный цикл для '{book_name}' успешно выполнен!")
+        return {"scenario_skipped": scenario_skipped}
 
     def export_book(self, book_name: str) -> Optional[Path]:
         logger.info(f"Запуск экспорта для: {book_name}")
