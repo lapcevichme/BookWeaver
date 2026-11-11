@@ -2,6 +2,7 @@
 Пайплайн для полной обработки одной главы: от текста до готового сценария.
 """
 import json
+import re
 import logging
 from typing import List, Dict, Optional, Callable
 
@@ -26,6 +27,8 @@ from utils.text_utils import split_text_for_llm
 from core.character_view import chapter_order, characters_as_of
 
 logger = logging.getLogger(__name__)
+
+_IMAGE_MD = re.compile(r"!\[[^\]]*\]\([^)]*\)")  # как в tools/audit_scenario_coverage.py
 
 
 class ScenarioGenerationPipeline:
@@ -225,10 +228,12 @@ class ScenarioGenerationPipeline:
     def _text_coverage(result: RawScenario, source_text: str) -> float:
         """
         Доля исходного текста, попавшая в сценарий (по символам, без пробелов).
-        Слова автора в диалогах вырезаются по правилам, поэтому норма — 95-99%;
+        Markdown картинок не считается. Слова автора в диалогах вырезаются по правилам, поэтому норма — 95-99%;
         обрезанный ответ дает заметно меньше.
         """
-        src_len = len("".join(source_text.split()))
+        # Картинки в сценарии — записи image с src и без text; в покрытии их markdown не считаем,
+        # иначе глава из одних иллюстраций «не покрыта» (vol_1_chap_0 Кусурии: 52% вместо 100%).
+        src_len = len("".join(_IMAGE_MD.sub("", source_text).split()))
         if src_len == 0:
             return 1.0
         got = sum(len("".join((e.text or "").split())) for e in result.scenario)
