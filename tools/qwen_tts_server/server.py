@@ -125,8 +125,18 @@ async def synthesize_speech(
 
     temp_ref_path = None
     try:
+        # Без текста референса клон идет только по вектору диктора (x_vector_only): манера образца
+        # (хрип, шепот) теряется — проверено на «больном» Джинши (docs/experiments/2026-11-11_voice-research.md).
+        # Поэтому режим входит в ключ кэша и не включается молча.
+        ref_transcript = prompt_text.strip() if prompt_text else None
+        x_vector_only = not ref_transcript
+        cache_key = f"{voice_id}:{'xvec' if x_vector_only else 'icl'}" if voice_id else None
+        if x_vector_only and (prompt_wav is not None or voice_prompt_cache.get(cache_key) is not None):
+            logger.warning(f"⚠️ Нет текста референса для '{voice_id or prompt_wav.filename}': клон только по вектору "
+                           f"диктора (x_vector_only), манера образца не переносится.")
+
         # 1. Проверяем наличие готового закэшированного эмбеддинга голоса
-        cached_prompt = voice_prompt_cache.get(voice_id) if voice_id else None
+        cached_prompt = voice_prompt_cache.get(cache_key) if cache_key else None
 
         if cached_prompt is not None:
             logger.debug(f"Использование закэшированного voice_clone_prompt для '{voice_id}'")
@@ -143,8 +153,6 @@ async def synthesize_speech(
                 tmp.write(content)
                 temp_ref_path = tmp.name
 
-            ref_transcript = prompt_text.strip() if prompt_text else None
-
             # Если передан voice_id, кэшируем эмбеддинг для последующих реплик
             if voice_id and hasattr(tts_model, "create_voice_clone_prompt"):
                 try:
@@ -152,9 +160,9 @@ async def synthesize_speech(
                     created_prompt = tts_model.create_voice_clone_prompt(
                         ref_audio=temp_ref_path,
                         ref_text=ref_transcript,
-                        x_vector_only_mode=False if ref_transcript else True
+                        x_vector_only_mode=x_vector_only
                     )
-                    voice_prompt_cache[voice_id] = created_prompt
+                    voice_prompt_cache[cache_key] = created_prompt
                     cached_prompt = created_prompt
                 except Exception as ce:
                     logger.warning(f"Не удалось создать reusable prompt: {ce}")
@@ -170,7 +178,8 @@ async def synthesize_speech(
                     text=text,
                     language=target_lang,
                     ref_audio=temp_ref_path,
-                    ref_text=ref_transcript
+                    ref_text=ref_transcript,
+                    x_vector_only_mode=x_vector_only
                 )
         else:
             # Если нет референса, пробуем VoiceDesign (если модель поддерживает)

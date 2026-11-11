@@ -79,7 +79,8 @@ class TTSService:
 
         model = self.whisper_model
         if not model:
-            return " "
+            logger.error(f"Whisper недоступен, текст референса {speaker_wav_path.name} не получен")
+            return ""
 
         try:
             logger.info(f"Транскрипция референса через C++ Whisper (pywhispercpp): {speaker_wav_path.name}")
@@ -110,7 +111,7 @@ class TTSService:
             return text
         except Exception as e:
             logger.error(f"Ошибка транскрипции референса pywhispercpp: {e}")
-            return " "
+            return ""
 
     def synthesize(self, text: str, speaker_wav_path: Path, emotion: str = None) -> bytes | None:
         """Синтез речи через API Qwen3-TTS."""
@@ -118,7 +119,11 @@ class TTSService:
             logger.error(f"Файл-образец голоса не найден: {speaker_wav_path}")
             return None
 
-        prompt_text = self._get_prompt_text(speaker_wav_path)
+        prompt_text = self._get_prompt_text(speaker_wav_path).strip()
+        if not prompt_text:
+            # Без текста сервер клонирует только по вектору диктора: манера образца (хрип, шепот) теряется.
+            logger.warning(f"Нет текста референса для {speaker_wav_path}: клон только по вектору диктора. "
+                           f"Положите рядом {speaker_wav_path.with_suffix('.txt').name} с точным текстом образца.")
         instruct_text = emotion if emotion and emotion.lower() != "neutral" else ""
         voice_id = speaker_wav_path.parent.name if speaker_wav_path.parent.name != "voices" else speaker_wav_path.stem
 
