@@ -84,8 +84,10 @@ def character_category(character) -> Optional[str]:
     return ("old_" if old else "") + gender
 
 
-def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config) -> VoiceChoice:
+def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config, speaker_id=None) -> VoiceChoice:
     """
+    Персонаж ищется по speaker_id реплики, имя — запасной путь: после переименования
+    («Евнух» → «Джинши») старые реплики хранят прежнее имя, но тот же id.
     Порядок: рассказчик → voice_base персонажа (если папка голоса есть) →
     config.character_voices[id персонажа] → общий голос по полу/возрасту (если создан) →
     голос рассказчика (откат).
@@ -95,10 +97,12 @@ def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config
     def choice(voice_id: str, source: str, wanted: str = "") -> VoiceChoice:
         return VoiceChoice(voice_id, source, path_manager.get_voice_path(voice_id), wanted)
 
-    if not speaker_name or speaker_name == NARRATOR:
+    characters = list(characters)
+    char = next((c for c in characters if speaker_id and str(c.id) == str(speaker_id)), None)
+    if char is None and (not speaker_name or speaker_name == NARRATOR):
         return choice(narrator, SOURCE_NARRATOR)
-
-    char = next((c for c in characters if c.name == speaker_name), None)
+    if char is None:
+        char = next((c for c in characters if c.name == speaker_name), None)
     if char and char.voice_base and path_manager.get_voice_path(char.voice_base).exists():
         return choice(char.voice_base, SOURCE_VOICE_BASE)
 

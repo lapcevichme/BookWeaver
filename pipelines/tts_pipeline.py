@@ -113,7 +113,7 @@ class TTSPipeline:
                 audio_path = audio_output_dir / audio_filename
 
                 character_name = entry.speaker_name
-                voice = resolve_voice(character_name, chars, manifest.config)
+                voice = resolve_voice(character_name, chars, manifest.config, speaker_id=entry.speaker_id)
                 voice_id, actual_voice_path = voice.voice_id, voice.path
                 if voice.source == SOURCE_FALLBACK:
                     hint = f" Подошел бы общий '{voice.wanted}', но он еще не создан." if voice.wanted else ""

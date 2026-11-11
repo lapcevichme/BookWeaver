@@ -49,6 +49,11 @@ class TestResolveVoice(unittest.TestCase):
             v = voices.resolve_voice(speaker, self.chars, self.config)
             self.assertEqual((v.voice_id, v.source), ("narrator_default", voices.SOURCE_FALLBACK))
 
+    def test_renamed_character_found_by_id(self):
+        # Реплика записана, когда Маомао звали иначе; id тот же — голос тоже
+        v = voices.resolve_voice("Служанка", self.chars, self.config, speaker_id=self.maomao.id)
+        self.assertEqual((v.voice_id, v.source), ("maomao_voice", voices.SOURCE_VOICE_BASE))
+
     def test_generic_voice_by_role_and_by_character_gender(self):
         (self.lib / "generic_female").mkdir()
         (self.lib / "generic_female" / "reference.wav").write_bytes(b"RIFF")

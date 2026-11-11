@@ -287,10 +287,11 @@ def cmd_inspect_voices(args) -> dict:
     from core.voices import resolve_voice
     repo = _repo(args.book)
     config, chars = repo.load_manifest().config, repo.get_characters()
-    replicas = Counter(e.speaker_name for e in _entries(repo, args.chapter) if e.type != "image" and (e.text or "").strip())
+    replicas = Counter((e.speaker_name, e.speaker_id) for e in _entries(repo, args.chapter)
+                       if e.type != "image" and (e.text or "").strip())
     speakers = []
-    for name, n in replicas.most_common():
-        v = resolve_voice(name, chars, config)
+    for (name, speaker_id), n in replicas.most_common():
+        v = resolve_voice(name, chars, config, speaker_id=speaker_id)
         speakers.append({"speaker": name or "Рассказчик", "replicas": n, "voice": v.voice_id, "source": v.source,
                          "exists": v.exists, "wanted": v.wanted})
     known_ids = {c.id for c in chars}
@@ -343,7 +344,7 @@ def cmd_inspect_characters(args) -> dict:
     replicas = Counter(e.speaker_name for e in _entries(repo, args.chapter))
     rows = []
     for c in chars:
-        v = resolve_voice(c.name, chars, config)
+        v = resolve_voice(c.name, chars, config, speaker_id=c.id)
         rows.append({"name": c.name, "aliases": c.aliases, "gender": getattr(c.gender, "value", c.gender),
                      "role": getattr(c.role_tier, "value", c.role_tier), "chapters": len(c.chapter_mentions or {}),
                      "replicas": replicas.get(c.name, 0), "voice_profile": c.voice_profile or "",
