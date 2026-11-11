@@ -60,9 +60,10 @@ _CHARACTER_PATCH_BATCH_DEFAULT = 8
 _CHARACTER_CALL_ATTEMPTS_DEFAULT = 3  # попыток на разведку и на каждую пачку патча
 _LLM_REQUEST_TIMEOUT_DEFAULT = 1200  # сек; глава на 43k символов генерируется ~5 минут
 # Таймаут по этапам ≈ 2x максимума реальных вызовов в прогонах ноября 2026 (DeepSeek, DeepInfra):
-# recon макс. 108 с, patch 334 с, summary 65 с. Зависший провайдер иначе съедает весь общий таймаут.
+# recon макс. 108 с, patch 334 с, summary 65 с, sound_design (с reasoning) 159 с. Зависший провайдер
+# иначе съедает весь таймаут: 2026-11-12 sound_design молчал 600 с, повтор ответил за 2 минуты.
 _LLM_TIMEOUT_BY_STAGE_DEFAULT = {"character_recon": 240, "character_patch": 600, "chapter_summary": 180,
-                                 "emotion_analysis": 180, "sound_design": 600}
+                                 "emotion_analysis": 180, "sound_design": 360}
 _SCENARIO_CHUNK_SIZE_DEFAULT = 45_000  # страховка для гигантских глав; см. docs/experiments/2026-11-06_chunking.md
 
 # Temp Defaults
