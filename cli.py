@@ -291,7 +291,8 @@ def cmd_inspect_voices(args) -> dict:
     speakers = []
     for name, n in replicas.most_common():
         v = resolve_voice(name, chars, config)
-        speakers.append({"speaker": name, "replicas": n, "voice": v.voice_id, "source": v.source, "exists": v.exists})
+        speakers.append({"speaker": name or "Рассказчик", "replicas": n, "voice": v.voice_id, "source": v.source,
+                         "exists": v.exists, "wanted": v.wanted})
     known_ids = {c.id for c in chars}
     stale = {str(k): v for k, v in config.character_voices.items() if k not in known_ids}
     return {"book": args.book, "chapter": args.chapter, "narrator_voice": config.default_narrator_voice,
@@ -346,7 +347,7 @@ def cmd_inspect_characters(args) -> dict:
         rows.append({"name": c.name, "aliases": c.aliases, "gender": getattr(c.gender, "value", c.gender),
                      "role": getattr(c.role_tier, "value", c.role_tier), "chapters": len(c.chapter_mentions or {}),
                      "replicas": replicas.get(c.name, 0), "voice_profile": c.voice_profile or "",
-                     "voice": v.voice_id, "voice_source": v.source})
+                     "voice": v.voice_id, "voice_source": v.source, "wanted": v.wanted})
     rows.sort(key=lambda r: (-r["replicas"], -r["chapters"], r["name"]))
     return {"book": args.book, "characters": rows}
 
@@ -369,7 +370,7 @@ def _human(command: str, result: dict) -> str:
     if command == "voices":
         out = [f"Рассказчик: {result['narrator_voice']}",
                _table([{**s, "exists": "да" if s["exists"] else "НЕТ ФАЙЛА"} for s in result["speakers"]],
-                      ["speaker", "replicas", "voice", "source", "exists"])]
+                      ["speaker", "replicas", "voice", "source", "exists", "wanted"])]
         if result["config_voices_without_character"]:
             out.append(f"В config.character_voices есть голоса для несуществующих персонажей: {result['config_voices_without_character']}")
         return "\n".join(out)
@@ -386,7 +387,7 @@ def _human(command: str, result: dict) -> str:
                  "max_gap": f"{r['max_gap_share']:.0%}"} for r in result["chapters"]]
         return _table(rows, ["chapter", "status", "entries", "dialogue", "coverage", "max_gap", "diagnosis"])
     if command == "characters":
-        return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "voice_profile"])
+        return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "wanted", "voice_profile"])
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 

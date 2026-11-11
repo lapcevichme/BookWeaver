@@ -49,6 +49,45 @@ class TestResolveVoice(unittest.TestCase):
             v = voices.resolve_voice(speaker, self.chars, self.config)
             self.assertEqual((v.voice_id, v.source), ("narrator_default", voices.SOURCE_FALLBACK))
 
+    def test_generic_voice_by_role_and_by_character_gender(self):
+        (self.lib / "generic_female").mkdir()
+        (self.lib / "generic_female" / "reference.wav").write_bytes(b"RIFF")
+        rifa = SimpleNamespace(id=uuid4(), name="Рифа", voice_base="", gender="female", voice_profile="adult female, sharp")
+        for speaker, chars in (("Служанка 1", self.chars), ("Рифа", [rifa])):
+            v = voices.resolve_voice(speaker, chars, self.config)
+            self.assertEqual((v.voice_id, v.source), ("generic_female", voices.SOURCE_GENERIC))
+
+    def test_missing_generic_voice_falls_back_but_says_what_is_wanted(self):
+        v = voices.resolve_voice("Старый стражник", self.chars, self.config)
+        self.assertEqual((v.voice_id, v.source, v.wanted), ("narrator_default", voices.SOURCE_FALLBACK, "generic_old_male"))
+
+
+class TestRoleCategory(unittest.TestCase):
+    def test_roles(self):
+        cases = {"Служанка 1": "female", "Стражник 2": "male", "Старый стражник": "old_male",
+                 "Пожилая женщина": "old_female", "Старший евнух": "male", "Маленькая служанка": "child",
+                 "Старик": "old_male", "Голос из толпы": None, "": None}
+        for speaker, expected in cases.items():
+            self.assertEqual(voices.role_category(speaker), expected, speaker)
+
+    def test_character_category(self):
+        c = lambda g, p: SimpleNamespace(gender=g, voice_profile=p)
+        self.assertEqual(voices.character_category(c("male", "adult male, calm")), "male")
+        self.assertEqual(voices.character_category(c("female", "old female, raspy")), "old_female")
+        self.assertEqual(voices.character_category(c("female", "infant, weak")), "child")
+        self.assertIsNone(voices.character_category(c("unknown", "")))
+
+
+class TestScenarioCoverage(unittest.TestCase):
+    def test_images_do_not_count(self):
+        from core.data_models import RawScenario
+        from pipelines.scenario_generation import ScenarioGenerationPipeline
+        src = "Примечание переводчика.\n![Иллюстрация](../images/img_970436a6f2.jpg)\n![Иллюстрация](../images/img_6772b898e8.jpg)"
+        result = RawScenario(scenario=[{"type": "narration", "text": "Примечание переводчика."},
+                                       {"type": "image", "src": "../images/img_970436a6f2.jpg"},
+                                       {"type": "image", "src": "../images/img_6772b898e8.jpg"}])
+        self.assertEqual(ScenarioGenerationPipeline._text_coverage(result, src), 1.0)
+
 
 class TestBookStatusAndTags(unittest.TestCase):
     def test_ranobelib_statuses(self):

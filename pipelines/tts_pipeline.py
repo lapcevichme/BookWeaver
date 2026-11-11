@@ -116,7 +116,8 @@ class TTSPipeline:
                 voice = resolve_voice(character_name, chars, manifest.config)
                 voice_id, actual_voice_path = voice.voice_id, voice.path
                 if voice.source == SOURCE_FALLBACK:
-                    logger.warning(f"Голос для персонажа '{character_name}' не настроен или папка референса не найдена. Будет использован голос рассказчика по умолчанию.")
+                    hint = f" Подошел бы общий '{voice.wanted}', но он еще не создан." if voice.wanted else ""
+                    logger.warning(f"Голос для '{character_name}' не настроен или папка референса не найдена.{hint} Будет использован голос рассказчика.")
 
                 if not voice.exists:
                     logger.error(f"❌ Аудиофайл для голоса '{voice_id}' не найден по пути {actual_voice_path}. Пропуск.")
