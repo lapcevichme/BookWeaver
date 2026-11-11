@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Literal, Any, Union
 from uuid import UUID, uuid4
 from enum import Enum
 
-from pydantic import model_validator, ValidationError, BaseModel as PydanticBaseModel, ConfigDict
+from pydantic import model_validator, field_validator, ValidationError, BaseModel as PydanticBaseModel, ConfigDict
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 from sqlalchemy import Text, Index, UniqueConstraint, ForeignKey, String
 from sqlalchemy.ext.mutable import MutableDict, MutableList
@@ -445,9 +445,20 @@ class SoundDesignResult(PydanticBaseModel):
                 return {"design": items}
         return data
 
+# Метки эмоций = набор эмоциональных референсов персонажа (docs/experiments/2026-11-11_voice-research.md,
+# «Эмоции на Qwen Base»). Озвучка клонирует голос из референса с этой меткой, если он есть, иначе из нейтрального.
+EMOTION_LABELS = ("neutral", "angry", "sad", "happy", "whisper", "scared")
+
+
 class VoiceDirection(PydanticBaseModel):
-    instruct: str = Field(...)
-    tts_text: Optional[str] = None
+    emotion: str = Field(default="neutral", description=f"одна метка из списка: {', '.join(EMOTION_LABELS)}")
+    tts_text: Optional[str] = Field(default=None, description="текст реплики с пустыми строками на месте длинных пауз; только если пауза нужна")
+
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def normalize_emotion(cls, v: Any) -> str:
+        label = str(v or "").strip().lower()
+        return label if label in EMOTION_LABELS else "neutral"
 
 class EmotionMap(PydanticBaseModel):
     emotions: Dict[UUID, VoiceDirection] = Field(default_factory=dict)

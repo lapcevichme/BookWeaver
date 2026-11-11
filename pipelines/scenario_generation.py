@@ -113,7 +113,7 @@ class ScenarioGenerationPipeline:
                 repo.set_cache(chapter_id, "ambient", sound_enriched_scenario)
 
             # 3. Instruct & tts_text
-            update_progress(0.75, "Эмоции", "Анализ интонаций, пауз и генерация режиссерских инструкций...")
+            update_progress(0.75, "Эмоции", "Разметка эмоций и пауз...")
             
             # Снова подгружаем персонажей для эмоций
             chars = repo.get_characters()
@@ -363,7 +363,7 @@ class ScenarioGenerationPipeline:
 
     def _enrich_with_emotions(self, entries: List[Dict], archive: CharacterArchive, chapter_id: str,
                               profiles: Optional[Dict[str, str]] = None) -> List[Dict]:
-        """Анализ эмоций и подготовка теневого текста (tts_text) для CosyVoice 3."""
+        """Метка эмоции (для выбора референса голоса) и паузы пустой строкой в tts_text."""
         replicas = [
             {"id": e['id'], "speaker": e['speaker'], "text": e['text']}
             for e in entries if e.get('text') and e.get('speaker')
@@ -388,8 +388,9 @@ class ScenarioGenerationPipeline:
         for entry_id_uuid, voice_dir in emotion_map_data.emotions.items():
             entry_id_str = str(entry_id_uuid)
             if entry_id_str in entries_by_id:
-                entries_by_id[entry_id_str]['instruct_prompt'] = voice_dir.instruct
-                entries_by_id[entry_id_str]['tts_text'] = voice_dir.tts_text
+                entries_by_id[entry_id_str]['instruct_prompt'] = voice_dir.emotion
+                if voice_dir.tts_text:
+                    entries_by_id[entry_id_str]['tts_text'] = voice_dir.tts_text
 
         for entry in entries:
             if 'instruct_prompt' not in entry:

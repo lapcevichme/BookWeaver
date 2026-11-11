@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 class TTSPipeline:
     """
     Основной пайплайн для синтеза речи для всей главы.
-    Адаптирован для работы с CosyVoice 3: использует tts_text и instruct_prompt.
+    Qwen3-TTS Base (клон по референсу): использует tts_text; instruct_prompt — метка эмоции,
+    пока не используется (нет эмоциональных референсов), instruct клон не принимает.
     """
 
     def __init__(self, model_manager: ModelManager):
@@ -141,7 +142,6 @@ class TTSPipeline:
                     failed_entries[f"#{i + 1}"] = f"нет файла голоса '{voice_id}'"
                     continue
 
-                instruct_prompt = getattr(entry, 'instruct_prompt', 'neutral')
                 tts_text_raw = getattr(entry, 'tts_text', None) or entry.text
 
                 processed_text = text_utils.preprocess_text_for_tts(tts_text_raw, self.pronunciation_dict)
@@ -161,21 +161,13 @@ class TTSPipeline:
                     
                     while attempt < max_attempts and not success:
                         attempt += 1
-                        current_instruct = instruct_prompt
-                        
-                        if attempt > 1:
-                            if current_instruct == 'neutral' or not current_instruct:
-                                current_instruct = "normal voice"
-                            else:
-                                current_instruct = f"{current_instruct}, natural"
 
-                        update_progress(progress, stage, f"[{i + 1}/{total_entries}] Синтез (попытка {attempt}): {character_name or 'Рассказчик'} ({current_instruct})")
+                        update_progress(progress, stage, f"[{i + 1}/{total_entries}] Синтез (попытка {attempt}): {character_name or 'Рассказчик'}")
 
                         start_time = time.time()
                         wav_bytes = tts_service.synthesize(
                             text=processed_text,
                             speaker_wav_path=actual_voice_path,
-                            emotion=current_instruct
                         )
                         call_duration = (time.time() - start_time) * 1000
                         total_synthesis_time += call_duration

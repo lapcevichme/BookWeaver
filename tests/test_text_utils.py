@@ -27,5 +27,17 @@ class TestTtsTags(unittest.TestCase):
         self.assertEqual(preprocess_text_for_tts("«Яд». <|pause|> «Точно?»", {}), "Яд.\n\nТочно?")
 
 
+class TestEmotionPrompt(unittest.TestCase):
+    def test_prompt_lists_all_labels_and_asks_for_no_tags(self):
+        from core.data_models import EMOTION_LABELS
+        from pipelines.prompts import format_emotion_analysis_prompt
+        prompt = format_emotion_analysis_prompt([{"id": "1", "speaker": "Маомао", "text": "Яд..."}], {})
+        rules = prompt.split("<emotion_rules>")[1].split("</emotion_rules>")[0]
+        for label in EMOTION_LABELS:
+            self.assertIn(label, rules)
+        self.assertNotIn("<|sigh|>", prompt)
+        self.assertNotIn("instruct", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

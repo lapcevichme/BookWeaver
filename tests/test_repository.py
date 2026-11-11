@@ -220,9 +220,12 @@ class TestRepository(unittest.TestCase):
         # Проверяем валидаторы EmotionMap (оборачивание словаря)
         from uuid import uuid4
         uid = uuid4()
-        emo_map = EmotionMap.model_validate({uid: {"instruct": "whisper", "tts_text": "тихо"}})
+        emo_map = EmotionMap.model_validate({uid: {"emotion": "Whisper", "tts_text": "тихо"}})
         self.assertIn(uid, emo_map.emotions)
-        self.assertEqual(emo_map.emotions[uid].instruct, "whisper")
+        self.assertEqual(emo_map.emotions[uid].emotion, "whisper")
+        # Свободный текст вместо метки (старый формат instruct) не ломает этап, а дает neutral
+        emo_map = EmotionMap.model_validate({uid: {"emotion": "громко, с восторгом"}})
+        self.assertEqual(emo_map.emotions[uid].emotion, "neutral")
 
 
 if __name__ == "__main__":
