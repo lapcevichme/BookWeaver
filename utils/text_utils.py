@@ -48,12 +48,33 @@ def load_pronunciation_dictionary(path: Path) -> dict:
         return json.load(f)
 
 
+_TTS_TAG_RE = re.compile(r'<\|\s*([a-zA-Z_]+)\s*\|>')
+
+
+def convert_tts_tags(text: str) -> str:
+    """
+    Приводит теги эмоций (<|pause|>, <|sigh|> …) к тому, что понимает Qwen3-TTS.
+
+    Тегов Qwen не знает и читает их вслух («Поза», «Сих»). Пауза — пустая строка:
+    так получается ~0.4 с против 0.04 с у точки (docs/experiments/2026-11-11_voice-research.md).
+    Остальные теги вырезаются: на клоне их нечем выразить.
+    """
+    if '<|' not in text:
+        return text
+    text = _TTS_TAG_RE.sub(lambda m: '\n\n' if m.group(1).lower() == 'pause' else ' ', text)
+    text = re.sub(r'[ \t]*\n\s*\n[ \t]*', '\n\n', text)
+    text = re.sub(r'[ \t]{2,}', ' ', text)
+    return text.strip()
+
+
 def preprocess_text_for_tts(text: str, dictionary: dict) -> str:
     """
     Полный конвейер предобработки текста для TTS:
-    1. Применяет словарь произношений.
-    2. Очищает от нежелательных символов и пунктуационных дублей.
+    1. Заменяет теги пауз переносом строки, остальные теги вырезает.
+    2. Применяет словарь произношений.
+    3. Очищает от нежелательных символов и пунктуационных дублей.
     """
+    text = convert_tts_tags(text)
     for word, pronunciation in dictionary.items():
         text = re.sub(r'\b' + re.escape(word) + r'\b', pronunciation, text, flags=re.IGNORECASE)
 
