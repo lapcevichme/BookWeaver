@@ -29,6 +29,8 @@ class BookStatus(str, Enum):
         if isinstance(value, cls):
             return value
         key = str(value or "").strip().lower()
+        if not key:  # epub/txt статуса не знают — это не ошибка
+            return cls.ONGOING
         for status in cls:
             if key == status.value:
                 return status

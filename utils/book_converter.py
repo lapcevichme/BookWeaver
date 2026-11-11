@@ -58,8 +58,8 @@ class BookConverter:
             print(f"      Метаданные: {meta.get('title')} / {meta.get('author')}")
 
         except Exception as e:
-            print(f"Ошибка парсинга: {e}")
-            return
+            # Не глотаем: иначе импорт «успешен», а книги нет
+            raise RuntimeError(f"Ошибка парсинга {self.input_file.name}: {e}") from e
 
         self._save_chapters(volumes)
         print(f"✅ Тексты сохранены.")

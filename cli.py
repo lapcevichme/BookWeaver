@@ -20,6 +20,7 @@ import logging
 import os
 import re
 from collections import Counter
+from contextlib import redirect_stdout
 import sys
 from pathlib import Path
 from typing import Tuple, Optional
@@ -440,7 +441,12 @@ def main(argv=None) -> int:
     setup_logging(console_stream=sys.stderr, console_level=logging.DEBUG if args.verbose else logging.INFO)
     from core.errors import PipelineIncompleteError
     try:
-        result = args.func(args)
+        if args.command == "menu":
+            result = args.func(args)
+        else:
+            # Пайплайны и конвертер местами пишут print(); stdout держим только под итог/JSON.
+            with redirect_stdout(sys.stderr):
+                result = args.func(args)
     except CliError as e:
         logger.error(str(e))
         if args.json:
