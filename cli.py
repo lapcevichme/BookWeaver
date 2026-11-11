@@ -1,8 +1,25 @@
 """
-Файл для запуска BookWeaver в режиме командной строки (CLI).
+BookWeaver CLI: команды без интерактива — для агентов, скриптов и человека.
+
+    uv run cli.py import <файл.epub>
+    uv run cli.py run <книга> [--stages summary,chars,scenario] [--max-chapters N]
+    uv run cli.py tts <книга> vol_1_chap_1 [vol_1_chap_2 ...]
+    uv run cli.py export <книга>
+    uv run cli.py status <книга>
+    uv run cli.py inspect voices|emotions|coverage|characters <книга> [--chapter ID]
+    uv run cli.py menu                      # старое интерактивное меню
+
+Любая команда: --json (результат в stdout как JSON), -v (подробные логи). Логи всегда в stderr.
+Код выхода: 0 — успех, 1 — ошибка, 2 — выполнено не полностью (часть глав упала), 3 — книга/файл не найдены.
 """
+from __future__ import annotations
+
+import argparse
+import json
 import logging
 import os
+import re
+from collections import Counter
 import sys
 from pathlib import Path
 from typing import Tuple, Optional
@@ -11,8 +28,6 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from main import Application
-from services.model_manager import ModelManager
 from utils.setup_logging import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -137,10 +152,315 @@ class BookWeaverCLI:
             elif choice == '0': break
             else: print("Неверный ввод.")
 
-if __name__ == "__main__":
-    setup_logging()
-    cli_model_manager = ModelManager()
-    application = Application(model_manager=cli_model_manager)
 
-    cli = BookWeaverCLI(application)
-    cli.main_menu()
+# ---------------------------------------------------------------------------
+# Неинтерактивные команды
+# ---------------------------------------------------------------------------
+
+EXIT_OK, EXIT_ERROR, EXIT_INCOMPLETE, EXIT_NOT_FOUND = 0, 1, 2, 3
+
+
+class CliError(Exception):
+    def __init__(self, message: str, code: int = EXIT_ERROR):
+        super().__init__(message)
+        self.code = code
+
+
+def _app():
+    from main import Application
+    from services.model_manager import ModelManager
+    return Application(model_manager=ModelManager())
+
+
+def _repo(book: str):
+    from core import path_manager
+    from core.book_repository import BookRepository
+    if not (path_manager.get_book_output_dir(book) / "project.db").exists():
+        raise CliError(f"Книга '{book}' не найдена (нет {path_manager.get_book_output_dir(book) / 'project.db'})", EXIT_NOT_FOUND)
+    return BookRepository(book)
+
+
+def _entries(repo, chapter: Optional[str] = None):
+    from sqlmodel import select
+    from core.data_models import ScenarioEntry
+    with repo.get_session() as session:
+        q = select(ScenarioEntry).order_by(ScenarioEntry.chapter_id, ScenarioEntry.order_index)
+        if chapter:
+            q = q.where(ScenarioEntry.chapter_id == chapter)
+        return session.exec(q).all()
+
+
+def _on_battery() -> bool:
+    """Ноутбук выключался при генерации TTS на батарее (2026-11-11) — предупреждаем."""
+    for ac in Path("/sys/class/power_supply").glob("A*/online"):
+        try:
+            return ac.read_text().strip() == "0"
+        except OSError:
+            return False
+    return False
+
+
+def _progress(p: float, stage: str, message: str):
+    logger.info(f"[{p:.0%}] [{stage}] {message}")
+
+
+# --- команды запуска ---------------------------------------------------------
+
+def cmd_import(args) -> dict:
+    path = Path(args.file)
+    if not path.exists():
+        raise CliError(f"Файл не найден: {path}", EXIT_NOT_FOUND)
+    book_id = _app().import_book(path)
+    return {"book": book_id}
+
+
+STAGES = ("summary", "chars", "scenario")
+
+
+def cmd_run(args) -> dict:
+    stages = [s.strip() for s in args.stages.split(",") if s.strip()]
+    unknown = set(stages) - set(STAGES)
+    if unknown:
+        raise CliError(f"Неизвестные этапы: {', '.join(sorted(unknown))}. Доступны: {', '.join(STAGES)}")
+    _repo(args.book)
+    _app().run_full_cycle(args.book, skip_summary="summary" not in stages, skip_chars="chars" not in stages,
+                          skip_scenario="scenario" not in stages, max_chapters=args.max_chapters,
+                          progress_callback=_progress)
+    return {"book": args.book, "stages": stages, "max_chapters": args.max_chapters, "result": "ok"}
+
+
+def cmd_tts(args) -> dict:
+    _repo(args.book)
+    if _on_battery():
+        logger.warning("⚠️ Ноутбук на батарее: при полной нагрузке TTS он уже выключался. Подключите зарядку.")
+    app, done = _app(), []
+    for chapter_id in args.chapters:
+        m = re.fullmatch(r"vol_(\d+)_chap_(\d+)", chapter_id)
+        if not m:
+            raise CliError(f"Глава задается как vol_<том>_chap_<номер>, получено: {chapter_id}")
+        app.tts_pipeline.run(book_name=args.book, volume_num=int(m.group(1)), chapter_num=int(m.group(2)),
+                             progress_callback=_progress)
+        done.append(chapter_id)
+    return {"book": args.book, "chapters": done, "result": "ok"}
+
+
+def cmd_export(args) -> dict:
+    _repo(args.book)
+    archive = _app().export_book(args.book)
+    if not archive:
+        raise CliError("Экспорт не удался (см. логи)")
+    return {"book": args.book, "archive": str(archive)}
+
+
+def cmd_menu(args) -> dict:
+    BookWeaverCLI(_app()).main_menu()
+    return {}
+
+
+# --- команды проверки ----------------------------------------------------------
+
+def cmd_status(args) -> dict:
+    from core import path_manager
+    repo = _repo(args.book)
+    book = repo.get_book()
+    per_chapter = Counter(e.chapter_id for e in _entries(repo))
+    from sqlmodel import select, func
+    from core.data_models import Chapter
+    with repo.get_session() as session:  # длину текста считаем в SQL: raw_text — ленивое поле
+        lengths = dict(session.exec(select(Chapter.id, func.length(Chapter.raw_text))).all())
+    chapters = []
+    for c in repo.get_all_chapters():
+        audio_dir = path_manager.get_chapter_audio_dir(args.book, c.id)
+        chapters.append({
+            "chapter": c.id, "title": c.title, "chars": lengths.get(c.id) or 0,
+            "status": getattr(c.status, "value", c.status), "characters_state": c.characters_state,
+            "entries": per_chapter.get(c.id, 0),
+            "audio_files": len(list(audio_dir.glob("*.wav"))) if audio_dir.exists() else 0,
+        })
+    return {"book": args.book, "title": book.title if book else None,
+            "book_status": getattr(book.status, "value", book.status) if book else None,
+            "characters": len(repo.get_characters()), "chapters": chapters}
+
+
+def cmd_inspect_voices(args) -> dict:
+    from core.voices import resolve_voice
+    repo = _repo(args.book)
+    config, chars = repo.load_manifest().config, repo.get_characters()
+    replicas = Counter(e.speaker_name for e in _entries(repo, args.chapter) if e.type != "image" and (e.text or "").strip())
+    speakers = []
+    for name, n in replicas.most_common():
+        v = resolve_voice(name, chars, config)
+        speakers.append({"speaker": name, "replicas": n, "voice": v.voice_id, "source": v.source, "exists": v.exists})
+    known_ids = {c.id for c in chars}
+    stale = {str(k): v for k, v in config.character_voices.items() if k not in known_ids}
+    return {"book": args.book, "chapter": args.chapter, "narrator_voice": config.default_narrator_voice,
+            "speakers": speakers, "config_voices_without_character": stale}
+
+
+def cmd_inspect_emotions(args) -> dict:
+    from core.data_models import EMOTION_LABELS
+    repo = _repo(args.book)
+    labels, chapters = Counter(), {}
+    for e in _entries(repo, args.chapter):
+        if e.type == "image" or not (e.text or "").strip():
+            continue
+        ch = chapters.setdefault(e.chapter_id, Counter(replicas=0, with_pauses=0, with_old_tags=0, tts_text_differs=0))
+        label = (e.instruct_prompt or "neutral").strip()
+        labels[label if label in EMOTION_LABELS else "(свободный текст, старый формат)"] += 1
+        tts = e.tts_text or ""
+        ch["replicas"] += 1
+        ch["with_old_tags"] += "<|" in tts
+        ch["with_pauses"] += "\n\n" in tts
+        # tts_text должен быть тем же текстом плюс паузы: сравниваем без пробелов и переносов
+        if tts and re.sub(r"\s+|<\|[^|]*\|>", "", tts) != re.sub(r"\s+", "", e.text):
+            ch["tts_text_differs"] += 1
+            if args.examples and len(ch.setdefault("_examples", [])) < args.examples:
+                ch["_examples"].append({"text": e.text, "tts_text": tts})
+    out = {}
+    for chapter, c in chapters.items():
+        out[chapter] = {k: v for k, v in c.items()}
+    return {"book": args.book, "labels": dict(labels.most_common()), "chapters": out}
+
+
+def cmd_inspect_coverage(args) -> dict:
+    from core import path_manager
+    from tools.audit_scenario_coverage import audit_sqlite, diagnose
+    _repo(args.book)
+    rows = audit_sqlite(path_manager.get_book_output_dir(args.book))
+    if args.chapter:
+        rows = [r for r in rows if r["chapter"] == args.chapter]
+    for r in rows:
+        r["diagnosis"] = diagnose(r, args.threshold)
+    return {"book": args.book, "threshold": args.threshold, "chapters": rows}
+
+
+def cmd_inspect_characters(args) -> dict:
+    from core.voices import resolve_voice
+    repo = _repo(args.book)
+    config, chars = repo.load_manifest().config, repo.get_characters()
+    replicas = Counter(e.speaker_name for e in _entries(repo, args.chapter))
+    rows = []
+    for c in chars:
+        v = resolve_voice(c.name, chars, config)
+        rows.append({"name": c.name, "aliases": c.aliases, "gender": getattr(c.gender, "value", c.gender),
+                     "role": getattr(c.role_tier, "value", c.role_tier), "chapters": len(c.chapter_mentions or {}),
+                     "replicas": replicas.get(c.name, 0), "voice_profile": c.voice_profile or "",
+                     "voice": v.voice_id, "voice_source": v.source})
+    rows.sort(key=lambda r: (-r["replicas"], -r["chapters"], r["name"]))
+    return {"book": args.book, "characters": rows}
+
+
+# --- вывод для человека ----------------------------------------------------------
+
+def _table(rows: list[dict], columns: list[str]) -> str:
+    if not rows:
+        return "(пусто)"
+    cells = [[str("" if r.get(c) is None else r.get(c)) for c in columns] for r in rows]
+    widths = [min(max(len(c), *(len(row[i]) for row in cells)), 60) for i, c in enumerate(columns)]
+    line = lambda vals: "  ".join(v[:w].ljust(w) for v, w in zip(vals, widths))
+    return "\n".join([line(columns), line(["-" * w for w in widths])] + [line(r) for r in cells])
+
+
+def _human(command: str, result: dict) -> str:
+    if command == "status":
+        head = f"{result['title']} [{result['book_status']}], персонажей: {result['characters']}"
+        return head + "\n" + _table(result["chapters"], ["chapter", "chars", "status", "characters_state", "entries", "audio_files"])
+    if command == "voices":
+        out = [f"Рассказчик: {result['narrator_voice']}",
+               _table([{**s, "exists": "да" if s["exists"] else "НЕТ ФАЙЛА"} for s in result["speakers"]],
+                      ["speaker", "replicas", "voice", "source", "exists"])]
+        if result["config_voices_without_character"]:
+            out.append(f"В config.character_voices есть голоса для несуществующих персонажей: {result['config_voices_without_character']}")
+        return "\n".join(out)
+    if command == "emotions":
+        rows = [{"chapter": ch, **{k: v for k, v in c.items() if not k.startswith("_")}} for ch, c in result["chapters"].items()]
+        out = [f"Метки: {result['labels']}",
+               _table(rows, ["chapter", "replicas", "with_pauses", "with_old_tags", "tts_text_differs"])]
+        for ch, c in result["chapters"].items():
+            for ex in c.get("_examples", []):
+                out.append(f"\n[{ch}] text:     {ex['text']!r}\n[{ch}] tts_text: {ex['tts_text']!r}")
+        return "\n".join(out)
+    if command == "coverage":
+        rows = [{**r, "coverage": f"{r['coverage']:.0%}" if r["coverage"] is not None else "—",
+                 "max_gap": f"{r['max_gap_share']:.0%}"} for r in result["chapters"]]
+        return _table(rows, ["chapter", "status", "entries", "dialogue", "coverage", "max_gap", "diagnosis"])
+    if command == "characters":
+        return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "voice_profile"])
+    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", help="результат в stdout как JSON")
+    common.add_argument("-v", "--verbose", action="store_true", help="подробные логи (DEBUG) в stderr")
+
+    parser = argparse.ArgumentParser(prog="cli.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("import", parents=[common], help="импорт книги из файла (.epub/.txt)")
+    p.add_argument("file"); p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("run", parents=[common], help="этапы анализа: summary, chars, scenario")
+    p.add_argument("book")
+    p.add_argument("--stages", default="summary,chars,scenario", help="через запятую (по умолчанию все)")
+    p.add_argument("--max-chapters", type=int, default=None, help="обработать только первые N глав")
+    p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("tts", parents=[common], help="озвучка глав")
+    p.add_argument("book"); p.add_argument("chapters", nargs="+", help="vol_1_chap_1 ...")
+    p.set_defaults(func=cmd_tts)
+
+    p = sub.add_parser("export", parents=[common], help="экспорт в .bw для мобилки")
+    p.add_argument("book"); p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("status", parents=[common], help="главы, этапы, реплики, аудио")
+    p.add_argument("book"); p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("menu", parents=[common], help="старое интерактивное меню")
+    p.set_defaults(func=cmd_menu)
+
+    p = sub.add_parser("inspect", help="проверка данных книги")
+    isub = p.add_subparsers(dest="what", required=True)
+    for name, func, help_ in [("voices", cmd_inspect_voices, "кто каким голосом озвучивается и почему"),
+                              ("emotions", cmd_inspect_emotions, "метки эмоций, паузы, старые теги"),
+                              ("coverage", cmd_inspect_coverage, "покрытие текста главы сценарием"),
+                              ("characters", cmd_inspect_characters, "персонажи, профиль голоса, назначенный голос")]:
+        ip = isub.add_parser(name, parents=[common], help=help_)
+        ip.add_argument("book"); ip.add_argument("--chapter", help="только эта глава (vol_1_chap_1)")
+        ip.set_defaults(func=func)
+        if name == "emotions":
+            ip.add_argument("--examples", type=int, default=0, help="показать N примеров, где tts_text отличается от текста")
+        if name == "coverage":
+            ip.add_argument("--threshold", type=float, default=0.90)
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    setup_logging(console_stream=sys.stderr, console_level=logging.DEBUG if args.verbose else logging.INFO)
+    from core.errors import PipelineIncompleteError
+    try:
+        result = args.func(args)
+    except CliError as e:
+        logger.error(str(e))
+        if args.json:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        return e.code
+    except PipelineIncompleteError as e:
+        logger.error(str(e))
+        if args.json:
+            print(json.dumps({"error": str(e), "failed": getattr(e, "failed", {})}, ensure_ascii=False, default=str))
+        return EXIT_INCOMPLETE
+    except Exception as e:
+        logger.exception(f"Ошибка: {e}")
+        if args.json:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        return EXIT_ERROR
+    if result:
+        command = args.what if args.command == "inspect" else args.command
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str) if args.json else _human(command, result))
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

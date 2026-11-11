@@ -6,6 +6,7 @@ import config
 
 from core.book_repository import BookRepository
 from core import path_manager
+from core.voices import resolve_voice, SOURCE_FALLBACK
 from services.model_manager import ModelManager
 from utils import text_utils
 from utils.metrics import metrics_collector, AudioMetrics
@@ -80,7 +81,6 @@ class TTSPipeline:
 
             manifest = repo.load_manifest()
             chars = repo.get_characters()
-            char_name_to_id_map = {char.name: char.id for char in chars}
 
             update_progress(0.1, stage, "Все данные успешно загружены.")
 
@@ -113,31 +113,12 @@ class TTSPipeline:
                 audio_path = audio_output_dir / audio_filename
 
                 character_name = entry.speaker_name
-                voice_id = None
+                voice = resolve_voice(character_name, chars, manifest.config)
+                voice_id, actual_voice_path = voice.voice_id, voice.path
+                if voice.source == SOURCE_FALLBACK:
+                    logger.warning(f"Голос для персонажа '{character_name}' не настроен или папка референса не найдена. Будет использован голос рассказчика по умолчанию.")
 
-                if character_name == "Рассказчик" or not character_name:
-                    voice_id = manifest.config.default_narrator_voice
-                else:
-                    character_uuid = char_name_to_id_map.get(character_name)
-                    char_obj = next((c for c in chars if c.name == character_name), None)
-                    
-                    # 1. Проверяем voice_base из базы данных персонажей (ищем имя папки голоса)
-                    if char_obj and char_obj.voice_base:
-                        candidate_path = path_manager.get_voice_path(char_obj.voice_base)
-                        if candidate_path.exists():
-                            voice_id = char_obj.voice_base
-                    
-                    # 2. Если не найден в базе, проверяем в манифесте
-                    if not voice_id and character_uuid:
-                        voice_id = manifest.config.character_voices.get(character_uuid)
-                        
-                    if not voice_id:
-                        logger.warning(f"Голос для персонажа '{character_name}' не настроен или папка референса не найдена. Будет использован голос рассказчика по умолчанию.")
-                        voice_id = manifest.config.default_narrator_voice
-
-                actual_voice_path = path_manager.get_voice_path(voice_id)
-
-                if not actual_voice_path.exists():
+                if not voice.exists:
                     logger.error(f"❌ Аудиофайл для голоса '{voice_id}' не найден по пути {actual_voice_path}. Пропуск.")
                     failed_entries[f"#{i + 1}"] = f"нет файла голоса '{voice_id}'"
                     continue

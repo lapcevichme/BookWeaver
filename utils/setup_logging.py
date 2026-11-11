@@ -3,10 +3,10 @@ import sys
 from logging.handlers import TimedRotatingFileHandler
 import config
 
-def setup_logging():
+def setup_logging(console_stream=None, console_level=logging.INFO):
     """
     Настраивает систему логирования:
-    - stdout: INFO+ (кратко)
+    - консоль (stdout по умолчанию; CLI передает stderr, чтобы stdout оставался для результата): INFO+ (кратко)
     - app.log: INFO+ (основные события, ротация по дням)
     - debug.log: DEBUG+ (всё подряд, ротация по дням)
     """
@@ -24,8 +24,8 @@ def setup_logging():
     file_formatter = logging.Formatter(file_format)
     console_formatter = logging.Formatter(console_format, datefmt="%H:%M:%S")
 
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setLevel(logging.INFO)
+    stdout_handler = logging.StreamHandler(console_stream or sys.stdout)
+    stdout_handler.setLevel(console_level)
     stdout_handler.setFormatter(console_formatter)
     
     # Фильтр для удаления спама от эндпоинта /tasks/
