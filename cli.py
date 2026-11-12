@@ -8,6 +8,7 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py export <книга>
     uv run cli.py status <книга>
     uv run cli.py inspect voices|emotions|coverage|characters|links|casting <книга> [--chapter ID]
+    uv run cli.py inspect cost|timeline|audio <книга> [--chapter ID]     # аналитика: деньги, время, озвучка
     uv run cli.py link resolve|auto <книга> [--chapter ID] [--force]   # кто стоит за подписями без имени
     uv run cli.py link confirm|reject <книга> --chapter ID --label 'Красавец-евнух'
     uv run cli.py cast profile|design <книга> [--character Имя] [--force] # кастинг: профиль от LLM, затем голос
@@ -480,6 +481,109 @@ def cmd_inspect_casting(args) -> dict:
     return {"book": args.book, "casting": rows}
 
 
+def _q(xs, p):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(p * len(xs)))] if xs else None
+
+
+def _llm_rows(repo, chapter=None):
+    from sqlmodel import select
+    from core.data_models import LLMMetric
+    with repo.get_session() as session:
+        q = select(LLMMetric).order_by(LLMMetric.timestamp)
+        if chapter:
+            q = q.where(LLMMetric.chapter_id == chapter)
+        return session.exec(q).all()
+
+
+def cmd_inspect_cost(args) -> dict:
+    """Деньги, токены и время LLM по этапам и главам (llmmetric)."""
+    repo = _repo(args.book)
+    rows = _llm_rows(repo, args.chapter)
+
+    def agg(items):
+        costs = [r.cost_usd for r in items if r.cost_usd is not None]
+        return {"calls": len(items), "errors": sum(r.status != "success" for r in items),
+                "input": sum(r.input_tokens for r in items), "cached": sum(r.cached_tokens or 0 for r in items),
+                "output": sum(r.output_tokens for r in items), "reasoning": sum(r.reasoning_tokens or 0 for r in items),
+                "cost_usd": round(sum(costs), 4), "cost_unknown": len(items) - len(costs),
+                "seconds": round(sum(r.latency_ms for r in items) / 1000)}
+
+    by_stage, by_chapter = {}, {}
+    for r in rows:
+        by_stage.setdefault(r.prompt_type, []).append(r)
+        by_chapter.setdefault(r.chapter_id or "книга", []).append(r)
+    order = {c.id: c.order_index for c in repo.get_all_chapters()}
+    return {"book": args.book, "chapter": args.chapter, "total": agg(rows),
+            "stages": sorted(({"stage": k, **agg(v)} for k, v in by_stage.items()), key=lambda x: -x["cost_usd"]),
+            "chapters": sorted(({"chapter": k, **agg(v)} for k, v in by_chapter.items()),
+                               key=lambda x: order.get(x["chapter"], -1))}
+
+
+def cmd_inspect_timeline(args) -> dict:
+    """Где уходит время: самые долгие вызовы, повторы (429, таймауты), ошибки, счетчики событий."""
+    from datetime import datetime
+    from sqlmodel import select
+    from core.data_models import MetricCounter
+    repo = _repo(args.book)
+    rows = _llm_rows(repo, args.chapter)
+    fmt = lambda r: {"when": datetime.fromtimestamp(r.timestamp).strftime("%m-%d %H:%M"), "chapter": r.chapter_id or "книга",
+                     "stage": r.prompt_type, "seconds": round(r.latency_ms / 1000), "attempts": r.attempts,
+                     "status": r.status, "error": (r.error_message or "")[:80]}
+    with repo.get_session() as session:
+        q = select(MetricCounter)
+        if args.chapter:
+            q = q.where(MetricCounter.chapter_id == args.chapter)
+        counters = [{"chapter": c.chapter_id, "counter": c.counter_name, "value": c.value} for c in session.exec(q).all()]
+    return {"book": args.book, "chapter": args.chapter,
+            "slowest": [fmt(r) for r in sorted(rows, key=lambda r: -r.latency_ms)[:args.top]],
+            "retried": [fmt(r) for r in rows if (r.attempts or 1) > 1],
+            "errors": [fmt(r) for r in rows if r.status != "success"],
+            "counters": sorted(counters, key=lambda c: (c["chapter"], c["counter"]))}
+
+
+def cmd_inspect_audio(args) -> dict:
+    """Озвучка: длительность, скорость синтеза, CER, повторы, принятые лучшие попытки (audiometric)."""
+    import config
+    from sqlmodel import select
+    from core.data_models import AudioMetric
+    repo = _repo(args.book)
+    with repo.get_session() as session:
+        q = select(AudioMetric).order_by(AudioMetric.timestamp)
+        if args.chapter:
+            q = q.where(AudioMetric.chapter_id == args.chapter)
+        latest = {}
+        for m in session.exec(q).all():  # перегенерированная реплика — берем последнюю запись
+            latest[(m.chapter_id, m.entry_id)] = m
+    threshold = config.TTS_CER_THRESHOLD
+
+    def agg(items):
+        ok = [m for m in items if m.status == "success"]
+        cers = [m.cer for m in ok]
+        audio = sum(m.audio_duration_ms for m in ok) / 1000
+        synth = sum(m.synthesis_latency_ms for m in items) / 1000
+        return {"lines": len(items), "ok": len(ok), "failed": len(items) - len(ok),
+                "retried": sum(m.attempts > 1 for m in items),
+                "best_attempt_kept": sum(m.cer > threshold for m in ok),
+                "audio_min": round(audio / 60, 1), "synth_min": round(synth / 60, 1),
+                "rtf": round(synth / audio, 1) if audio else None,
+                "cer_median": round(_q(cers, 0.5), 3) if cers else None,
+                "cer_p90": round(_q(cers, 0.9), 3) if cers else None,
+                "cer_max": round(max(cers), 3) if cers else None}
+
+    items = list(latest.values())
+    by_ch, by_sp = {}, {}
+    for m in items:
+        by_ch.setdefault(m.chapter_id, []).append(m)
+        by_sp.setdefault(m.speaker, []).append(m)
+    worst = sorted((m for m in items if m.status == "success"), key=lambda m: -m.cer)[:5]
+    return {"book": args.book, "chapter": args.chapter, "cer_threshold": threshold, "total": agg(items),
+            "chapters": [{"chapter": k, **agg(v)} for k, v in sorted(by_ch.items())],
+            "speakers": sorted(({"speaker": k, **agg(v)} for k, v in by_sp.items()), key=lambda x: -x["lines"]),
+            "worst": [{"chapter": m.chapter_id, "speaker": m.speaker, "cer": round(m.cer, 3), "attempts": m.attempts,
+                       "entry_id": m.entry_id} for m in worst]}
+
+
 def cmd_inspect_characters(args) -> dict:
     from core.voices import resolve_voice
     repo = _repo(args.book)
@@ -530,6 +634,33 @@ def _human(command: str, result: dict) -> str:
         rows = [{**r, "coverage": f"{r['coverage']:.0%}" if r["coverage"] is not None else "—",
                  "max_gap": f"{r['max_gap_share']:.0%}"} for r in result["chapters"]]
         return _table(rows, ["chapter", "status", "entries", "dialogue", "coverage", "max_gap", "diagnosis"])
+    if command == "cost":
+        t = result["total"]
+        head = (f"Всего: {t['calls']} вызовов, ${t['cost_usd']}"
+                + (f" (+{t['cost_unknown']} без цены)" if t["cost_unknown"] else "")
+                + f", {t['seconds'] // 60} мин, токены in {t['input']} (кэш {t['cached']}) / out {t['output']} (reasoning {t['reasoning']})")
+        cols = ["calls", "errors", "cost_usd", "cost_unknown", "seconds", "input", "cached", "output", "reasoning"]
+        return "\n\n".join([head, _table(result["stages"], ["stage"] + cols), _table(result["chapters"], ["chapter"] + cols)])
+    if command == "timeline":
+        cols = ["when", "chapter", "stage", "seconds", "attempts", "status", "error"]
+        out = ["Самые долгие вызовы:", _table(result["slowest"], cols)]
+        if result["retried"]:
+            out += ["\nС повторами (429, таймауты):", _table(result["retried"], cols)]
+        if result["errors"]:
+            out += ["\nОшибки:", _table(result["errors"], cols)]
+        if result["counters"]:
+            out += ["\nСчетчики событий:", _table(result["counters"], ["chapter", "counter", "value"])]
+        return "\n".join(out)
+    if command == "audio":
+        cols = ["lines", "ok", "failed", "retried", "best_attempt_kept", "audio_min", "synth_min", "rtf",
+                "cer_median", "cer_p90", "cer_max"]
+        t = result["total"]
+        head = (f"Всего: {t['lines']} реплик, {t['audio_min']} мин аудио за {t['synth_min']} мин (RTF {t['rtf']}), "
+                f"порог CER {result['cer_threshold']}")
+        out = [head, _table(result["chapters"], ["chapter"] + cols), "", _table(result["speakers"], ["speaker"] + cols)]
+        if result["worst"]:
+            out += ["\nХудшие по CER:", _table(result["worst"], ["chapter", "speaker", "cer", "attempts", "entry_id"])]
+        return "\n".join(out)
     if command == "casting":
         out = [_table(result["casting"], ["name", "status", "voice", "gender", "age", "pitch", "timbre", "pace", "manner", "f0"])]
         for r in result["casting"]:
@@ -582,7 +713,10 @@ def build_parser() -> argparse.ArgumentParser:
                               ("coverage", cmd_inspect_coverage, "покрытие текста главы сценарием"),
                               ("characters", cmd_inspect_characters, "персонажи, профиль голоса, назначенный голос"),
                               ("links", cmd_inspect_links, "кто стоит за подписями без имени: связи и массовка"),
-                              ("casting", cmd_inspect_casting, "профили голосов от кастинга и описания для VoiceDesign")]:
+                              ("casting", cmd_inspect_casting, "профили голосов от кастинга и описания для VoiceDesign"),
+                              ("cost", cmd_inspect_cost, "деньги, токены и время LLM по этапам и главам"),
+                              ("timeline", cmd_inspect_timeline, "самые долгие вызовы LLM, повторы, ошибки, счетчики"),
+                              ("audio", cmd_inspect_audio, "озвучка: длительность, RTF, CER, повторы, по говорящим")]:
         ip = isub.add_parser(name, parents=[common], help=help_)
         ip.add_argument("book"); ip.add_argument("--chapter", help="только эта глава (vol_1_chap_1)")
         ip.set_defaults(func=func)
@@ -590,6 +724,8 @@ def build_parser() -> argparse.ArgumentParser:
             ip.add_argument("--examples", type=int, default=0, help="показать N примеров, где tts_text отличается от текста")
         if name == "coverage":
             ip.add_argument("--threshold", type=float, default=0.90)
+        if name == "timeline":
+            ip.add_argument("--top", type=int, default=10, help="сколько самых долгих вызовов показать")
 
     p = sub.add_parser("link", parents=[common], help="связи подписей с персонажами: resolve, confirm, reject, auto")
     p.add_argument("action", choices=["resolve", "confirm", "reject", "auto"])
