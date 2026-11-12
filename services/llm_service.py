@@ -1,3 +1,4 @@
+import threading
 import time
 import re
 import json
@@ -32,6 +33,7 @@ class LLMService:
         self.api_key = api_key
         self._client = None
         self._lock = Lock()
+        self._call_info = threading.local()  # цена/попытки последнего вызова этого потока — для метрик
         self._usage_lock = Lock()  # сервис вызывается из нескольких потоков (параллельные чанки)
 
         self.total_input_tokens = 0
@@ -84,6 +86,7 @@ class LLMService:
         status = "success"
         error_msg = None
 
+        self._call_info.data = {}
         try:
             response_text, usage = self._raw_call_llm(prompt, prompt_type)
             if not response_text:
@@ -109,7 +112,8 @@ class LLMService:
                 output_tokens=usage[1],
                 latency_ms=latency_ms,
                 status=status,
-                error_message=error_msg
+                error_message=error_msg,
+                **getattr(self._call_info, "data", {}),
             ))
         return None
 
@@ -183,6 +187,9 @@ class LLMService:
     def _raw_call_llm(self, prompt: str, prompt_type: str = "unknown") -> Tuple[Optional[str], Tuple[int, int]]:
         max_retries = 3
         for attempt in range(max_retries):
+            if not hasattr(self._call_info, "data"):
+                self._call_info.data = {}
+            self._call_info.data["attempts"] = attempt + 1
             if attempt > 0:
                 metrics_collector.increment("api_retries")
             try:
@@ -215,6 +222,7 @@ class LLMService:
                     reasoning_toks = (getattr(out_details, "reasoning_tokens", 0) or 0) if out_details else 0
                     real_cost = getattr(completion.usage, "cost", None)
                     self._track_usage(*usage, real_cost=real_cost)
+                    self._call_info.data.update(cost_usd=real_cost, cached_tokens=cached, reasoning_tokens=reasoning_toks)
                     logger.info(
                         f"LLM usage [{prompt_type} | {self.model_name} @ {getattr(completion, 'provider', '?')}]: "
                         f"in={usage[0]} (cached={cached}), out={usage[1]} (reasoning={reasoning_toks}), cost=${real_cost if real_cost is not None else '?'}"

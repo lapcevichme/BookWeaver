@@ -82,6 +82,60 @@ def get_book_tables():
     ]
 
 
+_LLMMETRIC_OLD_COLUMNS = ("id", "chapter_id", "prompt_type", "model_name", "input_tokens", "output_tokens",
+                          "latency_ms", "status", "error_message", "timestamp")
+
+
+def _migrate_llmmetric(conn, db_name: str) -> None:
+    """
+    llmmetric: chapter_id стал необязательным (этапы уровня книги), добавлены cost_usd, attempts,
+    cached_tokens, reasoning_tokens. NOT NULL в SQLite через ALTER не снять — пересборка таблицы:
+    переименовать в llmmetric_old → создать новую → скопировать строки → удалить старую.
+    DDL в SQLite через pysqlite идет вне транзакции, поэтому шаги идемпотентны: если llmmetric_old
+    осталась (сбой на копировании 2026-11-12 — новые NOT NULL колонки без SQL-умолчаний), строки
+    докопируются при следующем открытии базы.
+    """
+    from sqlalchemy import text
+    from core.data_models import LLMMetric
+
+    def table_exists(name: str) -> bool:
+        return conn.execute(text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:n"), {"n": name}).first() is not None
+
+    def copy_from_old():
+        old_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(llmmetric_old)")).fetchall()}
+        cols = ", ".join(c for c in _LLMMETRIC_OLD_COLUMNS if c in old_cols)
+        before = conn.execute(text("SELECT COUNT(*) FROM llmmetric_old")).scalar()
+        conn.execute(text(f"INSERT INTO llmmetric ({cols}, attempts, cached_tokens, reasoning_tokens) "
+                          f"SELECT {cols}, 1, 0, 0 FROM llmmetric_old WHERE id NOT IN (SELECT id FROM llmmetric)"))
+        conn.commit()
+        missing = conn.execute(text("SELECT COUNT(*) FROM llmmetric_old WHERE id NOT IN (SELECT id FROM llmmetric)")).scalar()
+        if missing:
+            raise RuntimeError(f"llmmetric: {missing} из {before} строк не скопированы, llmmetric_old оставлена")
+        conn.execute(text("DROP TABLE llmmetric_old"))
+        conn.commit()
+        logger.info(f"Migration: llmmetric rows copied ({before}) in {db_name}")
+
+    if not table_exists("llmmetric"):
+        return
+    if table_exists("llmmetric_old"):
+        copy_from_old()
+        return
+    columns = {row[1]: row for row in conn.execute(text("PRAGMA table_info(llmmetric)")).fetchall()}
+    if columns.get("chapter_id") is not None and columns["chapter_id"][3] == 1:
+        logger.info(f"Migration: rebuilding llmmetric (nullable chapter_id, cost) in {db_name}")
+        conn.execute(text("DROP INDEX IF EXISTS ix_llmmetric_chapter_id"))
+        conn.execute(text("ALTER TABLE llmmetric RENAME TO llmmetric_old"))
+        LLMMetric.__table__.create(conn)
+        conn.commit()
+        copy_from_old()
+        return
+    for name, ddl in (("cost_usd", "FLOAT"), ("attempts", "INTEGER NOT NULL DEFAULT 1"),
+                      ("cached_tokens", "INTEGER NOT NULL DEFAULT 0"), ("reasoning_tokens", "INTEGER NOT NULL DEFAULT 0")):
+        if name not in columns:
+            conn.execute(text(f"ALTER TABLE llmmetric ADD COLUMN {name} {ddl}"))
+    conn.commit()
+
+
 def init_book_db(book_path: Path, force: bool = False) -> Engine:
     """Инициализирует таблицы и применяет миграции для конкретной книги (один раз за процесс, если force=False)."""
     resolved_path = Path(book_path).resolve()
@@ -127,6 +181,7 @@ def init_book_db(book_path: Path, force: bool = False) -> Engine:
                 logger.info(f"Migration: Adding description_timeline column to {resolved_path.name}")
                 conn.execute(text("ALTER TABLE character ADD COLUMN description_timeline JSON DEFAULT '{}'"))
                 conn.commit()
+            _migrate_llmmetric(conn, resolved_path.name)
             if char_columns and "voice_casting" not in char_columns:
                 logger.info(f"Migration: Adding voice_casting column to {resolved_path.name}")
                 conn.execute(text("ALTER TABLE character ADD COLUMN voice_casting JSON DEFAULT '{}'"))

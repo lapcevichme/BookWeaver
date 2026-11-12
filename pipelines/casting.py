@@ -51,7 +51,7 @@ class CastingPipeline:
         if not candidates:
             return summary
 
-        metrics_collector.start_chapter(f"{book_name}:casting")
+        metrics_collector.start_book(book_name)
         llm = self.model_manager.get_llm_service('character_analyzer')
         for i in range(0, len(candidates), BATCH):
             batch = candidates[i:i + BATCH]

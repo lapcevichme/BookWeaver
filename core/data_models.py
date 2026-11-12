@@ -656,10 +656,11 @@ class BookManifest(PydanticBaseModel):
 import time
 
 class LLMMetric(SQLModel, table=True):
-    """Метрики вызовов LLM для главы."""
+    """Метрики вызовов LLM. chapter_id пустой — этап уровня книги (кастинг)."""
     id: Optional[int] = Field(default=None, primary_key=True)
-    chapter_id: str = Field(
-        sa_column=Column(String, ForeignKey("chapter.id", ondelete="CASCADE"), index=True, nullable=False)
+    chapter_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String, ForeignKey("chapter.id", ondelete="CASCADE"), index=True, nullable=True)
     )
     prompt_type: str
     model_name: str
@@ -669,6 +670,11 @@ class LLMMetric(SQLModel, table=True):
     status: str = Field(default="success")
     error_message: Optional[str] = None
     timestamp: float = Field(default_factory=time.time)
+    cost_usd: Optional[float] = None    # цена от провайдера (OpenRouter usage.cost); None — неизвестна
+    # server_default — чтобы INSERT без этих колонок (миграция старых строк) не падал на NOT NULL
+    attempts: int = Field(default=1, sa_column_kwargs={"server_default": "1"})  # попыток внутри вызова (429, таймауты)
+    cached_tokens: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    reasoning_tokens: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
 
 class AudioMetric(SQLModel, table=True):
     """Метрики генерации аудио для реплик сценария."""

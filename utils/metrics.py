@@ -19,6 +19,10 @@ class LLMMetrics:
     status: str = "success"
     error_message: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
+    cost_usd: Optional[float] = None
+    attempts: int = 1
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
 
 @dataclass
 class AudioMetrics:
@@ -56,8 +60,12 @@ class MetricsCollector:
             self.active_chapter = chapter_id
         logger.debug(f"Metrics: Started tracking chapter {self.active_chapter} for book {self.active_book}")
 
+    def start_book(self, book_name: str):
+        """Этап уровня книги (кастинг): вызовы пишутся без главы."""
+        self.active_book, self.active_chapter = book_name, None
+
     def log_llm_call(self, metrics: LLMMetrics):
-        if not self.active_book or not self.active_chapter:
+        if not self.active_book:
             logger.warning("Metrics: Attempted to log LLM call without active book/chapter.")
             return
 
@@ -76,7 +84,11 @@ class MetricsCollector:
                     latency_ms=metrics.latency_ms,
                     status=metrics.status,
                     error_message=metrics.error_message,
-                    timestamp=metrics.timestamp
+                    timestamp=metrics.timestamp,
+                    cost_usd=metrics.cost_usd,
+                    attempts=metrics.attempts,
+                    cached_tokens=metrics.cached_tokens,
+                    reasoning_tokens=metrics.reasoning_tokens,
                 )
                 session.add(db_metric)
                 session.commit()
