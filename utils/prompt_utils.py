@@ -3,15 +3,17 @@ from enum import Enum
 import inspect
 from pydantic import BaseModel
 
-def generate_human_schema(model: Type[BaseModel], indent: int = 0) -> str:
+def generate_human_schema(model: Type[BaseModel], indent: int = 0, exclude: frozenset = frozenset()) -> str:
     """
     Рекурсивно генерирует простое, человекочитаемое описание Pydantic-модели
-    для использования в промптах LLM.
+    для использования в промптах LLM. exclude — имена полей, которых модели не показываем (на любом уровне).
     """
     lines = []
     prefix = " " * indent
 
     for field_name, field_info in model.model_fields.items():
+        if field_name in exclude:
+            continue
         type_desc, nested_models = _describe_type(field_info.annotation)
 
         description = f"({type_desc})"
@@ -21,7 +23,7 @@ def generate_human_schema(model: Type[BaseModel], indent: int = 0) -> str:
         lines.append(f"{prefix}- `{field_name}` {description}")
 
         for nested in nested_models:
-            lines.append(generate_human_schema(nested, indent=indent + 2))
+            lines.append(generate_human_schema(nested, indent=indent + 2, exclude=exclude))
 
     return "\n".join(lines)
 

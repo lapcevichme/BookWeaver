@@ -18,7 +18,9 @@ PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 
 # Этапы, которым reasoning не нужен, если в настройке openrouter_reasoning_by_stage не сказано иное:
 # эмбиент без reasoning выбирается так же (2026-11-06), а SFX теперь правила (utils/sfx_rules.py).
-STAGE_REASONING_DEFAULTS = {"ambient_design": "none"}
+# Разведка персонажей: low урезает reasoning в 2.5-3 раза без потери полноты; none — модель по умолчанию
+# отвечает «не изменилось» (14 отметок из 122 против 45), docs/experiments/2026-11-13_character-cards.md
+STAGE_REASONING_DEFAULTS = {"ambient_design": "none", "character_recon": "low"}
 
 PRICING_REGISTRY = {
     "xiaomi/mimo-v2-flash:free": {"input": 0.0, "output": 0.0}

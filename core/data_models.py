@@ -245,6 +245,9 @@ class Character(SQLModel, table=True):
     description_timeline: Dict[str, str] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
     # Кастинг (core/casting.py): профиль голоса от LLM, описание для VoiceDesign, статус и id созданного голоса.
     voice_casting: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
+    # Факты о персонаже (режим character_description_mode=facts): {"id", "fact", "kind", "chapter", "until"}.
+    # Карточка (`description`) — короткий портрет; факты копятся без предела и фильтруются по главе.
+    facts: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(MutableList.as_mutable(JSON)))
 
     # Relationships
     book: "Book" = Relationship(back_populates="characters")
@@ -388,6 +391,26 @@ class LlmReconResult(PydanticBaseModel):
         return data
 
 
+class LlmReconMention(PydanticBaseModel):
+    ref: str = Field(..., description="ref персонажа из списка, без изменений")
+    action: str = Field(..., description="Что персонаж делает в этой главе, одно предложение")
+    card_changed: bool = Field(False, description="true, если глава меняет карточку личности (см. правила)")
+    why: Optional[str] = Field(None, description="Если card_changed — что именно новое, коротко")
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce(cls, data: Any):
+        if isinstance(data, dict) and data.get("ref") is not None:
+            data["ref"] = str(data["ref"]).strip()
+        return data
+
+
+class LlmReconCardResult(PydanticBaseModel):
+    """Разведка в режиме карточек: кто есть в главе, что делает и у кого изменилась карточка."""
+    mentioned: List[LlmReconMention] = Field(default_factory=list, description="Известные персонажи из списка, которые есть в главе")
+    newly_discovered_names: List[str] = Field(default_factory=list, description="Имена новых персонажей")
+
+
 class LlmVoiceState(PydanticBaseModel):
     age_group: str = Field(..., description="child | teen | adult | elderly")
     voice_description: str = Field(..., description="Как звучит голос, на русском")
@@ -397,6 +420,28 @@ class LlmVoiceState(PydanticBaseModel):
 class LlmVisualState(PydanticBaseModel):
     description: str = Field(..., description="Внешность и одежда в этой главе, на русском")
     image_prompt: Optional[str] = Field(None, description="Промпт для генерации, на английском")
+
+
+FACT_KINDS_STATE = ("status", "relation", "secret")          # могут устареть: патч их видит и закрывает
+FACT_KINDS_DETAIL = ("trait", "skill", "appearance", "past", "health", "quirk")  # копятся вслепую
+FACT_KINDS = FACT_KINDS_STATE + FACT_KINDS_DETAIL
+
+
+class LlmFact(PydanticBaseModel):
+    fact: str = Field(..., description="Один факт, коротко, на русском")
+    kind: str = Field(..., description=" | ".join(FACT_KINDS))
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce(cls, data: Any):
+        if isinstance(data, dict) and isinstance(data.get("kind"), str):
+            kind = data["kind"].strip().lower()
+            data["kind"] = kind if kind in FACT_KINDS else "quirk"
+        return data
+
+
+class LlmCardCompact(PydanticBaseModel):
+    card: str = Field(..., description="Сжатая карточка")
 
 
 class LlmCharacterPatch(PydanticBaseModel):
@@ -412,12 +457,20 @@ class LlmCharacterPatch(PydanticBaseModel):
     voice_profile: Optional[str] = Field(None, description="Теги голоса; новому персонажу обязательно, известному — только если пусто")
     timeline_visual_update: Optional[LlmVisualState] = None
     timeline_voice_update: Optional[LlmVoiceState] = None
+    # Режим facts
+    personal_name: Optional[str] = Field(None, description="Личное имя, если глава ВПЕРВЫЕ его назвала, а персонаж записан ролью")
+    new_facts: Optional[List[LlmFact]] = Field(None, description="Новые факты этой главы")
+    retired_facts: Optional[List[str]] = Field(None, description="id фактов из state_facts, которые перестали быть верными")
 
     @model_validator(mode="before")
     @classmethod
     def coerce(cls, data: Any):
         if not isinstance(data, dict):
             return data
+        if data.get("retired_facts") is not None:
+            data["retired_facts"] = [str(x).strip() for x in data["retired_facts"] if x is not None]
+        if isinstance(data.get("new_facts"), list):
+            data["new_facts"] = [f for f in data["new_facts"] if isinstance(f, dict) and str(f.get("fact") or "").strip()]
         if "voice_base" in data and "voice_profile" not in data:  # старое имя поля
             data["voice_profile"] = data.pop("voice_base")
         for key in ("entity_type", "role_tier", "gender"):

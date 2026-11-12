@@ -63,13 +63,18 @@ _SCENARIO_MAX_ATTEMPTS_DEFAULT = 3
 _SCENARIO_PARALLEL_CHUNKS_DEFAULT = 4
 _CHARACTER_REF_STYLE_DEFAULT = "name"  # numeric: c1, c2... | name: каноническое имя персонажа
 _CHARACTER_PATCH_BATCH_DEFAULT = 8
+# rewrite: патч переписывает описание каждого упомянутого персонажа (до 2026-11-12);
+# card: описание — карточка личности без событий, патч только для тех, у кого глава ее изменила;
+# facts: card + короткий портрет (бюджет) и факты отдельным списком (docs/experiments/2026-11-13_character-cards.md)
+_CHARACTER_DESCRIPTION_MODE_DEFAULT = os.environ.get("CHARACTER_DESCRIPTION_MODE", "facts")
 _CHARACTER_CALL_ATTEMPTS_DEFAULT = 3  # попыток на разведку и на каждую пачку патча
 _LLM_REQUEST_TIMEOUT_DEFAULT = 1200  # сек; глава на 43k символов генерируется ~5 минут
 # Таймаут по этапам ≈ 2x максимума реальных вызовов в прогонах ноября 2026 (DeepSeek, DeepInfra):
 # recon макс. 108 с, patch 334 с, summary 65 с, sound_design (с reasoning) 159 с. Зависший провайдер
 # иначе съедает весь таймаут: 2026-11-12 sound_design молчал 600 с, повтор ответил за 2 минуты.
 _LLM_TIMEOUT_BY_STAGE_DEFAULT = {"character_recon": 240, "character_patch": 600, "chapter_summary": 180,
-                                 "emotion_analysis": 180, "sound_design": 360, "speaker_resolution": 300, "casting": 300, "ambient_design": 120}
+                                 "emotion_analysis": 180, "sound_design": 360, "speaker_resolution": 300, "casting": 300, "ambient_design": 120,
+                                 "character_card_compact": 120}
 _SCENARIO_CHUNK_SIZE_DEFAULT = 45_000  # страховка для гигантских глав; см. docs/experiments/2026-11-06_chunking.md
 
 # Temp Defaults
@@ -182,6 +187,9 @@ def __getattr__(name: str):
         return _get_db_setting("character_ref_style", _CHARACTER_REF_STYLE_DEFAULT)
     elif name == "CHARACTER_CALL_ATTEMPTS":
         return int(_get_db_setting("character_call_attempts", _CHARACTER_CALL_ATTEMPTS_DEFAULT))
+    elif name == "CHARACTER_DESCRIPTION_MODE":
+        return os.environ.get("CHARACTER_DESCRIPTION_MODE") or _get_db_setting(
+            "character_description_mode", _CHARACTER_DESCRIPTION_MODE_DEFAULT)
     elif name == "CHARACTER_PATCH_BATCH":
         return int(_get_db_setting("character_patch_batch", _CHARACTER_PATCH_BATCH_DEFAULT))
     elif name == "SCENARIO_PARALLEL_CHUNKS":

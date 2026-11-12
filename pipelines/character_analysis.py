@@ -12,7 +12,8 @@ import config
 from core.book_repository import BookRepository
 from core.data_models import (
     Character, CharacterArchive, CharacterType, ChapterStatus,
-    CharacterVoiceState, CharacterVisualState, LlmReconResult, LlmCharacterPatchList, LlmCharacterPatch,
+    CharacterVoiceState, CharacterVisualState, LlmReconResult, LlmCharacterPatchList, LlmCharacterPatch, LlmReconCardResult,
+    LlmCardCompact, FACT_KINDS_STATE,
 )
 from services.model_manager import ModelManager
 from pipelines import prompts
@@ -155,19 +156,43 @@ class CharacterAnalysisPipeline:
         summary = summary_archive.summaries.get(chapter_id)
         chapter_summary_text = summary.synopsis if summary else None
 
+        card_mode = self._card_mode()
         chapter_progress("Разведка...")
-        recon_result = self._call_with_retries(
-            lambda: self._perform_recon(master_archive, chapter_text, chapter_summary_text), "разведка")
+        if card_mode:
+            recon_result = self._call_with_retries(
+                lambda: self._perform_recon_card(master_archive, chapter_text, chapter_summary_text), "разведка")
+            mentioned_refs = [m.ref for m in recon_result.mentioned]
+        else:
+            recon_result = self._call_with_retries(
+                lambda: self._perform_recon(master_archive, chapter_text, chapter_summary_text), "разведка")
+            mentioned_refs = recon_result.mentioned_existing_refs
 
-        logger.info(f"🔍 Recon: Найдено известных: {len(recon_result.mentioned_existing_refs)}, новых имен: {len(recon_result.newly_discovered_names)}")
-        if not recon_result.mentioned_existing_refs and not recon_result.newly_discovered_names:
+        logger.info(f"🔍 Recon: Найдено известных: {len(mentioned_refs)}, новых имен: {len(recon_result.newly_discovered_names)}")
+        if not mentioned_refs and not recon_result.newly_discovered_names:
             logger.info(f"В главе {chapter_id} персонажи не обнаружены.")
             return
 
         chapter_key = f"vol_{vol_num}_chap_{chap_num}"
         refs = self._assign_refs(master_archive.characters)
-        known = [refs[r] for r in dict.fromkeys(recon_result.mentioned_existing_refs) if r in refs]
-        bad_refs = [r for r in recon_result.mentioned_existing_refs if r not in refs]
+        bad_refs = [r for r in mentioned_refs if r not in refs]
+        if card_mode:
+            # Действие пишет разведка; в патч идут только персонажи, у которых глава меняет карточку
+            changed = []
+            for m in recon_result.mentioned:
+                char = refs.get(m.ref)
+                if not char:
+                    continue
+                if m.action and m.action.strip():
+                    char.chapter_mentions[chapter_id] = m.action.strip()
+                if m.card_changed and char not in changed:
+                    changed.append(char)
+            self.stats["recon_mentioned"] += len(mentioned_refs) - len(bad_refs)
+            self.stats["recon_card_changed"] += len(changed)
+            logger.info(f"🗂 Карточка изменилась у {len(changed)} из {len(mentioned_refs) - len(bad_refs)}: "
+                        + "; ".join(f"{m.ref} — {m.why or '?'}" for m in recon_result.mentioned if m.card_changed))
+            known = changed
+        else:
+            known = [refs[r] for r in dict.fromkeys(mentioned_refs) if r in refs]
         if bad_refs:
             self.stats["recon_unknown_refs"] += len(bad_refs)
             logger.warning(f"Recon вернул неизвестные ref: {bad_refs}")
@@ -273,6 +298,65 @@ class CharacterAnalysisPipeline:
         prompt = prompts.format_character_recon_prompt(chapter_text, known_chars_json, chapter_summary)
         return fast_llm.call_for_pydantic(LlmReconResult, prompt, prompt_type="character_recon")
 
+    @staticmethod
+    def _description_mode() -> str:
+        return str(getattr(config, "CHARACTER_DESCRIPTION_MODE", "rewrite") or "rewrite").lower()
+
+    def _card_mode(self) -> bool:
+        return self._description_mode() in ("card", "facts")
+
+    def _facts_mode(self) -> bool:
+        return self._description_mode() == "facts"
+
+    @staticmethod
+    def _state_facts(char: Character) -> List[dict]:
+        return [{"id": f["id"], "fact": f["fact"], "kind": f["kind"]} for f in (char.facts or [])
+                if f.get("kind") in FACT_KINDS_STATE and not f.get("until")]
+
+    def _add_facts(self, char: Character, patch: LlmCharacterPatch, chapter_id: str):
+        """Новые факты с id f1, f2… и закрытие устаревших (until = эта глава)."""
+        facts = list(char.facts or [])
+        if patch.retired_facts:
+            retire = set(patch.retired_facts)
+            for f in facts:
+                if f["id"] in retire and not f.get("until") and f.get("kind") in FACT_KINDS_STATE:
+                    f["until"] = chapter_id
+                    self.stats["facts_retired"] += 1
+        next_id = max((int(f["id"][1:]) for f in facts if str(f.get("id", "")).startswith("f")
+                       and f["id"][1:].isdigit()), default=0)
+        for nf in patch.new_facts or []:
+            next_id += 1
+            facts.append({"id": f"f{next_id}", "fact": nf.fact.strip(), "kind": nf.kind, "chapter": chapter_id,
+                          "until": None})
+            self.stats["facts_added"] += 1
+        char.facts = facts
+
+    def _fit_card(self, name: str, card: str) -> str:
+        """Карточка длиннее 1000 символов — отдельный дешевый вызов сжатия (без текста главы)."""
+        if len(card) <= 1000:
+            return card
+        self.stats["card_over_budget"] += 1
+        try:
+            llm = self.model_manager.get_llm_service('character_analyzer')
+            result = llm.call_for_pydantic(LlmCardCompact, prompts.format_card_compact_prompt(name, card),
+                                           prompt_type="character_card_compact")
+            if result and result.card and len(result.card.strip()) < len(card):
+                self.stats["card_compacted"] += 1
+                return result.card.strip()
+        except Exception as e:
+            logger.warning(f"Сжатие карточки '{name}' не удалось: {e}")
+        return card
+
+    def _perform_recon_card(self, archive: CharacterArchive, chapter_text: str,
+                            chapter_summary: Optional[str] = None) -> Optional[LlmReconCardResult]:
+        fast_llm = self.model_manager.get_llm_service('character_analyzer')
+        refs = self._assign_refs(archive.characters)
+        known = [{"ref": ref, "name": c.name, "aliases": c.aliases, "card": c.description or ""}
+                 for ref, c in refs.items()]
+        known_json = json.dumps(known, ensure_ascii=False) if known else "[]"
+        prompt = prompts.format_character_recon_card_prompt(chapter_text, known_json, chapter_summary)
+        return fast_llm.call_for_pydantic(LlmReconCardResult, prompt, prompt_type="character_recon")
+
     def _perform_operation(self, refs: dict, to_update: List[Character], candidates: List[str],
                            archive: CharacterArchive, text: str, vol: int, chap: int) -> Optional[LlmCharacterPatchList]:
         powerful_llm = self.model_manager.get_llm_service('scenario_generator')
@@ -290,13 +374,16 @@ class CharacterAnalysisPipeline:
             "description": c.description,
             "visual_base": c.visual_base or "",
             "voice_profile": c.voice_profile or "",
+            **({"state_facts": self._state_facts(c)} if self._facts_mode() else {}),
         } for c in to_update], ensure_ascii=False, indent=1)
         directory_json = json.dumps([
             {"ref": ref, "name": c.name, "aliases": c.aliases,
              "description": (c.spoiler_free_description or c.description or "")[:150]}
             for ref, c in refs.items() if c.id not in update_ids
         ], ensure_ascii=False)
-        prompt = prompts.format_character_patch_prompt(to_update_json, candidates, directory_json, text, vol, chap)
+        prompt = prompts.format_character_patch_prompt(to_update_json, candidates, directory_json, text, vol, chap,
+                                                       card_mode=self._card_mode(),
+                                                       facts_mode=self._facts_mode())
         return powerful_llm.call_for_pydantic(LlmCharacterPatchList, prompt, prompt_type="character_patch")
 
     def _resolve_patch(self, patch: LlmCharacterPatch, refs: dict, archive: CharacterArchive) -> Optional[Character]:
@@ -411,6 +498,8 @@ class CharacterAnalysisPipeline:
     def _create_character(self, patch: LlmCharacterPatch, chapter_id: str, book_id: str) -> Character:
         description = (patch.description_update or "").strip() or "Новый персонаж."
         name = patch.name.strip()
+        if self._facts_mode():
+            description = self._fit_card(name, description)
         char = Character(
             id=uuid4(), book_id=book_id, name=name,
             entity_type=patch.entity_type or CharacterType.PERSON,
@@ -422,6 +511,8 @@ class CharacterAnalysisPipeline:
             chapter_mentions={chapter_id: patch.current_chapter_action} if patch.current_chapter_action else {},
         )
         self._apply_timelines(char, patch, chapter_id)
+        if self._facts_mode() and patch.new_facts:
+            self._add_facts(char, patch, chapter_id)
         char.embedding = self.model_manager.get_embedding_service().get_embedding(f"{char.name}. {description}")
         return char
 
@@ -466,6 +557,16 @@ class CharacterAnalysisPipeline:
         if patch.aliases:
             new_aliases = {a.strip() for a in patch.aliases if a and a.strip() != char.name and not self._is_role_name(a)}
             char.aliases = sorted(set(char.aliases) | new_aliases)
+        # Личное имя вместо роли («Добродетельная супруга» -> «Лишу»): модель часто кладет имя в алиасы,
+        # поэтому отдельное поле и то же правило повышения, что для `name`
+        personal = (patch.personal_name or "").strip()
+        if personal and personal != char.name and allow_rename and self._is_name_upgrade(char.name, personal, taken):
+            logger.info(f"   - ЛИЧНОЕ ИМЯ: {char.name} -> {personal}")
+            char.aliases = sorted((set(char.aliases) | {char.name}) - {personal})
+            char.name = personal
+            self.stats["personal_name_renames"] += 1
+        if self._facts_mode() and (patch.new_facts or patch.retired_facts):
+            self._add_facts(char, patch, chapter_id)
 
         if patch.gender and not char.gender:
             char.gender = patch.gender
@@ -483,6 +584,8 @@ class CharacterAnalysisPipeline:
             self.stats["voice_profile_overwrite_blocked"] += 1
 
         new_description = (patch.description_update or "").strip()
+        if new_description and self._facts_mode():
+            new_description = self._fit_card(char.name, new_description)
         if new_description and new_description != (char.description or "").strip():
             char.description_timeline[chapter_id] = new_description
             char.description = new_description
