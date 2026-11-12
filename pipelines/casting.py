@@ -6,6 +6,7 @@
 но не для тех, чей голос уже звучит в озвучке).
 """
 import logging
+import re
 from typing import List, Optional
 
 from sqlmodel import select
@@ -250,3 +251,62 @@ def update_profile(book_name: str, name: str, changes: dict) -> dict:
         session.add(db_char)
         session.commit()
     return {"name": name, "profile": profile, "instructs": vc["instructs"]}
+
+
+def design_candidate(book_name: str, tts_service, name: str, variant: str, changes: dict,
+                     seed: Optional[int] = 42) -> dict:
+    """
+    Кандидат голоса для выбора на слух: профиль персонажа + правки, голос в <voice_id>__<variant>.
+    Назначенный голос и основной профиль не меняются — выбор через pick_candidate.
+    """
+    from core.data_models import LlmVoiceCast
+    repo = BookRepository(book_name)
+    char = next((c for c in repo.get_characters() if c.name == name), None)
+    if char is None or not (char.voice_casting or {}).get("profile"):
+        raise KeyError(f"У '{name}' нет профиля кастинга")
+    if not re.fullmatch(r"[a-z0-9_]+", variant):
+        raise ValueError("имя варианта: латиница, цифры, _")
+    vc = dict(char.voice_casting)
+    profile = LlmVoiceCast(name=name, **{**vc["profile"], **changes}).model_dump(exclude={"name"})
+    if any(k in changes for k in ("age", "gender", "pitch")):
+        profile["instruct_zh"] = ""
+    instructs = casting.instruct_variants(profile)
+    logger.info(f"🎨 Кандидат {name}/{variant}")
+    result = _design_one(tts_service, profile, instructs, seed)
+    voice_id = f"{casting.voice_id_for(book_name, name)}__{variant}"
+    _save_voice(voice_id, result["wav"])
+    candidates = dict(vc.get("candidates") or {})
+    candidates[variant] = {"voice_id": voice_id, "profile": profile, "f0": result["f0"], "cer": result["cer"],
+                           "instruct_used": result["instruct"], "needs_review": result["needs_review"]}
+    vc["candidates"] = candidates
+    with repo.get_session() as session:
+        db_char = session.get(Character, char.id)
+        db_char.voice_casting = vc
+        session.add(db_char)
+        session.commit()
+    return {"name": name, "variant": variant, **candidates[variant]}
+
+
+def pick_candidate(book_name: str, name: str, variant: str) -> dict:
+    """Выбранный на слух кандидат становится голосом персонажа (voice_base) и его основным профилем."""
+    repo = BookRepository(book_name)
+    char = next((c for c in repo.get_characters() if c.name == name), None)
+    cand = ((char.voice_casting or {}).get("candidates") or {}).get(variant) if char else None
+    if cand is None:
+        raise KeyError(f"Нет кандидата '{variant}' у '{name}'")
+    with repo.get_session() as session:
+        entries = session.exec(select(ScenarioEntry)).all()
+        links = session.exec(select(SpeakerLink)).all()
+    if str(char.id) in CastingPipeline._voiced_character_ids(entries, links):
+        raise ValueError(f"Голос '{name}' уже звучит в озвучке — менять его нельзя")
+    vc = dict(char.voice_casting)
+    vc.update(profile=cand["profile"], instructs=casting.instruct_variants(cand["profile"]),
+              status=casting.STATUS_DESIGNED, voice_id=cand["voice_id"], f0=cand["f0"], cer=cand["cer"],
+              instruct_used=cand["instruct_used"], needs_review=cand["needs_review"], picked=variant)
+    with repo.get_session() as session:
+        db_char = session.get(Character, char.id)
+        db_char.voice_casting = vc
+        db_char.voice_base = cand["voice_id"]
+        session.add(db_char)
+        session.commit()
+    return {"name": name, "picked": variant, "voice": cand["voice_id"]}

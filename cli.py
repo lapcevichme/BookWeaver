@@ -12,6 +12,8 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py link confirm|reject <книга> --chapter ID --label 'Красавец-евнух'
     uv run cli.py cast profile|design <книга> [--character Имя] [--force] # кастинг: профиль от LLM, затем голос
     uv run cli.py cast set <книга> --character Имя --age 22 [--pitch ...]  # правка профиля, затем design --force
+    uv run cli.py cast design <книга> --character Имя --variant low --pitch low   # кандидат для выбора на слух
+    uv run cli.py cast pick <книга> --character Имя --variant low                 # назначить кандидата
     uv run cli.py cast generics                                           # доп. голоса массовки generic_*_2/_3
     uv run cli.py menu                      # старое интерактивное меню
 
@@ -410,11 +412,21 @@ def cmd_cast(args) -> dict:
         return {"book": args.book, "action": "profile",
                 **CastingPipeline(_app().model_manager).run(args.book, names=args.character or None, force=args.force)}
     from pipelines import casting as cp
+    changes = {k: v for k, v in {"age": args.age, "gender": args.gender, "pitch": args.pitch,
+                                 "timbre": args.timbre, "pace": args.pace, "manner": args.manner}.items() if v is not None}
+    one = args.character[0] if args.character and len(args.character) == 1 else None
+    if args.action == "pick":
+        if not (one and args.variant):
+            raise CliError("cast pick: нужны один --character и --variant")
+        try:
+            return {"book": args.book, "action": "pick", **cp.pick_candidate(args.book, one, args.variant)}
+        except KeyError as e:
+            raise CliError(str(e.args[0]), EXIT_NOT_FOUND)
+        except ValueError as e:
+            raise CliError(str(e))
     if args.action == "set":
-        if not args.character or len(args.character) != 1:
+        if not one:
             raise CliError("cast set: нужен ровно один --character")
-        changes = {k: v for k, v in {"age": args.age, "gender": args.gender, "pitch": args.pitch,
-                                     "timbre": args.timbre, "pace": args.pace, "manner": args.manner}.items() if v is not None}
         if not changes:
             raise CliError("cast set: укажите хотя бы одно поле (--age, --pitch, --timbre, --pace, --manner, --gender)")
         try:
@@ -428,6 +440,13 @@ def cmd_cast(args) -> dict:
         raise CliError("Сервер озвучки недоступен (tools/qwen_tts_server, порт 9233)")
     if _on_battery():
         logger.warning("⚠️ Ноутбук на батарее: VoiceDesign грузит все ядра. Подключите зарядку.")
+    if args.action == "design" and args.variant:
+        if not one:
+            raise CliError("cast design --variant: нужен ровно один --character")
+        try:
+            return {"book": args.book, "action": "candidate", **cp.design_candidate(args.book, tts, one, args.variant, changes)}
+        except KeyError as e:
+            raise CliError(str(e.args[0]), EXIT_NOT_FOUND)
     if args.action == "design":
         return {"book": args.book, "action": "design",
                 **cp.design_voices(args.book, tts, names=args.character or None, redo=args.force)}
@@ -571,7 +590,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_link)
 
     p = sub.add_parser("cast", parents=[common], help="кастинг голосов: profile (LLM), design (голоса), generics (массовка)")
-    p.add_argument("action", choices=["profile", "set", "design", "generics"])
+    p.add_argument("action", choices=["profile", "set", "design", "pick", "generics"])
+    p.add_argument("--variant", help="design: сделать кандидата <voice>__<variant> с правками профиля; pick: выбрать его")
     p.add_argument("book", nargs="?", default="", help="для generics не нужна")
     p.add_argument("--character", action="append", help="только этот персонаж (можно несколько раз)")
     p.add_argument("--force", action="store_true", help="profile: переспросить; design/generics: пересоздать (кроме уже озвученных)")
