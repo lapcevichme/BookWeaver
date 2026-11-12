@@ -67,17 +67,56 @@ def convert_tts_tags(text: str) -> str:
     return text.strip()
 
 
+def _cer_normalize(text: str) -> str:
+    """Только буквы и цифры, нижний регистр, ё = е: пунктуацию и регистр Whisper ставит как хочет."""
+    return re.sub(r"[\W_]+", "", (text or "").lower().replace("ё", "е"))
+
+
+def calculate_cer(reference: str, hypothesis: str) -> float:
+    """
+    Доля ошибок по символам (расстояние Левенштейна / длина эталона) после нормализации.
+    Используется для проверки озвучки: эталон — текст реплики, гипотеза — распознанное Whisper.
+    """
+    ref, hyp = _cer_normalize(reference), _cer_normalize(hypothesis)
+    if not ref:
+        return 0.0 if not hyp else 1.0
+    prev = list(range(len(hyp) + 1))
+    for i, rc in enumerate(ref, 1):
+        cur = [i]
+        for j, hc in enumerate(hyp, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (rc != hc)))
+        prev = cur
+    return prev[-1] / len(ref)
+
+
+_LATIN_STRESSED = str.maketrans("áéóúíýÁÉÓÚÍÝ", "аеоуиуАЕОУИУ")
+_CYR = "а-яёА-ЯЁ"
+
+
+def strip_stress_marks(text: str) -> str:
+    """
+    Убирает знаки ударения: Qwen3-TTS их не понимает и читает ударную гласную как «йо»/«ю»
+    («го́род» → «гойород», docs/experiments/2026-11-12_from-zero-cli.md). Латинские á/é/ó
+    внутри русских слов (старый словарь: «Маомáо») заменяются русскими буквами.
+    """
+    text = text.replace("\u0301", "").replace("\u0300", "")
+    return re.sub(rf"(?<=[{_CYR}])[áéóúíýÁÉÓÚÍÝ]|[áéóúíýÁÉÓÚÍÝ](?=[{_CYR}])",
+                  lambda m: m.group(0).translate(_LATIN_STRESSED), text)
+
+
 def preprocess_text_for_tts(text: str, dictionary: dict) -> str:
     """
     Полный конвейер предобработки текста для TTS:
     1. Заменяет теги пауз переносом строки, остальные теги вырезает.
     2. Применяет словарь произношений.
-    3. Очищает от нежелательных символов и пунктуационных дублей.
+    3. Убирает знаки ударения (Qwen их не понимает).
+    4. Очищает от нежелательных символов и пунктуационных дублей.
     """
     text = convert_tts_tags(text)
     for word, pronunciation in dictionary.items():
         text = re.sub(r'\b' + re.escape(word) + r'\b', pronunciation, text, flags=re.IGNORECASE)
 
+    text = strip_stress_marks(text)
     text = text.replace('«', '').replace('»', '').replace('"', '')
     text = text.replace('!.', '!').replace('.!', '!')
     text = text.replace('?.', '?').replace('.?', '?')

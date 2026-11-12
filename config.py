@@ -53,6 +53,10 @@ _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFO
 # sound_design с reasoning: без него хуже подбор SFX.
 _OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get("OPENROUTER_REASONING_BY_STAGE", '{"emotion_analysis": "none"}')
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
+# Проверка озвучки Whisper base: на хорошем аудио CER до ~0.25, на именах до 0.43; дефекты (утечка
+# образца, повторы, мусор) — 0.3–2.6. Калибровка 2026-11-12 на 149 репликах (docs/experiments/2026-11-12_from-zero-cli.md).
+_TTS_CER_THRESHOLD_DEFAULT = 0.35   # выше — попытка бракуется и повторяется
+_TTS_CER_ACCEPT_MAX_DEFAULT = 0.50  # после всех попыток лучшая принимается, если не хуже этого
 _SCENARIO_MAX_ATTEMPTS_DEFAULT = 3
 _SCENARIO_PARALLEL_CHUNKS_DEFAULT = 4
 _CHARACTER_REF_STYLE_DEFAULT = "name"  # numeric: c1, c2... | name: каноническое имя персонажа
@@ -164,6 +168,10 @@ def __getattr__(name: str):
         return _get_db_setting("openrouter_reasoning_effort", _OPENROUTER_REASONING_EFFORT_DEFAULT)
     elif name == "OPENROUTER_REASONING_BY_STAGE":
         return _get_db_setting("openrouter_reasoning_by_stage", _OPENROUTER_REASONING_BY_STAGE_DEFAULT)
+    elif name == "TTS_CER_THRESHOLD":
+        return float(_get_db_setting("tts_cer_threshold", _TTS_CER_THRESHOLD_DEFAULT))
+    elif name == "TTS_CER_ACCEPT_MAX":
+        return float(_get_db_setting("tts_cer_accept_max", _TTS_CER_ACCEPT_MAX_DEFAULT))
     elif name == "SCENARIO_MIN_COVERAGE":
         return float(_get_db_setting("scenario_min_coverage", _SCENARIO_MIN_COVERAGE_DEFAULT))
     elif name == "SCENARIO_MAX_ATTEMPTS":

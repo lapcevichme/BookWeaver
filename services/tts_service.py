@@ -77,41 +77,48 @@ class TTSService:
             except Exception as e:
                 logger.error(f"Ошибка чтения файла транскрипции {txt_path}: {e}")
 
-        model = self.whisper_model
-        if not model:
+        if not self.whisper_model:
             logger.error(f"Whisper недоступен, текст референса {speaker_wav_path.name} не получен")
             return ""
 
-        try:
-            logger.info(f"Транскрипция референса через C++ Whisper (pywhispercpp): {speaker_wav_path.name}")
-            import subprocess
-            import tempfile
-            
-            # Whisper требует 16kHz mono WAV
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
-                tmp_wav_path = Path(tmp_wav.name)
-            
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", path_str, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(tmp_wav_path)],
-                check=True,
-                capture_output=True
-            )
-            segments = model.transcribe(str(tmp_wav_path), language="ru")
-            if tmp_wav_path.exists():
-                tmp_wav_path.unlink()
-                
-            text = " ".join([s.text for s in segments]).strip()
-
+        logger.info(f"Транскрипция референса через C++ Whisper (pywhispercpp): {speaker_wav_path.name}")
+        text = self.transcribe(speaker_wav_path)
+        if text:
             try:
                 txt_path.write_text(text, encoding="utf-8")
             except Exception as e:
                 logger.error(f"Не удалось записать файл транскрипции {txt_path}: {e}")
-
             self._reference_transcription_cache[path_str] = text
-            return text
-        except Exception as e:
-            logger.error(f"Ошибка транскрипции референса pywhispercpp: {e}")
+        return text
+
+    def transcribe(self, wav_path: Path) -> str:
+        """
+        Распознает аудио без кэша и без записи файлов. Для проверки озвучки: повторная
+        попытка пишет в тот же файл, и кэш по пути вернул бы текст прошлой попытки.
+        """
+        model = self.whisper_model
+        if not model:
             return ""
+        import subprocess
+        import tempfile
+        tmp_wav_path = None
+        try:
+            # Whisper требует 16kHz mono WAV
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
+                tmp_wav_path = Path(tmp_wav.name)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(wav_path), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(tmp_wav_path)],
+                check=True,
+                capture_output=True
+            )
+            segments = model.transcribe(str(tmp_wav_path), language="ru")
+            return " ".join([s.text for s in segments]).strip()
+        except Exception as e:
+            logger.error(f"Ошибка транскрипции pywhispercpp ({wav_path.name}): {e}")
+            return ""
+        finally:
+            if tmp_wav_path and tmp_wav_path.exists():
+                tmp_wav_path.unlink()
 
     def synthesize(self, text: str, speaker_wav_path: Path, emotion: str = None) -> bytes | None:
         """Синтез речи через API Qwen3-TTS."""

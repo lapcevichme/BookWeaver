@@ -140,6 +140,8 @@ class TTSPipeline:
                     
                     last_cer = 0.0
                     total_synthesis_time = 0.0
+                    cer_threshold, cer_accept_max = config.TTS_CER_THRESHOLD, config.TTS_CER_ACCEPT_MAX
+                    best = None  # (cer, wav_bytes, duration_ms) лучшей забракованной попытки
                     
                     while attempt < max_attempts and not success:
                         attempt += 1
@@ -167,12 +169,19 @@ class TTSPipeline:
                                 duration_sec = audio_duration_ms / 1000
                                 is_too_long = word_count > 0 and (duration_sec / word_count) > 4.0
                                 
-                                whisper_text = tts_service._get_prompt_text(audio_path)
+                                if tts_service.whisper_model is None:
+                                    # Без Whisper проверить нечем: не браковать все подряд (CER пустой строки = 1.0)
+                                    logger.warning("⚠️ Whisper недоступен: озвучка принимается без проверки CER.")
+                                    success = True
+                                    continue
+                                whisper_text = tts_service.transcribe(audio_path)
                                 last_cer = text_utils.calculate_cer(processed_text, whisper_text)
-                                
-                                if last_cer <= 0.25 and not is_too_long:
+
+                                if last_cer <= cer_threshold and not is_too_long:
                                     success = True
                                 else:
+                                    if not is_too_long and (best is None or last_cer < best[0]):
+                                        best = (last_cer, wav_bytes, audio_duration_ms)
                                     if audio_path.exists(): audio_path.unlink()
                                     metrics_collector.increment("tts_hallucinations")
                             except Exception as e:
@@ -180,7 +189,16 @@ class TTSPipeline:
                                 success = True 
                         else:
                             break
-                            
+
+                    if not success and best and best[0] <= cer_accept_max:
+                        # Постоянный шум Whisper (имена) не должен ронять главу: берем лучшую попытку
+                        last_cer, wav_bytes, audio_duration_ms = best
+                        with open(audio_path, "wb") as f:
+                            f.write(wav_bytes)
+                        success = True
+                        logger.warning(f"⚠️ Реплика {i + 1}: принята лучшая попытка с CER {last_cer:.2f} "
+                                       f"(порог {cer_threshold:.2f}): {processed_text[:60]!r}")
+
                     metrics_collector.log_audio_gen(AudioMetrics(
                         entry_id=str(entry.id),
                         speaker=character_name or "Narrator",

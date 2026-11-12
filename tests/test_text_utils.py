@@ -41,3 +41,26 @@ class TestEmotionPrompt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCalculateCer(unittest.TestCase):
+    def test_punctuation_case_and_yo_do_not_count(self):
+        from utils.text_utils import calculate_cer
+        self.assertEqual(calculate_cer("Ещё раз, Маомао!", "еще раз маомао"), 0.0)
+
+    def test_errors_relative_to_reference(self):
+        from utils.text_utils import calculate_cer
+        self.assertAlmostEqual(calculate_cer("абвг", "абвд"), 0.25)
+        self.assertEqual(calculate_cer("абвг", ""), 1.0)
+        self.assertEqual(calculate_cer("", ""), 0.0)
+
+
+class TestStressMarks(unittest.TestCase):
+    def test_combining_and_latin_stress_removed(self):
+        from utils.text_utils import preprocess_text_for_tts
+        self.assertEqual(preprocess_text_for_tts("Он прошёл в го́род.", {}), "Он прошёл в город.")
+        self.assertEqual(preprocess_text_for_tts("Маомао пришла.", {"Маомао": "Маомáо"}), "Маомао пришла.")
+
+    def test_latin_words_untouched(self):
+        from utils.text_utils import preprocess_text_for_tts
+        self.assertEqual(preprocess_text_for_tts("Café Noir открылось.", {}), "Café Noir открылось.")
