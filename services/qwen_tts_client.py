@@ -12,8 +12,9 @@ class QwenTTSClient:
     Поддерживает Zero-shot Voice Cloning, Voice Design и кэширование профилей голоса.
     """
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, timeout: float = 600):
         self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
         self.tts_endpoint = f"{self.base_url}/api/tts"
         self.status_endpoint = f"{self.base_url}/api/status"
 
@@ -78,7 +79,7 @@ class QwenTTSClient:
                 f"Запрос Qwen3-TTS: {len(text)} симв | Язык: {language} | "
                 f"Voice: {voice_id or (prompt_wav_path.name if prompt_wav_path else 'None')} | Instruct: '{instruct_text}'"
             )
-            response = requests.post(self.tts_endpoint, data=data, files=files if files else None, timeout=90)
+            response = requests.post(self.tts_endpoint, data=data, files=files if files else None, timeout=self.timeout)
 
             if response.status_code == 200:
                 return response.content

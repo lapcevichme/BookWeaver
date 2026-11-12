@@ -15,7 +15,7 @@ class TTSService:
 
     def __init__(self):
         tts_url = getattr(config, "TTS_API_URL", getattr(config, "COSYVOICE_API_URL", "http://localhost:9233"))
-        self.tts_client = QwenTTSClient(base_url=tts_url)
+        self.tts_client = QwenTTSClient(base_url=tts_url, timeout=getattr(config, "TTS_REQUEST_TIMEOUT", 600))
         # Обратная совместимость
         self.cosy_client = self.tts_client
 

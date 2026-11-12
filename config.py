@@ -57,6 +57,8 @@ _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
 # образца, повторы, мусор) — 0.3–2.6. Калибровка 2026-11-12 на 149 репликах (docs/experiments/2026-11-12_from-zero-cli.md).
 _TTS_CER_THRESHOLD_DEFAULT = 0.35   # выше — попытка бракуется и повторяется
 _TTS_CER_ACCEPT_MAX_DEFAULT = 0.50  # после всех попыток лучшая принимается, если не хуже этого
+# Синтез одной реплики: на GPU секунды, на CPU (0.6B, RTF ~8) реплика на 12 с идет ~100 с — 90 с не хватало
+_TTS_REQUEST_TIMEOUT_DEFAULT = 600
 _SCENARIO_MAX_ATTEMPTS_DEFAULT = 3
 _SCENARIO_PARALLEL_CHUNKS_DEFAULT = 4
 _CHARACTER_REF_STYLE_DEFAULT = "name"  # numeric: c1, c2... | name: каноническое имя персонажа
@@ -193,6 +195,8 @@ def __getattr__(name: str):
             except ValueError:
                 value = {}
         return value if isinstance(value, dict) else {}
+    elif name == "TTS_REQUEST_TIMEOUT":
+        return float(_get_db_setting("tts_request_timeout", _TTS_REQUEST_TIMEOUT_DEFAULT))
     elif name == "LLM_REQUEST_TIMEOUT":
         return float(_get_db_setting("llm_request_timeout", _LLM_REQUEST_TIMEOUT_DEFAULT))
     elif name == "SCENARIO_CHUNK_SIZE":
