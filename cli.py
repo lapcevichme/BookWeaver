@@ -7,9 +7,11 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py tts <книга> vol_1_chap_1 [vol_1_chap_2 ...]
     uv run cli.py export <книга>
     uv run cli.py status <книга>
-    uv run cli.py inspect voices|emotions|coverage|characters|links <книга> [--chapter ID]
+    uv run cli.py inspect voices|emotions|coverage|characters|links|casting <книга> [--chapter ID]
     uv run cli.py link resolve|auto <книга> [--chapter ID] [--force]   # кто стоит за подписями без имени
     uv run cli.py link confirm|reject <книга> --chapter ID --label 'Красавец-евнух'
+    uv run cli.py cast profile|design <книга> [--character Имя] [--force] # кастинг: профиль от LLM, затем голос
+    uv run cli.py cast generics                                           # доп. голоса массовки generic_*_2/_3
     uv run cli.py menu                      # старое интерактивное меню
 
 Любая команда: --json (результат в stdout как JSON), -v (подробные логи). Логи всегда в stderr.
@@ -399,6 +401,42 @@ def cmd_link(args) -> dict:
             "status": link.status}
 
 
+def cmd_cast(args) -> dict:
+    if args.action != "generics":
+        _repo(args.book)
+    if args.action == "profile":
+        from pipelines.casting import CastingPipeline
+        return {"book": args.book, "action": "profile",
+                **CastingPipeline(_app().model_manager).run(args.book, names=args.character or None, force=args.force)}
+    from pipelines import casting as cp
+    tts = _app().model_manager.get_tts_service()
+    if not tts.tts_client.check_health():
+        raise CliError("Сервер озвучки недоступен (tools/qwen_tts_server, порт 9233)")
+    if _on_battery():
+        logger.warning("⚠️ Ноутбук на батарее: VoiceDesign грузит все ядра. Подключите зарядку.")
+    if args.action == "design":
+        return {"book": args.book, "action": "design",
+                **cp.design_voices(args.book, tts, names=args.character or None, redo=args.force)}
+    if args.action == "generics":
+        return {"action": "generics", **cp.design_generic_extras(tts, redo=args.force)}
+    raise CliError(f"Неизвестное действие: {args.action}")
+
+
+def cmd_inspect_casting(args) -> dict:
+    repo = _repo(args.book)
+    rows = []
+    for c in repo.get_characters():
+        vc = c.voice_casting or {}
+        p = vc.get("profile")
+        if not p:
+            continue
+        rows.append({"name": c.name, "status": vc.get("status"), "voice": c.voice_base or vc.get("voice_id", ""),
+                     "gender": p["gender"], "age": p["age"], "pitch": p["pitch"], "timbre": p["timbre"],
+                     "pace": p["pace"], "manner": p["manner"], "distinct_from": p.get("distinct_from", ""),
+                     "f0": vc.get("f0"), "instruct": (vc.get("instructs") or [""])[0]})
+    return {"book": args.book, "casting": rows}
+
+
 def cmd_inspect_characters(args) -> dict:
     from core.voices import resolve_voice
     repo = _repo(args.book)
@@ -449,6 +487,11 @@ def _human(command: str, result: dict) -> str:
         rows = [{**r, "coverage": f"{r['coverage']:.0%}" if r["coverage"] is not None else "—",
                  "max_gap": f"{r['max_gap_share']:.0%}"} for r in result["chapters"]]
         return _table(rows, ["chapter", "status", "entries", "dialogue", "coverage", "max_gap", "diagnosis"])
+    if command == "casting":
+        out = [_table(result["casting"], ["name", "status", "voice", "gender", "age", "pitch", "timbre", "pace", "manner", "f0"])]
+        for r in result["casting"]:
+            out.append(f"\n{r['name']}: {r['instruct']}\n   отличие: {r['distinct_from']}")
+        return "\n".join(out)
     if command == "links":
         rows = [{**r, "hidden": "да" if r["hidden"] else ""} for r in result["links"]]
         return _table(rows, ["chapter", "label", "kind", "target", "person_key", "confidence", "hidden", "status", "evidence"])
@@ -495,7 +538,8 @@ def build_parser() -> argparse.ArgumentParser:
                               ("emotions", cmd_inspect_emotions, "метки эмоций, паузы, старые теги"),
                               ("coverage", cmd_inspect_coverage, "покрытие текста главы сценарием"),
                               ("characters", cmd_inspect_characters, "персонажи, профиль голоса, назначенный голос"),
-                              ("links", cmd_inspect_links, "кто стоит за подписями без имени: связи и массовка")]:
+                              ("links", cmd_inspect_links, "кто стоит за подписями без имени: связи и массовка"),
+                              ("casting", cmd_inspect_casting, "профили голосов от кастинга и описания для VoiceDesign")]:
         ip = isub.add_parser(name, parents=[common], help=help_)
         ip.add_argument("book"); ip.add_argument("--chapter", help="только эта глава (vol_1_chap_1)")
         ip.set_defaults(func=func)
@@ -511,6 +555,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--label", help="подпись говорящего, например 'Красавец-евнух'")
     p.add_argument("--force", action="store_true", help="resolve: переспросить LLM о неподтвержденных связях")
     p.set_defaults(func=cmd_link)
+
+    p = sub.add_parser("cast", parents=[common], help="кастинг голосов: profile (LLM), design (голоса), generics (массовка)")
+    p.add_argument("action", choices=["profile", "design", "generics"])
+    p.add_argument("book", nargs="?", default="", help="для generics не нужна")
+    p.add_argument("--character", action="append", help="только этот персонаж (можно несколько раз)")
+    p.add_argument("--force", action="store_true", help="profile: переспросить; design/generics: пересоздать (кроме уже озвученных)")
+    p.set_defaults(func=cmd_cast)
     return parser
 
 

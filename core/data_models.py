@@ -243,7 +243,9 @@ class Character(SQLModel, table=True):
     # Версия на главе N собрана только из глав 1..N, поэтому бесспойлерна для слушателя,
     # дошедшего до N. `description` хранит последнюю версию.
     description_timeline: Dict[str, str] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
-    
+    # Кастинг (core/casting.py): профиль голоса от LLM, описание для VoiceDesign, статус и id созданного голоса.
+    voice_casting: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
+
     # Relationships
     book: "Book" = Relationship(back_populates="characters")
     scenario_entries: List["ScenarioEntry"] = Relationship(back_populates="speaker")
@@ -549,6 +551,42 @@ class LlmSpeakerResolutionList(PydanticBaseModel):
     def wrap_bare_list(cls, data: Any):
         if isinstance(data, list):
             return {"speakers": data}
+        return data
+
+
+class LlmVoiceCast(PydanticBaseModel):
+    """Базовый голос персонажа для VoiceDesign: без эмоций, только кто говорит."""
+    name: str = Field(..., description="имя персонажа ровно как во входных данных")
+    gender: Literal["male", "female"] = Field(..., description="пол голоса")
+    age: int = Field(..., description="возраст голоса в годах (по тексту; если не сказан — правдоподобная оценка)")
+    pitch: Literal["low", "medium-low", "medium", "medium-high", "high"] = Field(..., description="высота голоса относительно нормы для пола и возраста")
+    timbre: str = Field(..., description="тембр по-английски, 2-4 слова: 'warm, slightly husky'")
+    pace: Literal["slow", "moderate", "fast"] = Field(default="moderate", description="обычный темп речи")
+    manner: str = Field(..., description="манера речи по-английски, 3-6 слов, без эмоций момента: 'dry, matter-of-fact, precise'")
+    distinct_from: str = Field(default="", description="по-английски: чем голос отличается от похожих персонажей состава")
+    instruct_zh: str = Field(default="", description="то же описание голоса одной строкой на китайском (пол, возраст, высота, тембр, темп, манера)")
+
+    @field_validator("pitch", mode="before")
+    @classmethod
+    def normalize_pitch(cls, v: Any) -> str:
+        v = str(v or "").strip().lower().replace(" ", "-").replace("_", "-")
+        return v if v in ("low", "medium-low", "medium", "medium-high", "high") else "medium"
+
+    @field_validator("pace", mode="before")
+    @classmethod
+    def normalize_pace(cls, v: Any) -> str:
+        v = str(v or "").strip().lower()
+        return v if v in ("slow", "moderate", "fast") else "moderate"
+
+
+class LlmVoiceCastList(PydanticBaseModel):
+    voices: List[LlmVoiceCast] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def wrap_bare_list(cls, data: Any):
+        if isinstance(data, list):
+            return {"voices": data}
         return data
 
 

@@ -505,3 +505,41 @@ def format_speaker_resolution_prompt(chapter_id: str, chapter_text: str, synopsi
 
 ТВОЙ ОТВЕТ (ТОЛЬКО JSON):
 """
+
+
+def format_casting_prompt(candidates: List[Dict], cast: List[Dict]) -> str:
+    """Кастинг: базовый голос (без эмоций) для персонажей с репликами."""
+    from core.data_models import LlmVoiceCastList
+    schema_description = generate_human_schema(LlmVoiceCastList)
+    return f"""
+<role>
+ТЫ — РЕЖИССЕР КАСТИНГА АУДИОКНИГИ. Подбери каждому персонажу из <candidates> базовый голос: каким он звучит
+в спокойной речи. По описанию будет сгенерирован образец голоса, которым персонаж озвучивается всю книгу.
+</role>
+
+<rules>
+- Голос БАЗОВЫЙ: без эмоций момента (гнев, слезы, болезнь), только кто говорит.
+- `age` — числом, по тексту; если не сказан — правдоподобная оценка по роли и описанию. Молодая взрослая
+  героиня 17-20 лет звучит как взрослая девушка, а не как ребенок.
+- `pitch` — относительно нормы для пола и возраста. Не делай всех женщин высокими, а всех мужчин низкими.
+- Персонажи одного пола и возраста должны различаться: высотой, тембром, темпом или манерой. Смотри на весь
+  <cast>, включая уже подобранные голоса; опиши в `distinct_from`, чем голос отличается от похожих.
+- `timbre`, `manner`, `distinct_from` — по-английски, коротко. `instruct_zh` — полное описание голоса на китайском.
+- Никаких имен реальных актеров и персонажей других произведений.
+- Верни ровно по одному объекту на каждого персонажа из <candidates>.
+</rules>
+
+<cast>
+{json.dumps(cast, ensure_ascii=False, indent=1)}
+</cast>
+
+<candidates>
+{json.dumps(candidates, ensure_ascii=False, indent=1)}
+</candidates>
+
+<output_format>
+{schema_description}
+</output_format>
+
+ТВОЙ ОТВЕТ (ТОЛЬКО JSON):
+"""

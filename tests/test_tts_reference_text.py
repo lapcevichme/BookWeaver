@@ -97,5 +97,19 @@ class TestServerCloneMode(unittest.TestCase):
         self.assertEqual(set(self.server.voice_prompt_cache), {"jinshi_sick:xvec", "jinshi_sick:icl"})
 
 
+    def test_voice_design_endpoint(self):
+        class _Design:
+            def generate_voice_design(self, text, language=None, instruct=None):
+                self.instruct = instruct
+                return [np.zeros(2400, dtype=np.float32)], 24000
+        self.server.design_model = _Design()
+        r = self.client.post("/api/voice_design", data={"text": "Утром прошёл дождь.", "instruct": "Female, 30 years old"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["content-type"], "audio/wav")
+        self.assertEqual(r.headers["x-audio-seconds"], "0.10")
+        self.assertEqual(self.server.design_model.instruct, "Female, 30 years old")
+        self.assertEqual(self.client.post("/api/voice_design", data={"text": "x", "instruct": " "}).status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

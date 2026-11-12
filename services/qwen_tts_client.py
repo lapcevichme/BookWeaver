@@ -97,5 +97,27 @@ class QwenTTSClient:
                 opened_file.close()
 
 
+    def design_voice(self, text: str, instruct: str, language: str = "Russian",
+                     seed: Optional[int] = None, timeout: float = 900) -> Optional[dict]:
+        """
+        Голос по описанию (VoiceDesign) для кастинга. Возвращает {"wav": bytes, "f0": float|None, "seconds": float}.
+        На CPU один образец ~2-4 минуты, отсюда длинный таймаут.
+        """
+        data = {"text": text, "instruct": instruct, "language": language}
+        if seed is not None:
+            data["seed"] = seed
+        try:
+            response = requests.post(f"{self.base_url}/api/voice_design", data=data, timeout=timeout)
+        except requests.exceptions.ConnectionError:
+            logger.critical(f"Не удалось подключиться к Qwen3-TTS API ({self.base_url}).")
+            return None
+        if response.status_code != 200:
+            logger.error(f"Ошибка VoiceDesign ({response.status_code}): {response.text[:300]}")
+            return None
+        f0 = response.headers.get("X-F0-Median")
+        return {"wav": response.content, "f0": float(f0) if f0 else None,
+                "seconds": float(response.headers.get("X-Audio-Seconds", 0) or 0)}
+
+
 # Псевдоним для полной обратной совместимости
 CosyVoiceClient = QwenTTSClient

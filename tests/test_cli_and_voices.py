@@ -186,5 +186,38 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 1)
 
 
+class TestCasting(unittest.TestCase):
+    PROFILE = {"gender": "female", "age": 17, "pitch": "medium-low", "timbre": "clear, slightly husky",
+               "pace": "moderate", "manner": "dry, matter-of-fact", "instruct_zh": "女性，17岁"}
+
+    def test_instruct_ladder_for_women(self):
+        from core.casting import instruct_variants
+        v = instruct_variants(self.PROFILE)
+        self.assertTrue(v[0].startswith("Female, 17 years old, alto range, medium-low pitch, clear, slightly husky voice"))
+        self.assertIn("alto range, low-pitched", v[1])
+        self.assertIn("not high-pitched", v[1])
+        self.assertEqual(v[2], "女性，17岁")
+
+    def test_child_and_male(self):
+        from core.casting import instruct_variants, f0_band
+        child = dict(self.PROFILE, gender="male", age=9, instruct_zh="")
+        self.assertEqual(instruct_variants(child)[0].split(", ")[:2], ["Boy", "9 years old"])
+        self.assertEqual(len(instruct_variants(child)), 1)
+        self.assertEqual(f0_band("female", 17), (150.0, 265.0))
+        self.assertEqual(f0_band("male", 70), (75.0, 170.0))
+
+    def test_replica_counts_include_confirmed_links(self):
+        from core.casting import replica_counts
+        jinshi = uuid4()
+        e = lambda name, sid=None, ch="c4": SimpleNamespace(type="dialogue", text="Да.", speaker_id=sid,
+                                                             speaker_name=name, chapter_id=ch)
+        links = [SimpleNamespace(kind="character", status="confirmed", character_id=jinshi,
+                                 chapter_id="c4", speaker_label="Красавец-евнух"),
+                 SimpleNamespace(kind="character", status="suggested", character_id=jinshi,
+                                 chapter_id="c4", speaker_label="Евнух")]
+        counts = replica_counts([e("Джинши", jinshi), e("Красавец-евнух"), e("Евнух")], links)
+        self.assertEqual(counts[str(jinshi)], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,8 @@ logger = logging.getLogger("qwen3-tts-server")
 DEVICE = os.getenv("DEVICE", "cuda:0" if torch.cuda.is_available() else "cpu")
 DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-Base" if "cpu" in DEVICE else "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 MODEL_ID = os.getenv("QWEN_TTS_MODEL", DEFAULT_MODEL)
+# Модель для создания голосов по описанию (кастинг); грузится при первом запросе /api/voice_design
+DESIGN_MODEL_ID = os.getenv("QWEN_TTS_DESIGN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
 DEFAULT_LANGUAGE = os.getenv("DEFAULT_LANGUAGE", "Russian")
 
 # Auto-detect precision
@@ -33,6 +35,7 @@ app = FastAPI(
 
 # Global model container and prompt cache
 model = None
+design_model = None
 voice_prompt_cache: Dict[str, object] = {}
 
 
@@ -59,6 +62,55 @@ def load_model():
             
         logger.info(f"✅ Qwen3-TTS model successfully loaded on {DEVICE}!")
     return model
+
+
+def load_design_model():
+    global design_model
+    if design_model is None:
+        logger.info(f"⏳ Loading VoiceDesign model '{DESIGN_MODEL_ID}' on {DEVICE} ({DTYPE})...")
+        from qwen_tts import Qwen3TTSModel
+        design_model = Qwen3TTSModel.from_pretrained(DESIGN_MODEL_ID, device_map=DEVICE, dtype=DTYPE)
+        logger.info("✅ VoiceDesign model loaded")
+    return design_model
+
+
+def _f0_median(audio, sr: int) -> Optional[float]:
+    """Медиана F0 образца (pyin) — кастинг проверяет, что голос попал в норму для пола и возраста."""
+    try:
+        import librosa
+        import numpy as np
+        y = librosa.resample(np.asarray(audio, dtype="float32"), orig_sr=sr, target_sr=16000)
+        f0, voiced, _ = librosa.pyin(y, fmin=60, fmax=600, sr=16000)
+        return float(np.nanmedian(f0[voiced])) if voiced.any() else None
+    except Exception as e:
+        logger.warning(f"F0 не посчитан: {e}")
+        return None
+
+
+@app.post("/api/voice_design")
+def voice_design(
+    text: str = Form(...),
+    instruct: str = Form(...),
+    language: Optional[str] = Form(None),
+    seed: Optional[int] = Form(None),
+):
+    """Голос по описанию (VoiceDesign). Ответ — WAV; X-F0-Median и X-Audio-Seconds в заголовках."""
+    if not text.strip() or not instruct.strip():
+        raise HTTPException(status_code=400, detail="text и instruct обязательны")
+    m = load_design_model()
+    if seed is not None:
+        torch.manual_seed(seed)
+    start = time.time()
+    wavs, sr = m.generate_voice_design(text=text, language=language or DEFAULT_LANGUAGE, instruct=instruct)
+    seconds = len(wavs[0]) / sr
+    f0 = _f0_median(wavs[0], sr)
+    logger.info(f"🎨 VoiceDesign: {time.time() - start:.0f}s на {seconds:.1f}s аудио, F0 {f0}, instruct='{instruct[:80]}'")
+    buf = io.BytesIO()
+    sf.write(buf, wavs[0], sr, format="WAV")
+    headers = {"X-Audio-Seconds": f"{seconds:.2f}"}
+    if f0 is not None:
+        headers["X-F0-Median"] = f"{f0:.1f}"
+    return Response(content=buf.getvalue(), media_type="audio/wav", headers=headers)
 
 
 @app.on_event("startup")
