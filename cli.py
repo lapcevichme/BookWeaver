@@ -2,12 +2,14 @@
 BookWeaver CLI: команды без интерактива — для агентов, скриптов и человека.
 
     uv run cli.py import <файл.epub>
-    uv run cli.py run <книга> [--stages summary,chars,scenario] [--max-chapters N] [--force]
+    uv run cli.py run <книга> [--stages summary,chars,scenario,speakers] [--max-chapters N] [--force]
                                             # готовые главы пропускаются; --force — заново
     uv run cli.py tts <книга> vol_1_chap_1 [vol_1_chap_2 ...]
     uv run cli.py export <книга>
     uv run cli.py status <книга>
-    uv run cli.py inspect voices|emotions|coverage|characters <книга> [--chapter ID]
+    uv run cli.py inspect voices|emotions|coverage|characters|links <книга> [--chapter ID]
+    uv run cli.py link resolve|auto <книга> [--chapter ID] [--force]   # кто стоит за подписями без имени
+    uv run cli.py link confirm|reject <книга> --chapter ID --label 'Красавец-евнух'
     uv run cli.py menu                      # старое интерактивное меню
 
 Любая команда: --json (результат в stdout как JSON), -v (подробные логи). Логи всегда в stderr.
@@ -216,7 +218,7 @@ def cmd_import(args) -> dict:
     return {"book": book_id}
 
 
-STAGES = ("summary", "chars", "scenario")
+STAGES = ("summary", "chars", "scenario", "speakers")
 
 
 def cmd_run(args) -> dict:
@@ -226,10 +228,10 @@ def cmd_run(args) -> dict:
         raise CliError(f"Неизвестные этапы: {', '.join(sorted(unknown))}. Доступны: {', '.join(STAGES)}")
     _repo(args.book)
     done = _app().run_full_cycle(args.book, skip_summary="summary" not in stages, skip_chars="chars" not in stages,
-                          skip_scenario="scenario" not in stages, max_chapters=args.max_chapters,
-                          progress_callback=_progress, force_scenario=args.force) or {}
+                          skip_scenario="scenario" not in stages, skip_speakers="speakers" not in stages,
+                          max_chapters=args.max_chapters, progress_callback=_progress, force_scenario=args.force) or {}
     return {"book": args.book, "stages": stages, "max_chapters": args.max_chapters, "result": "ok",
-            "scenario_skipped": done.get("scenario_skipped", [])}
+            "scenario_skipped": done.get("scenario_skipped", []), "speakers": done.get("speakers", [])}
 
 
 def cmd_tts(args) -> dict:
@@ -286,16 +288,24 @@ def cmd_status(args) -> dict:
 
 
 def cmd_inspect_voices(args) -> dict:
-    from core.voices import resolve_voice
+    from core.voices import resolve_voice, link_context
+    from pipelines.speaker_resolution import chapter_links
     repo = _repo(args.book)
     config, chars = repo.load_manifest().config, repo.get_characters()
-    replicas = Counter((e.speaker_name, e.speaker_id) for e in _entries(repo, args.chapter)
-                       if e.type != "image" and (e.text or "").strip())
-    speakers = []
-    for (name, speaker_id), n in replicas.most_common():
-        v = resolve_voice(name, chars, config, speaker_id=speaker_id)
-        speakers.append({"speaker": name or "Рассказчик", "replicas": n, "voice": v.voice_id, "source": v.source,
-                         "exists": v.exists, "wanted": v.wanted})
+    names = {c.id: c.name for c in chars}
+    entries = [e for e in _entries(repo, args.chapter) if e.type != "image" and (e.text or "").strip()]
+    links_by_chapter = {}
+    for link in chapter_links(repo, args.chapter):
+        links_by_chapter.setdefault(link.chapter_id, []).append(link)
+    contexts = {ch: link_context(links_by_chapter.get(ch, []), [e for e in entries if e.chapter_id == ch])
+                for ch in {e.chapter_id for e in entries}}
+    rows = Counter()
+    for e in entries:
+        link, idx = contexts[e.chapter_id].get(e.speaker_name, (None, 0))
+        v = resolve_voice(e.speaker_name, chars, config, speaker_id=e.speaker_id, link=link, extra_index=idx)
+        rows[(e.speaker_name or "Рассказчик", v.voice_id, v.source, v.exists, v.wanted, _link_note(link, names))] += 1
+    speakers = [{"speaker": k[0], "replicas": n, "voice": k[1], "source": k[2], "exists": k[3], "wanted": k[4],
+                 "link": k[5]} for k, n in rows.most_common()]
     known_ids = {c.id for c in chars}
     stale = {str(k): v for k, v in config.character_voices.items() if k not in known_ids}
     return {"book": args.book, "chapter": args.chapter, "narrator_voice": config.default_narrator_voice,
@@ -339,6 +349,56 @@ def cmd_inspect_coverage(args) -> dict:
     return {"book": args.book, "threshold": args.threshold, "chapters": rows}
 
 
+def _link_note(link, names: dict) -> str:
+    if link is None:
+        return ""
+    if link.kind == "character":
+        return f"{names.get(link.character_id, '?')} ({link.status}, {link.confidence}{', скрыт' if link.identity_hidden else ''})"
+    return f"массовка {link.gender or '?'}/{link.age_group or '?'} [{link.person_key}] ({link.status})"
+
+
+def cmd_inspect_links(args) -> dict:
+    from pipelines.speaker_resolution import chapter_links
+    repo = _repo(args.book)
+    names = {c.id: c.name for c in repo.get_characters()}
+    order = {c.id: c.order_index for c in repo.get_all_chapters()}
+    rows = []
+    for l in sorted(chapter_links(repo, args.chapter), key=lambda l: (order.get(l.chapter_id, 0), l.speaker_label)):
+        rows.append({"chapter": l.chapter_id, "label": l.speaker_label, "kind": l.kind,
+                     "target": names.get(l.character_id, "?") if l.kind == "character"
+                     else f"{l.gender or '?'}/{l.age_group or '?'}",
+                     "person_key": l.person_key, "confidence": l.confidence, "hidden": l.identity_hidden,
+                     "status": l.status, "evidence": l.evidence})
+    return {"book": args.book, "links": rows}
+
+
+def cmd_link(args) -> dict:
+    from pipelines import speaker_resolution as sr
+    repo = _repo(args.book)
+    if args.action == "resolve":
+        done_statuses = {"scenario_ready", "audio_ready", "tts_ready", "completed"}
+        chapters = [c.id for c in repo.get_all_chapters()
+                    if getattr(c.status, "value", c.status) in done_statuses and (not args.chapter or c.id == args.chapter)]
+        if args.chapter and not chapters:
+            raise CliError(f"Глава {args.chapter} не найдена или у нее нет готового сценария", EXIT_NOT_FOUND)
+        pipeline = sr.SpeakerResolutionPipeline(_app().model_manager)
+        return {"book": args.book, "action": "resolve",
+                "chapters": [pipeline.run(args.book, ch, force=args.force) for ch in chapters]}
+    if args.action == "auto":
+        confirmed = sr.auto_confirm(args.book, args.chapter)
+        return {"book": args.book, "action": "auto",
+                "confirmed": [{"chapter": l.chapter_id, "label": l.speaker_label} for l in confirmed]}
+    if not (args.chapter and args.label):
+        raise CliError("confirm/reject: нужны --chapter и --label")
+    try:
+        link = sr.set_status(args.book, args.chapter, args.label,
+                             "confirmed" if args.action == "confirm" else "rejected")
+    except KeyError as e:
+        raise CliError(str(e.args[0]), EXIT_NOT_FOUND)
+    return {"book": args.book, "action": args.action, "chapter": link.chapter_id, "label": link.speaker_label,
+            "status": link.status}
+
+
 def cmd_inspect_characters(args) -> dict:
     from core.voices import resolve_voice
     repo = _repo(args.book)
@@ -373,7 +433,7 @@ def _human(command: str, result: dict) -> str:
     if command == "voices":
         out = [f"Рассказчик: {result['narrator_voice']}",
                _table([{**s, "exists": "да" if s["exists"] else "НЕТ ФАЙЛА"} for s in result["speakers"]],
-                      ["speaker", "replicas", "voice", "source", "exists", "wanted"])]
+                      ["speaker", "replicas", "voice", "source", "exists", "wanted", "link"])]
         if result["config_voices_without_character"]:
             out.append(f"В config.character_voices есть голоса для несуществующих персонажей: {result['config_voices_without_character']}")
         return "\n".join(out)
@@ -389,6 +449,9 @@ def _human(command: str, result: dict) -> str:
         rows = [{**r, "coverage": f"{r['coverage']:.0%}" if r["coverage"] is not None else "—",
                  "max_gap": f"{r['max_gap_share']:.0%}"} for r in result["chapters"]]
         return _table(rows, ["chapter", "status", "entries", "dialogue", "coverage", "max_gap", "diagnosis"])
+    if command == "links":
+        rows = [{**r, "hidden": "да" if r["hidden"] else ""} for r in result["links"]]
+        return _table(rows, ["chapter", "label", "kind", "target", "person_key", "confidence", "hidden", "status", "evidence"])
     if command == "characters":
         return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "wanted", "voice_profile"])
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
@@ -405,9 +468,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("import", parents=[common], help="импорт книги из файла (.epub/.txt)")
     p.add_argument("file"); p.set_defaults(func=cmd_import)
 
-    p = sub.add_parser("run", parents=[common], help="этапы анализа: summary, chars, scenario")
+    p = sub.add_parser("run", parents=[common], help="этапы анализа: summary, chars, scenario, speakers")
     p.add_argument("book")
-    p.add_argument("--stages", default="summary,chars,scenario", help="через запятую (по умолчанию все)")
+    p.add_argument("--stages", default="summary,chars,scenario,speakers", help="через запятую (по умолчанию все)")
     p.add_argument("--max-chapters", type=int, default=None, help="обработать только первые N глав")
     p.add_argument("--force", action="store_true",
                    help="переделать сценарии готовых глав с нуля (у озвученных аудио отвяжется от реплик)")
@@ -431,7 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name, func, help_ in [("voices", cmd_inspect_voices, "кто каким голосом озвучивается и почему"),
                               ("emotions", cmd_inspect_emotions, "метки эмоций, паузы, старые теги"),
                               ("coverage", cmd_inspect_coverage, "покрытие текста главы сценарием"),
-                              ("characters", cmd_inspect_characters, "персонажи, профиль голоса, назначенный голос")]:
+                              ("characters", cmd_inspect_characters, "персонажи, профиль голоса, назначенный голос"),
+                              ("links", cmd_inspect_links, "кто стоит за подписями без имени: связи и массовка")]:
         ip = isub.add_parser(name, parents=[common], help=help_)
         ip.add_argument("book"); ip.add_argument("--chapter", help="только эта глава (vol_1_chap_1)")
         ip.set_defaults(func=func)
@@ -439,6 +503,14 @@ def build_parser() -> argparse.ArgumentParser:
             ip.add_argument("--examples", type=int, default=0, help="показать N примеров, где tts_text отличается от текста")
         if name == "coverage":
             ip.add_argument("--threshold", type=float, default=0.90)
+
+    p = sub.add_parser("link", parents=[common], help="связи подписей с персонажами: resolve, confirm, reject, auto")
+    p.add_argument("action", choices=["resolve", "confirm", "reject", "auto"])
+    p.add_argument("book")
+    p.add_argument("--chapter", help="vol_1_chap_4")
+    p.add_argument("--label", help="подпись говорящего, например 'Красавец-евнух'")
+    p.add_argument("--force", action="store_true", help="resolve: переспросить LLM о неподтвержденных связях")
+    p.set_defaults(func=cmd_link)
     return parser
 
 

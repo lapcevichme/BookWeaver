@@ -67,6 +67,63 @@ class TestResolveVoice(unittest.TestCase):
         self.assertEqual((v.voice_id, v.source, v.wanted), ("narrator_default", voices.SOURCE_FALLBACK, "generic_old_male"))
 
 
+class TestSpeakerLinks(unittest.TestCase):
+    def setUp(self):
+        self.lib = Path(tempfile.mkdtemp())
+        for name in ("narrator_default", "jinshi_voice", "generic_female", "generic_female_2", "generic_male"):
+            (self.lib / name).mkdir()
+            (self.lib / name / "reference.wav").write_bytes(b"RIFF")
+        self.patcher = patch.object(voices.path_manager, "get_voice_path",
+                                    side_effect=lambda vid: self.lib / vid / "reference.wav")
+        self.patcher.start()
+        self.jinshi = SimpleNamespace(id=uuid4(), name="Джинши", voice_base="jinshi_voice", gender="male", voice_profile="")
+        self.config = SimpleNamespace(default_narrator_voice="narrator_default", character_voices={})
+
+    def tearDown(self):
+        self.patcher.stop()
+
+    @staticmethod
+    def _link(label, kind="extra", status="suggested", **kw):
+        base = dict(speaker_label=label, kind=kind, status=status, character_id=None, gender=None,
+                    age_group=None, person_key=label, confidence="high", identity_hidden=False)
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def test_confirmed_link_gives_character_voice_suggested_does_not(self):
+        for status, expected in (("confirmed", "jinshi_voice"), ("suggested", "generic_male")):
+            link = self._link("Красавец-евнух", kind="character", status=status, character_id=self.jinshi.id)
+            v = voices.resolve_voice("Красавец-евнух", [self.jinshi], self.config, link=link)
+            self.assertEqual(v.voice_id, expected, status)
+
+    def test_two_maids_get_different_voices_same_person_same_voice(self):
+        links = [self._link("Служанка 1", gender="female", age_group="adult", person_key="maid1"),
+                 self._link("Служанка 2", gender="female", age_group="adult", person_key="maid2"),
+                 self._link("Та же служанка", gender="female", age_group="adult", person_key="maid1")]
+        entries = [SimpleNamespace(speaker_name=n) for n in ("Служанка 1", None, "Служанка 2", "Та же служанка")]
+        ctx = voices.link_context(links, entries)
+        got = {label: voices.resolve_voice(label, [], self.config, link=l, extra_index=i).voice_id
+               for label, (l, i) in ctx.items()}
+        self.assertEqual(got, {"Служанка 1": "generic_female", "Служанка 2": "generic_female_2",
+                               "Та же служанка": "generic_female"})
+
+    def test_extra_uses_llm_gender_not_dictionary(self):
+        # «Голос из толпы» словарь не знает; LLM сказала — пожилая женщина, такого голоса нет -> wanted
+        link = self._link("Голос из толпы", gender="female", age_group="old")
+        v = voices.resolve_voice("Голос из толпы", [], self.config, link=link)
+        self.assertEqual((v.source, v.wanted), (voices.SOURCE_FALLBACK, "generic_old_female"))
+
+
+class TestUnresolvedSpeakers(unittest.TestCase):
+    def test_only_lines_without_speaker_id(self):
+        from pipelines.speaker_resolution import unresolved_speakers
+        e = lambda t, name=None, sid=None, text="x": SimpleNamespace(type=t, speaker_name=name, speaker_id=sid, text=text)
+        entries = [e("narration", text="Вошел красивый евнух."), e("dialogue", "Красавец-евнух", text="Останься."),
+                   e("dialogue", "Маомао", sid=uuid4()), e("dialogue", "Рассказчик"), e("image", "Х", text=None)]
+        got = unresolved_speakers(entries)
+        self.assertEqual(list(got), ["Красавец-евнух"])
+        self.assertEqual(got["Красавец-евнух"][0], {"text": "Останься.", "before": "Вошел красивый евнух."})
+
+
 class TestRoleCategory(unittest.TestCase):
     def test_roles(self):
         cases = {"Служанка 1": "female", "Стражник 2": "male", "Старый стражник": "old_male",

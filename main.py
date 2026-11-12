@@ -16,6 +16,7 @@ from services.model_manager import ModelManager
 
 from pipelines.character_analysis import CharacterAnalysisPipeline
 from pipelines.scenario_generation import ScenarioGenerationPipeline
+from pipelines.speaker_resolution import SpeakerResolutionPipeline
 from pipelines.summary_generation import SummaryGenerationPipeline
 from pipelines.tts_pipeline import TTSPipeline
 from pipelines.image_generation_pipeline import (ImageGenerationPipeline)
@@ -40,6 +41,7 @@ class Application:
         logger.info("Инициализация AI-пайплайнов...")
         self.character_pipeline = CharacterAnalysisPipeline(self.model_manager)
         self.scenario_pipeline = ScenarioGenerationPipeline(self.model_manager)
+        self.speaker_pipeline = SpeakerResolutionPipeline(self.model_manager)
         self.summary_pipeline = SummaryGenerationPipeline(self.model_manager)
         self.tts_pipeline = TTSPipeline(self.model_manager)
         self.image_pipeline = ImageGenerationPipeline()
@@ -58,6 +60,7 @@ class Application:
                        skip_summary: bool = False,
                        skip_chars: bool = False,
                        skip_scenario: bool = False,
+                       skip_speakers: bool = False,
                        generate_images: bool = False,
                        max_chapters: Optional[int] = None,
                        progress_callback: Optional[Callable] = None,
@@ -84,6 +87,7 @@ class Application:
         if not skip_chars: stages.append("chars")
         if generate_images: stages.append("images")
         if not skip_scenario: stages.append("scenario")
+        if not skip_speakers: stages.append("speakers")
         
         total_stages = len(stages)
         current_stage_idx = 0
@@ -166,6 +170,30 @@ class Application:
         if scenario_skipped:
             logger.info(f"Сценарии пропущены (уже готовы): {', '.join(scenario_skipped)}")
 
+        speakers_summary = []
+        if not skip_speakers:
+            # Кто стоит за подписями без speaker_id («Красавец-евнух» = Джинши?). Спрашиваются только новые
+            # подписи; переспросить предложения — `cli.py link resolve --force` (не пересобирая сценарии).
+            current_stage_idx += 1
+            ready = [c.id for c in repo.get_all_chapters()
+                     if getattr(c.status, "value", c.status) in self.SCENARIO_DONE_STATUSES]
+            if max_chapters and max_chapters > 0:
+                allowed = {c.id for c in repo.get_all_chapters()[:max_chapters]}
+                ready = [cid for cid in ready if cid in allowed]
+            failed_speakers = {}
+            for i, chapter_id in enumerate(ready, 1):
+                update_progress((current_stage_idx - 1 + i / max(len(ready), 1)) / total_stages, "Speakers",
+                                f"Опознание говорящих {i}/{len(ready)}: {chapter_id}")
+                try:
+                    speakers_summary.append(self.speaker_pipeline.run(book_name, chapter_id))
+                except TaskCancelledException:
+                    raise
+                except Exception as e:
+                    failed_speakers[chapter_id] = str(e)[:200]
+                    logger.error(f"Опознание говорящих {chapter_id}: {e}")
+            if failed_speakers:
+                incomplete.append(PipelineIncompleteError("Опознание говорящих", len(ready), failed_speakers))
+
         if incomplete:
             summary = " | ".join(str(e) for e in incomplete)
             update_progress(1.0, "Ошибка", f"Полный цикл для '{book_name}' завершен НЕ полностью: {summary}")
@@ -173,7 +201,7 @@ class Application:
                                           {f"{e.stage}/{ch}": r for e in incomplete for ch, r in e.failed.items()},
                                           message=f"Полный цикл завершен НЕ полностью: {summary}")
         update_progress(1.0, "Завершено", f"Полный цикл для '{book_name}' успешно выполнен!")
-        return {"scenario_skipped": scenario_skipped}
+        return {"scenario_skipped": scenario_skipped, "speakers": speakers_summary}
 
     def export_book(self, book_name: str) -> Optional[Path]:
         logger.info(f"Запуск экспорта для: {book_name}")

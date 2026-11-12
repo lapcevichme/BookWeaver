@@ -296,6 +296,43 @@ class ScenarioEntry(SQLModel, table=True):
     chapter: "Chapter" = Relationship(back_populates="entries")
     speaker: Optional["Character"] = Relationship(back_populates="scenario_entries")
 
+class SpeakerLinkKind(str, Enum):
+    CHARACTER = "character"  # за подписью стоит известный персонаж
+    EXTRA = "extra"          # массовка: свой голос по полу/возрасту
+
+
+class SpeakerLinkStatus(str, Enum):
+    SUGGESTED = "suggested"  # предложено LLM, голос не меняет (кроме массовки)
+    CONFIRMED = "confirmed"  # подтверждено человеком (или авто-подтверждением)
+    REJECTED = "rejected"    # отклонено: подпись озвучивается как массовка/рассказчик
+
+
+AGE_GROUPS = ("child", "adult", "old")
+
+
+class SpeakerLink(SQLModel, table=True):
+    """
+    Кто стоит за подписью говорящего без speaker_id в главе: «Красавец-евнух» в главе 4 = Джинши,
+    «Служанка 1» — молодая женщина, не та же, что «Служанка 2».
+    Сценарий не меняется: подпись на экране остается прежней (без спойлеров), связь влияет только на голос.
+    """
+    __table_args__ = (UniqueConstraint("chapter_id", "speaker_label", name="uq_speakerlink_chapter_label"),)
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    chapter_id: str = Field(sa_column=Column(String, ForeignKey("chapter.id", ondelete="CASCADE"), nullable=False, index=True))
+    speaker_label: str
+    kind: str = Field(default=SpeakerLinkKind.EXTRA.value)
+    character_id: Optional[UUID] = Field(
+        default=None, sa_column=Column(ForeignKey("character.id", ondelete="SET NULL"), nullable=True)
+    )
+    confidence: str = Field(default="low")      # high | medium | low
+    identity_hidden: bool = Field(default=False)  # автор намеренно скрывает личность (раскрытие позже)
+    evidence: str = Field(default="", sa_column=Column(Text))
+    gender: Optional[str] = None                # для массовки: male | female
+    age_group: Optional[str] = None             # для массовки: child | adult | old
+    person_key: str = Field(default="")         # одинаковый ключ в главе — один и тот же человек
+    status: str = Field(default=SpeakerLinkStatus.SUGGESTED.value)
+
+
 # --- Non-Table Models (Prompts/API DTOs) ---
 
 class CharacterReconResult(PydanticBaseModel):
@@ -485,6 +522,35 @@ class VoiceDirection(PydanticBaseModel):
     def normalize_emotion(cls, v: Any) -> str:
         label = str(v or "").strip().lower()
         return label if label in EMOTION_LABELS else "neutral"
+
+class LlmSpeakerResolution(PydanticBaseModel):
+    label: str = Field(..., description="подпись говорящего ровно как во входных данных")
+    kind: Literal["character", "extra"] = Field(..., description="character — это известный персонаж из списка; extra — массовка")
+    character: Optional[str] = Field(default=None, description="для character: имя персонажа ровно как в списке персонажей")
+    confidence: Literal["high", "medium", "low"] = Field(default="low", description="уверенность в связи с персонажем")
+    identity_hidden: bool = Field(default=False, description="true, если автор намеренно скрывает личность и раскрывает позже")
+    evidence: str = Field(default="", description="1-2 коротких довода с опорой на текст")
+    gender: Optional[Literal["male", "female"]] = Field(default=None, description="для extra: пол")
+    age_group: Optional[Literal["child", "adult", "old"]] = Field(default=None, description="для extra: возраст")
+    person_key: str = Field(default="", description="одинаковый у подписей, за которыми один и тот же человек (например, 'eunuch1')")
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, v: Any) -> str:
+        v = str(v or "").strip().lower()
+        return v if v in ("high", "medium", "low") else "low"
+
+
+class LlmSpeakerResolutionList(PydanticBaseModel):
+    speakers: List[LlmSpeakerResolution] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def wrap_bare_list(cls, data: Any):
+        if isinstance(data, list):
+            return {"speakers": data}
+        return data
+
 
 class EmotionMap(PydanticBaseModel):
     emotions: Dict[UUID, VoiceDirection] = Field(default_factory=dict)

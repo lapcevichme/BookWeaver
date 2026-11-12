@@ -6,7 +6,7 @@ import config
 
 from core.book_repository import BookRepository
 from core import path_manager
-from core.voices import resolve_voice, SOURCE_FALLBACK
+from core.voices import resolve_voice, link_context, SOURCE_FALLBACK
 from services.model_manager import ModelManager
 from utils import text_utils
 from utils.metrics import metrics_collector, AudioMetrics
@@ -81,6 +81,8 @@ class TTSPipeline:
 
             manifest = repo.load_manifest()
             chars = repo.get_characters()
+            from pipelines.speaker_resolution import chapter_links
+            links = link_context(chapter_links(repo, chapter_id), scenario_entries)
 
             update_progress(0.1, stage, "Все данные успешно загружены.")
 
@@ -113,7 +115,9 @@ class TTSPipeline:
                 audio_path = audio_output_dir / audio_filename
 
                 character_name = entry.speaker_name
-                voice = resolve_voice(character_name, chars, manifest.config, speaker_id=entry.speaker_id)
+                link, extra_index = links.get(character_name, (None, 0))
+                voice = resolve_voice(character_name, chars, manifest.config, speaker_id=entry.speaker_id,
+                                      link=link, extra_index=extra_index)
                 voice_id, actual_voice_path = voice.voice_id, voice.path
                 if voice.source == SOURCE_FALLBACK:
                     hint = f" Подошел бы общий '{voice.wanted}', но он еще не создан." if voice.wanted else ""

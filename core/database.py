@@ -75,6 +75,7 @@ def get_book_tables():
         data_models.ChapterSummary.__table__,
         data_models.Character.__table__,
         data_models.ScenarioEntry.__table__,
+        data_models.SpeakerLink.__table__,
         data_models.LLMMetric.__table__,
         data_models.AudioMetric.__table__,
         data_models.MetricCounter.__table__,

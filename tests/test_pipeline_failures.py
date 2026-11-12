@@ -190,6 +190,7 @@ class TestFullCycleFailures(unittest.TestCase):
         app.summary_pipeline = MagicMock()
         app.character_pipeline = MagicMock()
         app.scenario_pipeline = MagicMock()
+        app.speaker_pipeline = MagicMock()
         app.scenario_pipeline.run.side_effect = [None, ValueError("нет ответа"), None]
         repo = MagicMock()
         repo.get_all_chapters.return_value = _chapters(3, done=(0, 1, 2))
@@ -206,6 +207,7 @@ class TestFullCycleFailures(unittest.TestCase):
         app = cls.__new__(cls)
         app.summary_pipeline = app.character_pipeline = MagicMock()
         app.scenario_pipeline = MagicMock()
+        app.speaker_pipeline = MagicMock()
         app.scenario_pipeline.run.side_effect = TaskCancelledException("cancel")
         repo = MagicMock()
         repo.get_all_chapters.return_value = _chapters(2, done=(0, 1))
@@ -221,6 +223,7 @@ class TestFullCycleFailures(unittest.TestCase):
         app.character_pipeline = MagicMock()
         app.character_pipeline.run.side_effect = PipelineIncompleteError("Анализ персонажей", 4, {"vol_1_chap_2": "x"})
         app.scenario_pipeline = MagicMock()
+        app.speaker_pipeline = MagicMock()
         repo = MagicMock()
         repo.get_all_chapters.return_value = _chapters(4, done=(0, 1))
         with patch("core.book_repository.BookRepository", return_value=repo):
@@ -237,6 +240,7 @@ class TestFullCycleSkipsReadyChapters(unittest.TestCase):
         app.summary_pipeline = MagicMock()
         app.character_pipeline = MagicMock()
         app.scenario_pipeline = MagicMock()
+        app.speaker_pipeline = MagicMock()
         return app
 
     def _repo(self, statuses):
