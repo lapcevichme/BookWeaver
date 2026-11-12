@@ -168,11 +168,13 @@ def normalize_audio_file(
 def merge_chapter_audio(
         scenario: Scenario,
         audio_dir: Path,
-        output_file_path: Path
+        output_file_path: Path,
+        gap_ms: int = 0
 ) -> Tuple[int, List[dict]]:
     """
     Склеивает аудиофайлы главы через ffmpeg (стриминг, экономно по памяти).
     Создает карту синхронизации на основе метаданных файлов и данных из БД.
+    gap_ms — тишина между репликами: у Qwen в конце реплики тишины нет, встык звучит скороговоркой.
     """
     sync_map = []
     current_offset_ms = 0
@@ -209,6 +211,9 @@ def merge_chapter_audio(
         if file_path.exists():
             segment_duration = get_audio_duration_ms(file_path)
             if segment_duration > 0:
+                if gap_ms > 0 and audio_files_to_concat:
+                    audio_files_to_concat.append(("gap", file_path))
+                    current_offset_ms += gap_ms
                 audio_files_to_concat.append(file_path)
         else:
             missing_files_count += 1
@@ -250,6 +255,20 @@ def merge_chapter_audio(
     if not audio_files_to_concat:
         logger.warning("Нет аудиофайлов для склейки.")
         return 0, sync_map
+
+    # Тишина для пауз — в формате первой реплики (concat требует одинаковых параметров)
+    gap_path = None
+    if any(isinstance(p, tuple) for p in audio_files_to_concat):
+        import wave
+        with wave.open(str(audio_files_to_concat[0]), "rb") as w:
+            rate, channels, width = w.getframerate(), w.getnchannels(), w.getsampwidth()
+        gap_path = Path(tempfile.mkstemp(suffix=".wav")[1])
+        with wave.open(str(gap_path), "wb") as w:
+            w.setnchannels(channels)
+            w.setsampwidth(width)
+            w.setframerate(rate)
+            w.writeframes(b"\x00" * (rate * gap_ms // 1000) * channels * width)
+    audio_files_to_concat = [gap_path if isinstance(p, tuple) else p for p in audio_files_to_concat]
 
     # Создаем временный файл для ffmpeg concat
     with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
@@ -299,5 +318,7 @@ def merge_chapter_audio(
     finally:
         if os.path.exists(concat_list_path):
             os.remove(concat_list_path)
+        if gap_path and gap_path.exists():
+            gap_path.unlink()
 
     return current_offset_ms, sync_map
