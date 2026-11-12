@@ -36,6 +36,7 @@ app = FastAPI(
 # Global model container and prompt cache
 model = None
 design_model = None
+speaker_encoder = None
 voice_prompt_cache: Dict[str, object] = {}
 
 
@@ -85,6 +86,43 @@ def _f0_median(audio, sr: int) -> Optional[float]:
     except Exception as e:
         logger.warning(f"F0 не посчитан: {e}")
         return None
+
+
+def load_speaker_encoder():
+    """ECAPA-TDNN (SpeechBrain, VoxCeleb): вектор голоса для «похож ли голос на образец» и различимости состава."""
+    global speaker_encoder
+    if speaker_encoder is None:
+        from speechbrain.inference.speaker import EncoderClassifier
+        logger.info("⏳ Loading speaker encoder speechbrain/spkrec-ecapa-voxceleb...")
+        speaker_encoder = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb",
+                                                         run_opts={"device": DEVICE})
+        logger.info("✅ Speaker encoder loaded")
+    return speaker_encoder
+
+
+@app.post("/api/speaker_embedding")
+async def speaker_embedding(audio: UploadFile = File(...)):
+    """
+    Нормированный вектор голоса (192). Сравнивать синтетику с синтетикой: ECAPA частично ловит канал записи,
+    и живая запись ближе к другой живой записи, чем к синтезу того же голоса (2026-11-12).
+    """
+    import librosa
+    import numpy as np
+    suffix = Path(audio.filename or "a.wav").suffix or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        path = tmp.name
+    try:
+        y, _ = librosa.load(path, sr=16000, mono=True)
+    finally:
+        os.unlink(path)
+    if len(y) < 16000:
+        raise HTTPException(status_code=400, detail="Нужно хотя бы 1 секунда речи")
+    enc = load_speaker_encoder()
+    with torch.no_grad():
+        e = enc.encode_batch(torch.tensor(y).unsqueeze(0)).squeeze().cpu().numpy()
+    e = e / (np.linalg.norm(e) + 1e-9)
+    return {"embedding": [round(float(x), 6) for x in e], "model": "speechbrain/spkrec-ecapa-voxceleb"}
 
 
 @app.post("/api/voice_design")

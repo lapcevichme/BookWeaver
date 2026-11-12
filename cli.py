@@ -14,6 +14,8 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py cast set <книга> --character Имя --age 22 [--pitch ...]  # правка профиля, затем design --force
     uv run cli.py cast design <книга> --character Имя --variant low --pitch low   # кандидат для выбора на слух
     uv run cli.py cast pick <книга> --character Имя --variant low                 # назначить кандидата
+    uv run cli.py cast compare <книга> --character Имя --reference клип.mp3       # кандидаты по сходству (ECAPA)
+    uv run cli.py cast distinct <книга>                                           # насколько похожи голоса состава
     uv run cli.py cast generics                                           # доп. голоса массовки generic_*_2/_3
     uv run cli.py menu                      # старое интерактивное меню
 
@@ -440,6 +442,14 @@ def cmd_cast(args) -> dict:
         raise CliError("Сервер озвучки недоступен (tools/qwen_tts_server, порт 9233)")
     if _on_battery():
         logger.warning("⚠️ Ноутбук на батарее: VoiceDesign грузит все ядра. Подключите зарядку.")
+    if args.action == "compare":
+        if not (one and args.reference):
+            raise CliError("cast compare: нужны один --character и --reference <клип>")
+        if not Path(args.reference).exists():
+            raise CliError(f"Нет файла {args.reference}", EXIT_NOT_FOUND)
+        return {"book": args.book, "action": "compare", **cp.compare_to_reference(args.book, tts, one, args.reference)}
+    if args.action == "distinct":
+        return {"action": "distinct", **cp.cast_distinctness(args.book, tts)}
     if args.action == "design" and args.variant:
         if not one:
             raise CliError("cast design --variant: нужен ровно один --character")
@@ -590,7 +600,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_link)
 
     p = sub.add_parser("cast", parents=[common], help="кастинг голосов: profile (LLM), design (голоса), generics (массовка)")
-    p.add_argument("action", choices=["profile", "set", "design", "pick", "generics"])
+    p.add_argument("action", choices=["profile", "set", "design", "pick", "compare", "distinct", "generics"])
+    p.add_argument("--reference", help="compare: клип голоса, с которым сравнивать (wav/mp3)")
     p.add_argument("--variant", help="design: сделать кандидата <voice>__<variant> с правками профиля; pick: выбрать его")
     p.add_argument("book", nargs="?", default="", help="для generics не нужна")
     p.add_argument("--character", action="append", help="только этот персонаж (можно несколько раз)")

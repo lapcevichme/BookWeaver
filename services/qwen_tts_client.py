@@ -119,5 +119,21 @@ class QwenTTSClient:
                 "seconds": float(response.headers.get("X-Audio-Seconds", 0) or 0)}
 
 
+    def speaker_embedding(self, audio_path: Path, timeout: float = 120) -> Optional[list]:
+        """Нормированный вектор голоса (ECAPA) для сравнения голосов; None — сервер недоступен или ошибка."""
+        audio_path = Path(audio_path)
+        try:
+            with open(audio_path, "rb") as f:
+                response = requests.post(f"{self.base_url}/api/speaker_embedding",
+                                         files={"audio": (audio_path.name, f)}, timeout=timeout)
+        except requests.exceptions.ConnectionError:
+            logger.critical(f"Не удалось подключиться к Qwen3-TTS API ({self.base_url}).")
+            return None
+        if response.status_code != 200:
+            logger.error(f"Ошибка speaker_embedding ({response.status_code}): {response.text[:200]}")
+            return None
+        return response.json()["embedding"]
+
+
 # Псевдоним для полной обратной совместимости
 CosyVoiceClient = QwenTTSClient

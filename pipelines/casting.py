@@ -310,3 +310,56 @@ def pick_candidate(book_name: str, name: str, variant: str) -> dict:
         session.add(db_char)
         session.commit()
     return {"name": name, "picked": variant, "voice": cand["voice_id"]}
+
+
+# --- Сходство голосов (ECAPA на сервере озвучки) -----------------------------------------------
+
+def _cosine(a, b) -> float:
+    return float(sum(x * y for x, y in zip(a, b)))  # векторы уже нормированы сервером
+
+
+def compare_to_reference(book_name: str, tts_service, name: str, reference: str) -> dict:
+    """
+    Текущий голос персонажа и его кандидаты против образца (клип голоса, каким его хотят слышать).
+    Ранжировать синтетику между собой можно; абсолютное число «синтез против живой записи» занижено каналом.
+    """
+    from pathlib import Path
+    from core import path_manager
+    repo = BookRepository(book_name)
+    char = next((c for c in repo.get_characters() if c.name == name), None)
+    if char is None:
+        raise KeyError(f"Персонаж '{name}' не найден")
+    ref = tts_service.tts_client.speaker_embedding(Path(reference))
+    if ref is None:
+        raise RuntimeError("Не удалось получить вектор образца")
+    vc = char.voice_casting or {}
+    voices = {"assigned": char.voice_base} if char.voice_base else {}
+    voices.update({f"candidate:{k}": v["voice_id"] for k, v in (vc.get("candidates") or {}).items()})
+    rows = []
+    for label, voice_id in voices.items():
+        path = path_manager.get_voice_path(voice_id)
+        emb = tts_service.tts_client.speaker_embedding(path) if path.exists() else None
+        rows.append({"voice": label, "voice_id": voice_id,
+                     "similarity": round(_cosine(ref, emb), 3) if emb else None})
+    rows.sort(key=lambda r: -(r["similarity"] or -1))
+    return {"name": name, "reference": reference, "ranking": rows}
+
+
+def cast_distinctness(book_name: str, tts_service) -> dict:
+    """Попарное сходство назначенных голосов персонажей: слишком похожие пары собеседников трудно различать."""
+    from core import path_manager
+    repo = BookRepository(book_name)
+    voices = {c.name: (c.voice_base, getattr(c.gender, "value", c.gender)) for c in repo.get_characters() if c.voice_base}
+    emb = {}
+    for name, (voice_id, _) in voices.items():
+        path = path_manager.get_voice_path(voice_id)
+        if path.exists():
+            emb[name] = tts_service.tts_client.speaker_embedding(path)
+    names = [n for n in emb if emb[n]]
+    pairs = []
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            pairs.append({"a": a, "b": b, "same_gender": voices[a][1] == voices[b][1],
+                          "similarity": round(_cosine(emb[a], emb[b]), 3)})
+    pairs.sort(key=lambda p: -p["similarity"])
+    return {"book": book_name, "pairs": pairs}
