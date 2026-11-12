@@ -42,21 +42,54 @@ def f0_band(gender: str, age: int) -> Tuple[float, float]:
     return (75.0, 170.0) if group == "old" else (80.0, 175.0)
 
 
+_YOUTH_WORDS = re.compile(r"\b(youthful|girlish|boyish|childlike|young|cute)\b,?\s*", re.I)
+
+
+def _clean_timbre(timbre: str) -> str:
+    """Слова юности в тембре поднимают голос VoiceDesign к детскому — у взрослых их убираем."""
+    return re.sub(r"\s*,\s*$", "", _YOUTH_WORDS.sub("", timbre or "")).strip(" ,") or "clear"
+
+
 def instruct_variants(profile: dict) -> List[str]:
-    """Описания для VoiceDesign по порядку попыток."""
+    """
+    Описания для VoiceDesign по порядку попыток.
+    Высоту у VoiceDesign задает прежде всего возраст: героини 17-22 лет вышли на 294-394 Гц при любых
+    словах про регистр (mezzo, alto, low-pitched, китайский), взрослые 28-50 — в норме с первой попытки
+    (2026-11-12). Поэтому молодым взрослым (до 25) сначала идут варианты без точного возраста.
+    """
     gender, age, pitch = profile["gender"], int(profile["age"]), profile["pitch"]
     group = age_group(age)
-    who = ("Boy" if gender == "male" else "Girl") if group == "child" else ("Male" if gender == "male" else "Female")
-    parts = [f"{who}, {age} years old"]
-    if group != "child":
-        parts.append(f"{_RANGE[gender][pitch]} range")
-    parts += [f"{pitch} pitch", f"{profile['timbre']} voice", f"{profile['pace']} pace", profile["manner"],
-              "calm neutral delivery"]
-    base = ", ".join(p.strip() for p in parts if p and p.strip())
-    variants = [base]
-    if gender == "female" and group != "child":
-        variants.append(base.replace(f"{_RANGE[gender][pitch]} range", "alto range").replace(f"{pitch} pitch", "low-pitched")
-                        + ", mature adult woman, not childlike, not high-pitched")
+    timbre = profile["timbre"] if group == "child" else _clean_timbre(profile["timbre"])
+    tail = [f"{profile['pace']} pace", profile["manner"], "calm neutral delivery"]
+
+    def build(who: str, rng: Optional[str], pitch_words: str, tmb: str, extra: str = "") -> str:
+        parts = [who] + ([f"{rng} range"] if rng else []) + [pitch_words, f"{tmb} voice"] + tail
+        return ", ".join(p.strip() for p in parts if p and p.strip()) + extra
+
+    if group == "child":
+        who = "Boy" if gender == "male" else "Girl"
+        variants = [build(f"{who}, {age} years old", None, f"{pitch} pitch", timbre)]
+    else:
+        noun = "Male" if gender == "male" else "Female"
+        exact = build(f"{noun}, {age} years old", _RANGE[gender][pitch], f"{pitch} pitch", timbre)
+        if gender == "female":
+            low = ", mature adult woman, not childlike, not high-pitched"
+            if age < 25:
+                variants = [build("Female, young adult woman in her early twenties", _RANGE[gender][pitch],
+                                  f"{pitch} pitch", timbre, ", not childlike"),
+                            build("Female, adult woman in her twenties", "alto", "low-pitched", timbre, low),
+                            exact]
+            else:
+                variants = [exact, build(f"Female, {age} years old", "alto", "low-pitched", timbre, low)]
+        else:
+            low = ", mature adult man, deep voice, not high-pitched"
+            if age < 25:
+                variants = [build("Male, young adult man in his early twenties", _RANGE[gender][pitch],
+                                  f"{pitch} pitch", timbre),
+                            build("Male, adult man in his twenties", "baritone", "low-pitched", timbre, low),
+                            exact]
+            else:
+                variants = [exact, build(f"Male, {age} years old", "baritone", "low-pitched", timbre, low)]
     if profile.get("instruct_zh"):
         variants.append(profile["instruct_zh"])
     return variants

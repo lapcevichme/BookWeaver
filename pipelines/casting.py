@@ -185,7 +185,9 @@ def design_voices(book_name: str, tts_service, names: Optional[List[str]] = None
             summary["skipped"].append(c.name)
             continue
         logger.info(f"🎨 Кастинг: голос для {c.name}")
-        result = _design_one(tts_service, vc["profile"], vc.get("instructs") or casting.instruct_variants(vc["profile"]), seed)
+        # Описания всегда из профиля по текущей лесенке: сохраненные могли собираться старым шаблоном
+        vc["instructs"] = casting.instruct_variants(vc["profile"])
+        result = _design_one(tts_service, vc["profile"], vc["instructs"], seed)
         voice_id = casting.voice_id_for(book_name, c.name)
         _save_voice(voice_id, result["wav"])
         vc.update(status=casting.STATUS_DESIGNED, voice_id=voice_id, f0=result["f0"], cer=result["cer"],
@@ -217,3 +219,34 @@ def design_generic_extras(tts_service, seed: Optional[int] = 42, redo: bool = Fa
         summary["designed"].append({"voice": voice_id, "f0": result["f0"], "cer": result["cer"],
                                     "attempts": len(result["attempts"]), "needs_review": result["needs_review"]})
     return summary
+
+
+def update_profile(book_name: str, name: str, changes: dict) -> dict:
+    """
+    Правка профиля человеком (возраст Джинши 35 → 22). Профиль проверяется той же моделью, что ответ LLM;
+    статус возвращается в profiled — следующий `cast design --force` пересоздаст голос.
+    Голос уже озвученного персонажа менять нельзя.
+    """
+    from core.data_models import LlmVoiceCast
+    repo = BookRepository(book_name)
+    char = next((c for c in repo.get_characters() if c.name == name), None)
+    if char is None:
+        raise KeyError(f"Персонаж '{name}' не найден")
+    vc = dict(char.voice_casting or {})
+    if not vc.get("profile"):
+        raise KeyError(f"У '{name}' нет профиля: сначала cast profile")
+    with repo.get_session() as session:
+        entries = session.exec(select(ScenarioEntry)).all()
+        links = session.exec(select(SpeakerLink)).all()
+    if str(char.id) in CastingPipeline._voiced_character_ids(entries, links):
+        raise ValueError(f"Голос '{name}' уже звучит в озвучке — менять его нельзя")
+    profile = LlmVoiceCast(name=name, **{**vc["profile"], **changes}).model_dump(exclude={"name"})
+    if "instruct_zh" not in changes and any(k in changes for k in ("age", "gender", "pitch")):
+        profile["instruct_zh"] = ""  # китайское описание от LLM знало старый возраст/пол — не врать модели
+    vc.update(profile=profile, instructs=casting.instruct_variants(profile), status=casting.STATUS_PROFILED)
+    with repo.get_session() as session:
+        db_char = session.get(Character, char.id)
+        db_char.voice_casting = vc
+        session.add(db_char)
+        session.commit()
+    return {"name": name, "profile": profile, "instructs": vc["instructs"]}

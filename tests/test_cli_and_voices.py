@@ -190,13 +190,22 @@ class TestCasting(unittest.TestCase):
     PROFILE = {"gender": "female", "age": 17, "pitch": "medium-low", "timbre": "clear, slightly husky",
                "pace": "moderate", "manner": "dry, matter-of-fact", "instruct_zh": "女性，17岁"}
 
-    def test_instruct_ladder_for_women(self):
+    def test_instruct_ladder_for_young_women_starts_without_exact_age(self):
         from core.casting import instruct_variants
-        v = instruct_variants(self.PROFILE)
-        self.assertTrue(v[0].startswith("Female, 17 years old, alto range, medium-low pitch, clear, slightly husky voice"))
+        v = instruct_variants(dict(self.PROFILE, timbre="clear, youthful, slightly dry"))
+        self.assertTrue(v[0].startswith("Female, young adult woman in her early twenties, alto range, medium-low pitch, "
+                                        "clear, slightly dry voice"), v[0])
+        self.assertNotIn("youthful", " ".join(v))
         self.assertIn("alto range, low-pitched", v[1])
-        self.assertIn("not high-pitched", v[1])
-        self.assertEqual(v[2], "女性，17岁")
+        self.assertTrue(v[2].startswith("Female, 17 years old"))
+        self.assertEqual(v[3], "女性，17岁")
+
+    def test_adult_woman_exact_age_first_and_male_low_fallback(self):
+        from core.casting import instruct_variants
+        self.assertTrue(instruct_variants(dict(self.PROFILE, age=28))[0].startswith("Female, 28 years old"))
+        male = instruct_variants(dict(self.PROFILE, gender="male", age=22, instruct_zh=""))
+        self.assertTrue(male[0].startswith("Male, young adult man in his early twenties"))
+        self.assertIn("baritone range, low-pitched", male[1])
 
     def test_child_and_male(self):
         from core.casting import instruct_variants, f0_band
