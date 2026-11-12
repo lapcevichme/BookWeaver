@@ -158,8 +158,10 @@ def _design_one(tts_service, profile: dict, instructs: List[str], seed: Optional
 
 
 def _save_voice(voice_id: str, wav: bytes) -> None:
-    from core import path_manager
-    path = path_manager.get_voice_path(voice_id)
+    """Папка библиотеки storage/voices/<id>/reference.wav + reference.txt (как у всех голосов).
+    get_voice_path для еще не созданного голоса указывает в плоскую selected_refs — туда не пишем."""
+    import config
+    path = config.VOICES_DIR / voice_id / "reference.wav"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(wav)
     path.with_suffix(".txt").write_text(casting.SAMPLE_TEXT + "\n", encoding="utf-8")

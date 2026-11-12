@@ -65,10 +65,14 @@ def generic_pool(category: str) -> list:
     base = GENERIC_VOICES[category]
     voices_dir = path_manager.get_voice_path(base).parent.parent
     found = [base] if path_manager.get_voice_path(base).exists() else []
-    if voices_dir.exists():
-        extra = [d.name for d in voices_dir.iterdir() if re.fullmatch(rf"{re.escape(base)}_\d+", d.name)
-                 and path_manager.get_voice_path(d.name).exists()]
-        found += sorted(extra, key=lambda n: int(n.rsplit("_", 1)[1]))
+    names = set()
+    if voices_dir.exists():  # папки storage/voices/<id>/ и плоские storage/voices/selected_refs/<id>.wav
+        names |= {d.name for d in voices_dir.iterdir() if d.is_dir()}
+        selected = voices_dir / "selected_refs"
+        if selected.exists():
+            names |= {f.stem for f in selected.iterdir() if f.is_file()}
+    extra = [n for n in names if re.fullmatch(rf"{re.escape(base)}_\d+", n) and path_manager.get_voice_path(n).exists()]
+    found += sorted(extra, key=lambda n: int(n.rsplit("_", 1)[1]))
     return found
 
 
