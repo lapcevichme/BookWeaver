@@ -22,6 +22,7 @@ from core import path_manager
 from pipelines import prompts
 from services.model_manager import ModelManager
 from utils.metrics import metrics_collector
+from utils.sfx_rules import pick_sfx
 from utils.prompt_utils import generate_human_schema
 from utils.text_utils import split_text_for_llm
 from core.character_view import chapter_order, characters_as_of
@@ -316,11 +317,47 @@ class ScenarioGenerationPipeline:
 
     def _enrich_sound_design(self, entries: List[Dict]) -> List[Dict]:
         """
-        Подбирает эмбиент и SFX, используя Whitelist.
+        Фон — LLM без reasoning (ambient_design), эффекты — правила по явным действиям (utils/sfx_rules.py).
+        Раньше оба выбирала одна LLM с reasoning: половина LLM-времени книги ради пары эффектов.
         """
-        if not self.ambient_library and not self.sfx_library:
-            for entry in entries: entry['ambient'] = 'none'
+        valid_sfx_ids = set(self.sfx_library.keys()) if self.sfx_library else set()
+        for entry in entries:
+            if entry.get("type") == "narration" and valid_sfx_ids:
+                sfx = pick_sfx(entry.get("text") or "", valid_sfx_ids)
+                if sfx:
+                    entry["sfx"] = sfx
+
+        if not self.ambient_library:
+            for entry in entries:
+                entry["ambient"] = "none"
             return entries
+
+        minimized_scenario = []
+        for e in entries:
+            text_content = e.get("text") or "[Иллюстрация]"
+            short_text = text_content[:120] + "..." if len(text_content) > 120 else text_content
+            minimized_scenario.append({"id": str(e["id"]), "text": short_text})
+        ambient_menu = json.dumps([{"id": a["id"], "description": a.get("description", "")} for a in self.ambient_library],
+                                  ensure_ascii=False)
+        prompt = prompts.format_ambient_prompt(
+            scenario_json=json.dumps(minimized_scenario, ensure_ascii=False),
+            ambient_menu=ambient_menu,
+            schema_description=generate_human_schema(SoundDesignResult))
+        result = self.model_manager.get_llm_service('character_analyzer').call_for_pydantic(
+            SoundDesignResult, prompt, prompt_type="ambient_design")
+        if not result:
+            # Иначе в кэш ляжет сценарий без звука, и повторный запуск его уже не исправит.
+            raise ValueError("Звуковой дизайн: LLM не вернула валидный ответ")
+
+        changes = {item.entry_id: item.ambient for item in result.design if item.ambient}
+        valid_amb_ids = {a['id'] for a in self.ambient_library} | {"none"}
+        current_ambient = "none"
+        for entry in entries:
+            amb = changes.get(str(entry['id']))
+            if amb in valid_amb_ids:
+                current_ambient = amb
+            entry['ambient'] = current_ambient
+        return entries
 
         minimized_scenario = []
         for e in entries:

@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 
+# Этапы, которым reasoning не нужен, если в настройке openrouter_reasoning_by_stage не сказано иное:
+# эмбиент без reasoning выбирается так же (2026-11-06), а SFX теперь правила (utils/sfx_rules.py).
+STAGE_REASONING_DEFAULTS = {"ambient_design": "none"}
+
 PRICING_REGISTRY = {
     "xiaomi/mimo-v2-flash:free": {"input": 0.0, "output": 0.0}
 }
@@ -150,6 +154,8 @@ class LLMService:
                 logger.warning(f"openrouter_reasoning_by_stage не является JSON: {by_stage!r}")
                 by_stage = {}
         effort = by_stage.get(prompt_type)
+        if effort is None:
+            effort = STAGE_REASONING_DEFAULTS.get(prompt_type)
         if effort is None:
             effort = getattr(config, "OPENROUTER_REASONING_EFFORT", "")
         effort = (effort or "").strip().lower()

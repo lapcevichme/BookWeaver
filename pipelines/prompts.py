@@ -543,3 +543,35 @@ def format_casting_prompt(candidates: List[Dict], cast: List[Dict]) -> str:
 
 ТВОЙ ОТВЕТ (ТОЛЬКО JSON):
 """
+
+
+def format_ambient_prompt(scenario_json: str, ambient_menu: str, schema_description: str) -> str:
+    """Только фон локации; эффекты выбираются правилами (utils/sfx_rules.py)."""
+    return f"""
+<role>
+ТЫ — ЗВУКОРЕЖИССЕР АУДИОКНИГИ. Выбери фоновый звук локации строго из меню.
+</role>
+
+<rules>
+- Выбирай по тому, что СЛЫШНО в сцене: людно или пусто, внутри или снаружи, тихо или шумно. Название трека
+  может не совпадать буквально — бери ближайший по звучанию (людная столовая, где едят сотни человек, звучит как
+  tavern_lively; тихие покои — palace_hall_quiet).
+- Фон держится, пока сцена не сменится: укажи `ambient` у ПЕРВОЙ записи и у записей, где меняется место или
+  обстановка (вышли во двор к толпе, ушли в тихую комнату, начался дождь). Остальные записи не выводи.
+- Если окружения не слышно или важна тишина — "none". Только id из меню. Поле `sfx` не заполняй.
+</rules>
+
+<ambient_menu>
+{ambient_menu}
+</ambient_menu>
+
+<scenario>
+{scenario_json}
+</scenario>
+
+<output_format>
+{schema_description}
+</output_format>
+
+ТВОЙ ОТВЕТ (ТОЛЬКО JSON):
+"""
