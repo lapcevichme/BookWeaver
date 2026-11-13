@@ -127,5 +127,51 @@ class TestFactsMode(unittest.TestCase):
         self.assertEqual(char.facts, [])
 
 
+class TestTitleSuccession(unittest.TestCase):
+    """Новый носитель титула (Лоулан) не склеивается с прежним (А-Дуо) по алиасу-титулу."""
+
+    def setUp(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        self.pipeline = CharacterAnalysisPipeline(MagicMock())
+        patcher = patch("pipelines.character_analysis.config")
+        cfg = patcher.start()
+        self.addCleanup(patcher.stop)
+        cfg.CHARACTER_DESCRIPTION_MODE = "facts"
+        self.pipeline.GENERIC_ROLES_BLACKLIST = {"супруга", "евнух"}
+        self.aduo = Character(book_id="b", name="А-Дуо", aliases=["Целомудренная супруга"],
+                              description="Бывшая супруга.", spoiler_free_description="Бывшая супруга.")
+        self.jinshi = Character(book_id="b", name="Джинши", description="Евнух.", spoiler_free_description="Евнух.")
+        self.archive = CharacterArchive(characters=[self.aduo, self.jinshi])
+        self.refs = self.pipeline._assign_refs(self.archive.characters)
+
+    def _patch(self, **kw):
+        from core.data_models import LlmCharacterPatch
+        return LlmCharacterPatch.model_validate({"description_update": "Новая супруга.", **kw})
+
+    def test_new_title_holder_is_not_resolved_by_title_alias(self):
+        p = self._patch(ref=None, name="Лоулан", aliases=["Целомудренная супруга"])
+        self.assertIsNone(self.pipeline._resolve_patch(p, self.refs, self.archive))
+
+    def test_new_title_holder_is_created_without_taken_alias(self):
+        from core.data_models import LlmCharacterPatchList
+        p = self._patch(ref=None, name="Лоулан", aliases=["Целомудренная супруга", "Госпожа Лоулан"])
+        self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
+        with patch.object(self.pipeline, "_vector_match", return_value=None):
+            self.pipeline._apply_patch(self.archive, LlmCharacterPatchList(patches=[p]), self.refs, [], ["Лоулан"],
+                                       "vol_2_chap_3", "b")
+        loulan = next(c for c in self.archive.characters if c.name == "Лоулан")
+        self.assertNotIn("Целомудренная супруга", loulan.aliases)
+        self.assertEqual(self.aduo.description, "Бывшая супруга.")
+        self.assertEqual(self.aduo.aliases, ["Целомудренная супруга"])
+
+    def test_proper_name_alias_still_resolves_candidate(self):
+        p = self._patch(ref=None, name="Красивый евнух", aliases=["Джинши"])
+        self.assertIs(self.pipeline._resolve_patch(p, self.refs, self.archive), self.jinshi)
+
+    def test_explicit_ref_still_uses_aliases(self):
+        p = self._patch(ref="unknown", name="Лоулан", aliases=["Целомудренная супруга"])
+        self.assertIs(self.pipeline._resolve_patch(p, self.refs, self.archive), self.aduo)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -387,8 +387,13 @@ class CharacterAnalysisPipeline:
         return powerful_llm.call_for_pydantic(LlmCharacterPatchList, prompt, prompt_type="character_patch")
 
     def _resolve_patch(self, patch: LlmCharacterPatch, refs: dict, archive: CharacterArchive) -> Optional[Character]:
-        """Находит персонажа патча: по ref, затем по имени/алиасу (в т.ч. если модель написала имя вместо ref)."""
+        """
+        Находит персонажа патча: по ref, затем по имени/алиасу (в т.ч. если модель написала имя вместо ref).
+        Пустой ref — модель сказала «новый персонаж»: ищем по его имени и по алиасам без слов-ролей.
+        Иначе новый носитель титула («Лоулан», алиас «Целомудренная супруга») склеивается с прежним (А-Дуо).
+        """
         if patch.ref and patch.ref in refs:
+            self.stats["resolved_by_ref"] += 1
             return refs[patch.ref]
         if patch.ref:
             self.stats["patch_unknown_refs"] += 1
@@ -396,15 +401,26 @@ class CharacterAnalysisPipeline:
         for c in archive.characters:
             for n in [c.name, *(c.aliases or [])]:
                 by_name.setdefault(n.strip().lower(), c)
-        for key in [patch.ref, patch.name, *(patch.aliases or [])]:
+        if patch.ref:
+            keys = [patch.ref, patch.name, *(patch.aliases or [])]
+        else:
+            # Собственное имя в алиасах («Джинши») надежно; описание с ролью («Целомудренная супруга») — нет
+            keys = [patch.name, *(a for a in (patch.aliases or []) if a and
+                                  not any(self._is_role_word(w) for w in re.findall(r"\w+", a.lower())))]
+        for key in keys:
             if key and key.strip().lower() in by_name:
-                return by_name[key.strip().lower()]
+                char = by_name[key.strip().lower()]
+                path = "name" if key == patch.name or key == patch.ref else "alias"
+                self.stats[f"resolved_by_{path}"] += 1
+                logger.info(f"   🔗 '{patch.name or patch.ref}' -> '{char.name}' по {'имени' if path == 'name' else 'алиасу'} '{key}'")
+                return char
         # "Евнух Джинши" -> "джинши": имя без слов-ролей совпадает с известным именем или алиасом
         core = self._strip_roles(patch.name or "")
         if core:
             for known, c in by_name.items():
                 if self._strip_roles(known) == core:
                     self.stats["matched_by_stripped_role"] += 1
+                    logger.info(f"   🔗 '{patch.name}' -> '{c.name}' по имени без ролей '{known}'")
                     return c
         return None
 
@@ -455,7 +471,8 @@ class CharacterAnalysisPipeline:
                 similar = self._vector_match(patch, archive, embedding_service)
                 if similar is not None:
                     self.stats["vector_similar_not_merged"] += 1
-                char = self._create_character(patch, chapter_id, book_id)
+                taken = frozenset(n.lower() for c in archive.characters for n in [c.name, *(c.aliases or [])])
+                char = self._create_character(patch, chapter_id, book_id, taken)
                 archive.characters.append(char)
                 self.stats["created"] += 1
                 logger.info(f"✨ НОВЫЙ: {char.name} ({char.role_tier})")
@@ -495,7 +512,23 @@ class CharacterAnalysisPipeline:
             return match[0]
         return None
 
-    def _create_character(self, patch: LlmCharacterPatch, chapter_id: str, book_id: str) -> Character:
+    def _free_aliases(self, aliases, name: str, taken: frozenset) -> set:
+        """Алиасы патча без ролей, без своего имени и без занятых другими персонажами:
+        общий алиас («Целомудренная супруга» у А-Дуо и Лоулан) снова склеил бы их по совпадению."""
+        result = set()
+        for a in aliases or []:
+            a = (a or "").strip()
+            if not a or a == name or self._is_role_name(a):
+                continue
+            if a.lower() in taken:
+                self.stats["alias_taken_skipped"] += 1
+                logger.info(f"   - алиас '{a}' для '{name}' пропущен: занят другим персонажем")
+                continue
+            result.add(a)
+        return result
+
+    def _create_character(self, patch: LlmCharacterPatch, chapter_id: str, book_id: str,
+                          taken: frozenset = frozenset()) -> Character:
         description = (patch.description_update or "").strip() or "Новый персонаж."
         name = patch.name.strip()
         if self._facts_mode():
@@ -505,7 +538,7 @@ class CharacterAnalysisPipeline:
             entity_type=patch.entity_type or CharacterType.PERSON,
             description=description, spoiler_free_description=description,
             description_timeline={chapter_id: description} if patch.description_update else {},
-            aliases=sorted({a.strip() for a in (patch.aliases or []) if a and a.strip() != name and not self._is_role_name(a)}),
+            aliases=sorted(self._free_aliases(patch.aliases, name, taken)),
             role_tier=patch.role_tier or "minor", gender=patch.gender,
             visual_base=patch.visual_base or "", voice_profile=patch.voice_profile or "",
             chapter_mentions={chapter_id: patch.current_chapter_action} if patch.current_chapter_action else {},
@@ -551,12 +584,11 @@ class CharacterAnalysisPipeline:
                 if not self._is_role_name(char.name):
                     char.aliases = sorted(set(char.aliases) | {char.name})
                 char.name = new_name
-            elif not self._is_role_name(new_name):
+            elif not self._is_role_name(new_name) and new_name.lower() not in taken:
                 logger.info(f"   - имя '{new_name}' -> алиас (остается '{char.name}')")
                 char.aliases = sorted(set(char.aliases) | {new_name})
         if patch.aliases:
-            new_aliases = {a.strip() for a in patch.aliases if a and a.strip() != char.name and not self._is_role_name(a)}
-            char.aliases = sorted(set(char.aliases) | new_aliases)
+            char.aliases = sorted(set(char.aliases) | self._free_aliases(patch.aliases, char.name, taken))
         # Личное имя вместо роли («Добродетельная супруга» -> «Лишу»): модель часто кладет имя в алиасы,
         # поэтому отдельное поле и то же правило повышения, что для `name`
         personal = (patch.personal_name or "").strip()
