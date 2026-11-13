@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from collections import Counter
-from typing import List, Optional, Callable
+from typing import Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
 import config
@@ -13,7 +13,7 @@ from core.book_repository import BookRepository
 from core.data_models import (
     Character, CharacterArchive, CharacterType, ChapterStatus,
     CharacterVoiceState, CharacterVisualState, LlmReconResult, LlmCharacterPatchList, LlmCharacterPatch, LlmReconCardResult,
-    LlmCardCompact, FACT_KINDS_STATE,
+    LlmCardCompact, FACT_KINDS_STATE, ALIAS_KINDS_PERSONAL, alias_texts,
 )
 from services.model_manager import ModelManager
 from pipelines import prompts
@@ -402,11 +402,11 @@ class CharacterAnalysisPipeline:
             for n in [c.name, *(c.aliases or [])]:
                 by_name.setdefault(n.strip().lower(), c)
         if patch.ref:
-            keys = [patch.ref, patch.name, *(patch.aliases or [])]
+            keys = [patch.ref, patch.name, *alias_texts(patch)]
         else:
-            # Собственное имя в алиасах («Джинши») надежно; описание с ролью («Целомудренная супруга») — нет
-            keys = [patch.name, *(a for a in (patch.aliases or []) if a and
-                                  not any(self._is_role_word(w) for w in re.findall(r"\w+", a.lower())))]
+            # Имя, прозвище, псевдоним («Джинши») надежны; титул или роль («Целомудренная супруга») может
+            # принадлежать другому человеку. Вид пишет модель; у алиасов без вида — проверка по словам-ролям.
+            keys = [patch.name, *(a.alias for a in (patch.aliases or []) if self._is_personal_alias(a.alias, a.kind))]
         for key in keys:
             if key and key.strip().lower() in by_name:
                 char = by_name[key.strip().lower()]
@@ -444,7 +444,7 @@ class CharacterAnalysisPipeline:
         for patch in patch_list.patches:
             if patch.entity_type == CharacterType.OBJECT:
                 continue
-            names_in_patch = {k.strip().lower() for k in [patch.name, *(patch.aliases or [])] if k}
+            names_in_patch = {k.strip().lower() for k in [patch.name, *alias_texts(patch)] if k}
             from_candidate = bool(names_in_patch & candidate_keys)
             char = self._resolve_patch(patch, refs, archive)
 
@@ -512,20 +512,45 @@ class CharacterAnalysisPipeline:
             return match[0]
         return None
 
-    def _free_aliases(self, aliases, name: str, taken: frozenset) -> set:
-        """Алиасы патча без ролей, без своего имени и без занятых другими персонажами:
-        общий алиас («Целомудренная супруга» у А-Дуо и Лоулан) снова склеил бы их по совпадению."""
-        result = set()
+    def _is_personal_alias(self, alias: str, kind: Optional[str]) -> bool:
+        """Принадлежит ли алиас человеку. Вид от модели главнее; без вида — нет ли слов-ролей."""
+        if kind:
+            return kind in ALIAS_KINDS_PERSONAL
+        return bool(alias) and not any(self._is_role_word(w) for w in re.findall(r"\w+", alias.lower()))
+
+    def _free_aliases(self, aliases, name: str, taken: frozenset) -> Dict[str, Optional[str]]:
+        """
+        Алиасы патча, которые можно дать персонажу: алиас -> вид.
+        Не даются: описания (титул, роль, родство — они в фактах-состояниях и переходят к другим людям),
+        свое имя и алиасы, занятые другим персонажем (общий алиас склеил бы двоих по совпадению;
+        занятое имя — сигнал «это один человек» для IdentityLink, пишется в лог).
+        """
+        result = {}
         for a in aliases or []:
-            a = (a or "").strip()
-            if not a or a == name or self._is_role_name(a):
+            text_, kind = (a.alias or "").strip(), a.kind
+            if not text_ or text_ == name or self._is_role_name(text_):
                 continue
-            if a.lower() in taken:
+            if kind == "description":
+                self.stats["alias_description_skipped"] += 1
+                logger.info(f"   - '{text_}' для '{name}' не алиас: описание (титул/роль)")
+                continue
+            if text_.lower() in taken:
                 self.stats["alias_taken_skipped"] += 1
-                logger.info(f"   - алиас '{a}' для '{name}' пропущен: занят другим персонажем")
+                logger.info(f"   - алиас '{text_}' для '{name}' пропущен: занят другим персонажем")
                 continue
-            result.add(a)
+            result[text_] = kind
         return result
+
+    @staticmethod
+    def _add_aliases(char: Character, aliases: Dict[str, Optional[str]], chapter_id: str):
+        """Добавляет алиасы и помнит, с какой главы и какого вида каждый (первая запись не перезаписывается)."""
+        if not aliases:
+            return
+        char.aliases = sorted(set(char.aliases or []) | set(aliases))
+        meta = dict(char.alias_meta or {})
+        for alias, kind in aliases.items():
+            meta.setdefault(alias, {"kind": kind, "since": chapter_id})
+        char.alias_meta = meta
 
     def _create_character(self, patch: LlmCharacterPatch, chapter_id: str, book_id: str,
                           taken: frozenset = frozenset()) -> Character:
@@ -538,16 +563,24 @@ class CharacterAnalysisPipeline:
             entity_type=patch.entity_type or CharacterType.PERSON,
             description=description, spoiler_free_description=description,
             description_timeline={chapter_id: description} if patch.description_update else {},
-            aliases=sorted(self._free_aliases(patch.aliases, name, taken)),
             role_tier=patch.role_tier or "minor", gender=patch.gender,
             visual_base=patch.visual_base or "", voice_profile=patch.voice_profile or "",
             chapter_mentions={chapter_id: patch.current_chapter_action} if patch.current_chapter_action else {},
         )
+        self._add_aliases(char, self._free_aliases(patch.aliases, name, taken), chapter_id)
         self._apply_timelines(char, patch, chapter_id)
         if self._facts_mode() and patch.new_facts:
             self._add_facts(char, patch, chapter_id)
         char.embedding = self.model_manager.get_embedding_service().get_embedding(f"{char.name}. {description}")
         return char
+
+    @staticmethod
+    def _first_chapter(char: Character) -> Optional[str]:
+        """Первая глава персонажа по порядку вставки упоминаний/версий (главы обрабатываются по порядку)."""
+        for source in (char.chapter_mentions or {}, char.description_timeline or {}):
+            for k in source:
+                return k
+        return None
 
     def _is_name_upgrade(self, current: str, new: str, taken: frozenset = frozenset()) -> bool:
         """
@@ -582,19 +615,22 @@ class CharacterAnalysisPipeline:
             if allow_rename and self._is_name_upgrade(char.name, new_name, taken):
                 logger.info(f"   - ИМЯ: {char.name} -> {new_name}")
                 if not self._is_role_name(char.name):
-                    char.aliases = sorted(set(char.aliases) | {char.name})
+                    self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
                 char.name = new_name
             elif not self._is_role_name(new_name) and new_name.lower() not in taken:
                 logger.info(f"   - имя '{new_name}' -> алиас (остается '{char.name}')")
-                char.aliases = sorted(set(char.aliases) | {new_name})
+                self._add_aliases(char, {new_name: "name"}, chapter_id)
         if patch.aliases:
-            char.aliases = sorted(set(char.aliases) | self._free_aliases(patch.aliases, char.name, taken))
+            self._add_aliases(char, self._free_aliases(patch.aliases, char.name, taken), chapter_id)
         # Личное имя вместо роли («Добродетельная супруга» -> «Лишу»): модель часто кладет имя в алиасы,
         # поэтому отдельное поле и то же правило повышения, что для `name`
         personal = (patch.personal_name or "").strip()
         if personal and personal != char.name and allow_rename and self._is_name_upgrade(char.name, personal, taken):
             logger.info(f"   - ЛИЧНОЕ ИМЯ: {char.name} -> {personal}")
-            char.aliases = sorted((set(char.aliases) | {char.name}) - {personal})
+            # Прежнее имя-роль знали с первого появления; само личное имя — с этой главы, но это теперь name
+            self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
+            char.aliases = sorted(set(char.aliases) - {personal})
+            char.alias_meta = {k: v for k, v in (char.alias_meta or {}).items() if k != personal}
             char.name = personal
             self.stats["personal_name_renames"] += 1
         if self._facts_mode() and (patch.new_facts or patch.retired_facts):

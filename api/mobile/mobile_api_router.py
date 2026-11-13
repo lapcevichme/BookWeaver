@@ -258,8 +258,7 @@ async def get_character_details(
                 avatar_url=f"/static/books/{bookId}/chars/{target_char.id}.jpg",
                 description=view.description,
                 spoiler_free_description=target_char.spoiler_free_description,
-                # Ограничение: алиасы не версионируются; если среди них «настоящее имя», это спойлер.
-                aliases=target_char.aliases,
+                aliases=view.aliases,
                 chapter_mentions=view.chapter_mentions,
                 as_of_chapter=asOfChapter,
                 description_from_chapter=view.description_from,

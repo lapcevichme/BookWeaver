@@ -25,6 +25,7 @@ class CharacterAsOf:
     description_from: Optional[str]          # глава, из которой взята версия описания; None — запасное описание
     first_chapter: Optional[str]
     chapter_mentions: Dict[str, str] = field(default_factory=dict)
+    aliases: List[str] = field(default_factory=list)  # только те, что читатель знает к этой главе
 
 
 def _known_chapters(char: Character, order: Dict[str, int], limit: int) -> List[str]:
@@ -55,7 +56,23 @@ def character_as_of(char: Character, order: Dict[str, int], as_of: str) -> Optio
 
     mentions = {k: v for k, v in (char.chapter_mentions or {}).items() if k in order and order[k] <= limit}
     return CharacterAsOf(character=char, description=description, description_from=description_from,
-                         first_chapter=known[0], chapter_mentions=mentions)
+                         first_chapter=known[0], chapter_mentions=mentions,
+                         aliases=_aliases_as_of(char, order, limit))
+
+
+def _aliases_as_of(char: Character, order: Dict[str, int], limit: int) -> List[str]:
+    """
+    Алиасы, известные к главе: «Ка Зуйгэцу» у Джинши раскрыт в 3.20 — раньше его показывать нельзя.
+    Алиас без записи в alias_meta (проекты до версионирования) или с неизвестной главой считается
+    известным с первого появления персонажа.
+    """
+    meta = char.alias_meta or {}
+    result = []
+    for alias in char.aliases or []:
+        since = (meta.get(alias) or {}).get("since")
+        if since is None or since not in order or order[since] <= limit:
+            result.append(alias)
+    return result
 
 
 def characters_as_of(chars: Iterable[Character], order: Dict[str, int], as_of: str) -> List[CharacterAsOf]:

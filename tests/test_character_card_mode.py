@@ -173,5 +173,66 @@ class TestTitleSuccession(unittest.TestCase):
         self.assertIs(self.pipeline._resolve_patch(p, self.refs, self.archive), self.aduo)
 
 
+class TestAliasKinds(unittest.TestCase):
+    """Вид алиаса пишет модель: описание (титул/роль) не становится алиасом и не сопоставляет персонажей."""
+
+    def setUp(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        self.pipeline = CharacterAnalysisPipeline(MagicMock())
+        patcher = patch("pipelines.character_analysis.config")
+        cfg = patcher.start()
+        self.addCleanup(patcher.stop)
+        cfg.CHARACTER_DESCRIPTION_MODE = "facts"
+        self.pipeline.GENERIC_ROLES_BLACKLIST = {"супруга", "евнух"}
+
+    def _patch(self, **kw):
+        from core.data_models import LlmCharacterPatch
+        return LlmCharacterPatch.model_validate(kw)
+
+    def test_description_alias_is_not_added(self):
+        char = Character(book_id="b", name="Джинши", description="d", spoiler_free_description="d")
+        self.pipeline._update_character(char, self._patch(ref="x", aliases=[
+            {"alias": "наследник", "kind": "description"}, {"alias": "Ка Зуйгэцу", "kind": "name"}]),
+            "vol_3_chap_20", {})
+        self.assertEqual(char.aliases, ["Ка Зуйгэцу"])
+        self.assertEqual(char.alias_meta["Ка Зуйгэцу"], {"kind": "name", "since": "vol_3_chap_20"})
+        self.assertEqual(self.pipeline.stats["alias_description_skipped"], 1)
+
+    def test_first_since_is_kept(self):
+        char = Character(book_id="b", name="Маомао", description="d", spoiler_free_description="d")
+        self.pipeline._update_character(char, self._patch(ref="x", aliases=[{"alias": "Веснушка", "kind": "nickname"}]),
+                                        "vol_1_chap_3", {})
+        self.pipeline._update_character(char, self._patch(ref="x", aliases=["Веснушка"]), "vol_2_chap_1", {})
+        self.assertEqual(char.alias_meta["Веснушка"]["since"], "vol_1_chap_3")
+
+    def test_new_patch_matches_by_personal_alias_kind_only(self):
+        heir = Character(book_id="b", name="Принц", aliases=["Наследник", "Ка Зуйгэцу"],
+                         description="d", spoiler_free_description="d")
+        archive = CharacterArchive(characters=[heir])
+        refs = self.pipeline._assign_refs(archive.characters)
+        by_title = self._patch(name="Новый", aliases=[{"alias": "Наследник", "kind": "description"}])
+        by_name = self._patch(name="Маска", aliases=[{"alias": "Ка Зуйгэцу", "kind": "name"}])
+        self.assertIsNone(self.pipeline._resolve_patch(by_title, refs, archive))
+        self.assertIs(self.pipeline._resolve_patch(by_name, refs, archive), heir)
+
+    def test_personal_name_keeps_role_as_previous_name(self):
+        char = Character(book_id="b", name="Добродетельная супруга", description="d", spoiler_free_description="d",
+                         chapter_mentions={"vol_1_chap_15": "x"})
+        self.pipeline._update_character(char, self._patch(ref="x", personal_name="Лишу"), "vol_1_chap_17", {})
+        self.assertEqual(char.name, "Лишу")
+        self.assertEqual(char.alias_meta["Добродетельная супруга"], {"kind": "previous_name", "since": "vol_1_chap_15"})
+
+
+class TestAliasesAsOf(unittest.TestCase):
+    def test_alias_hidden_before_its_chapter(self):
+        from core.character_view import character_as_of
+        order = {"vol_1_chap_3": 3, "vol_3_chap_19": 90, "vol_3_chap_20": 91}
+        char = Character(book_id="b", name="Джинши", description="d", spoiler_free_description="d",
+                         aliases=["Ка Зуйгэцу", "Красивый евнух"], chapter_mentions={"vol_1_chap_3": "x"},
+                         alias_meta={"Ка Зуйгэцу": {"kind": "name", "since": "vol_3_chap_20"}})
+        self.assertEqual(character_as_of(char, order, "vol_3_chap_19").aliases, ["Красивый евнух"])
+        self.assertEqual(character_as_of(char, order, "vol_3_chap_20").aliases, ["Ка Зуйгэцу", "Красивый евнух"])
+
+
 if __name__ == "__main__":
     unittest.main()

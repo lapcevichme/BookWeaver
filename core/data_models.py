@@ -223,6 +223,9 @@ class Character(SQLModel, table=True):
     name: str = Field(..., index=True)
     entity_type: CharacterType = Field(default=CharacterType.PERSON)
     aliases: List[str] = Field(default_factory=list, sa_column=Column(MutableList.as_mutable(JSON)))
+    # Алиас -> {"kind": ALIAS_KINDS | "previous_name", "since": id главы}: с какой главы читатель знает это имя.
+    # Алиасы без записи — из проектов до версионирования, считаются известными с первого появления.
+    alias_meta: Dict[str, Dict[str, Optional[str]]] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
     gender: Optional[CharacterGender] = Field(default=None, sa_column=Column(String, nullable=True))
     role_tier: RoleTier = Field(default=RoleTier.BACKGROUND, sa_column=Column(String, default=RoleTier.BACKGROUND))
     spoiler_free_description: str = Field(..., sa_column=Column(Text))
@@ -444,13 +447,33 @@ class LlmCardCompact(PydanticBaseModel):
     card: str = Field(..., description="Сжатая карточка")
 
 
+ALIAS_KINDS = ("name", "nickname", "cover", "description")
+ALIAS_KINDS_PERSONAL = ("name", "nickname", "cover")  # принадлежат человеку; description может перейти к другому
+
+
+class LlmAlias(PydanticBaseModel):
+    """Алиас с видом: титул или роль («Целомудренная супруга») — не имя, может перейти к другому человеку."""
+    alias: str = Field(..., description="Как назван в тексте")
+    kind: Optional[str] = Field(None, description=" | ".join(ALIAS_KINDS))
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce(cls, data: Any):
+        if isinstance(data, str):  # старый формат: строка без вида
+            return {"alias": data, "kind": None}
+        if isinstance(data, dict) and isinstance(data.get("kind"), str):
+            kind = data["kind"].strip().lower()
+            data["kind"] = kind if kind in ALIAS_KINDS else None
+        return data
+
+
 class LlmCharacterPatch(PydanticBaseModel):
     ref: Optional[str] = Field(None, description="ref из входных данных; для нового персонажа не пиши")
     name: Optional[str] = Field(None, description="Каноническое имя")
     entity_type: Optional[CharacterType] = None
     role_tier: Optional[RoleTier] = None
     gender: Optional[CharacterGender] = None
-    aliases: Optional[List[str]] = Field(None, description="Только новые имена/прозвища/титулы из этой главы")
+    aliases: Optional[List[LlmAlias]] = Field(None, description="Только новые имена из этой главы, каждое с видом")
     current_chapter_action: Optional[str] = Field(None, description="Что делает в этой главе, одно предложение")
     description_update: Optional[str] = Field(None, description="Полное актуальное описание, только если глава добавила новое")
     visual_base: Optional[str] = Field(None, description="Только если у персонажа пусто")
@@ -467,6 +490,9 @@ class LlmCharacterPatch(PydanticBaseModel):
     def coerce(cls, data: Any):
         if not isinstance(data, dict):
             return data
+        if isinstance(data.get("aliases"), list):
+            data["aliases"] = [a for a in data["aliases"]
+                               if (isinstance(a, str) and a.strip()) or (isinstance(a, dict) and str(a.get("alias") or "").strip())]
         if data.get("retired_facts") is not None:
             data["retired_facts"] = [str(x).strip() for x in data["retired_facts"] if x is not None]
         if isinstance(data.get("new_facts"), list):
@@ -490,6 +516,11 @@ class LlmCharacterPatch(PydanticBaseModel):
             if data.get(key) is not None and data[key] not in {e.value for e in enum}:
                 data[key] = None
         return data
+
+
+def alias_texts(patch: "LlmCharacterPatch") -> List[str]:
+    """Все алиасы патча строками (с описаниями)."""
+    return [a.alias.strip() for a in (patch.aliases or []) if a.alias and a.alias.strip()]
 
 
 class LlmCharacterPatchList(PydanticBaseModel):
