@@ -312,17 +312,24 @@ def cmd_inspect_voices(args) -> dict:
         links_by_chapter.setdefault(link.chapter_id, []).append(link)
     contexts = {ch: link_context(links_by_chapter.get(ch, []), [e for e in entries if e.chapter_id == ch])
                 for ch in {e.chapter_id for e in entries}}
-    rows = Counter()
+    from pipelines.identity_links import identity_voices
+    identity = identity_voices(repo)
+    rows, revoice = Counter(), Counter()
     for e in entries:
         link, idx = contexts[e.chapter_id].get(e.speaker_name, (None, 0))
-        v = resolve_voice(e.speaker_name, chars, config, speaker_id=e.speaker_id, link=link, extra_index=idx)
-        rows[(e.speaker_name or "Рассказчик", v.voice_id, v.source, v.exists, v.wanted, _link_note(link, names))] += 1
+        v = resolve_voice(e.speaker_name, chars, config, speaker_id=e.speaker_id, link=link, extra_index=idx,
+                          identity=identity, chapter_id=e.chapter_id)
+        rows[(e.speaker_name or "Рассказчик", v.voice_id, v.source, v.exists, v.wanted, _link_note(link, names), v.via)] += 1
+        if v.via and e.audio_file:
+            # Озвучено до того, как связь начала менять голос: аудио звучит голосом персоны
+            revoice[(e.chapter_id, e.speaker_name, v.voice_id)] += 1
     speakers = [{"speaker": k[0], "replicas": n, "voice": k[1], "source": k[2], "exists": k[3], "wanted": k[4],
-                 "link": k[5]} for k, n in rows.most_common()]
+                 "link": k[5], "identity": k[6]} for k, n in rows.most_common()]
     known_ids = {c.id for c in chars}
     stale = {str(k): v for k, v in config.character_voices.items() if k not in known_ids}
     return {"book": args.book, "chapter": args.chapter, "narrator_voice": config.default_narrator_voice,
-            "speakers": speakers, "config_voices_without_character": stale}
+            "speakers": speakers, "config_voices_without_character": stale,
+            "revoice": [{"chapter": k[0], "speaker": k[1], "voice": k[2], "replicas": n} for k, n in sorted(revoice.items())]}
 
 
 def cmd_inspect_emotions(args) -> dict:
@@ -657,7 +664,10 @@ def _human(command: str, result: dict) -> str:
     if command == "voices":
         out = [f"Рассказчик: {result['narrator_voice']}",
                _table([{**s, "exists": "да" if s["exists"] else "НЕТ ФАЙЛА"} for s in result["speakers"]],
-                      ["speaker", "replicas", "voice", "source", "exists", "wanted", "link"])]
+                      ["speaker", "replicas", "voice", "source", "exists", "wanted", "link", "identity"])]
+        if result.get("revoice"):
+            out += ["\nУже озвучено другим голосом (связь личностей меняет голос) — нужна переозвучка:",
+                    _table(result["revoice"], ["chapter", "speaker", "voice", "replicas"])]
         if result["config_voices_without_character"]:
             out.append(f"В config.character_voices есть голоса для несуществующих персонажей: {result['config_voices_without_character']}")
         return "\n".join(out)

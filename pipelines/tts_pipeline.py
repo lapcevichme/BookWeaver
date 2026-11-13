@@ -83,6 +83,8 @@ class TTSPipeline:
             chars = repo.get_characters()
             from pipelines.speaker_resolution import chapter_links
             links = link_context(chapter_links(repo, chapter_id), scenario_entries)
+            from pipelines.identity_links import identity_voices
+            identity = identity_voices(repo)  # связи личностей: чьим голосом звучит персонаж в этой главе
 
             update_progress(0.1, stage, "Все данные успешно загружены.")
 
@@ -117,7 +119,9 @@ class TTSPipeline:
                 character_name = entry.speaker_name
                 link, extra_index = links.get(character_name, (None, 0))
                 voice = resolve_voice(character_name, chars, manifest.config, speaker_id=entry.speaker_id,
-                                      link=link, extra_index=extra_index)
+                                      link=link, extra_index=extra_index, identity=identity, chapter_id=chapter_id)
+                if voice.via:
+                    logger.info(f"Голос через связь личностей: {voice.via} -> {voice.voice_id}")
                 voice_id, actual_voice_path = voice.voice_id, voice.path
                 if voice.source == SOURCE_FALLBACK:
                     hint = f" Подошел бы общий '{voice.wanted}', но он еще не создан." if voice.wanted else ""

@@ -5,7 +5,7 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Dict, Iterable, Optional
 
 from core import path_manager
 
@@ -54,6 +54,7 @@ class VoiceChoice:
     source: str
     path: Path
     wanted: str = ""  # для fallback: какой общий голос подошел бы, но еще не создан
+    via: str = ""     # голос взят через связь личностей: «Шисуй → Лоулан (switch_after_reveal с vol_4_chap_14)»
 
     @property
     def exists(self) -> bool:
@@ -133,8 +134,57 @@ def character_category(character) -> Optional[str]:
     return ("old_" if old else "") + gender
 
 
+class IdentityVoices:
+    """
+    Чьим голосом звучит персонаж в главе с учетом подтвержденных IdentityLink (docs/design/identity-links.md).
+    Без связей и при voice_policy=separate — своим. Персонажи не сливаются: меняется только владелец голоса.
+    - duplicate: всегда голос основной записи (это ошибка базы, а не тайна книги);
+    - same_person, possession: shared — голос true всегда; switch_after_reveal — с главы revealed_in;
+    - impersonation: только в active_chapters и если политика не separate (shared — всегда в них,
+      switch_after_reveal — с revealed_in).
+    Цепочки (A = B, B = C) разворачиваются; циклы обрываются.
+    """
+    MAX_HOPS = 5
+
+    def __init__(self, links: Iterable, order: Dict[str, int]):
+        self.order = order
+        self.by_persona: Dict[str, list] = {}
+        for l in links:
+            if l.status == "confirmed":
+                self.by_persona.setdefault(str(l.persona_id), []).append(l)
+
+    def _after_reveal(self, link, chapter_id: Optional[str]) -> bool:
+        if not link.revealed_in or chapter_id not in self.order or link.revealed_in not in self.order:
+            return False
+        return self.order[chapter_id] >= self.order[link.revealed_in]
+
+    def _applies(self, link, chapter_id: Optional[str]) -> bool:
+        if link.relation == "duplicate":
+            return True
+        if link.voice_policy == "separate":
+            return False
+        if link.relation == "impersonation" and chapter_id not in (link.active_chapters or []):
+            return False
+        return link.voice_policy == "shared" or (link.voice_policy == "switch_after_reveal"
+                                                 and self._after_reveal(link, chapter_id))
+
+    def owner(self, character_id, chapter_id: Optional[str]):
+        """(id владельца голоса, пояснение) — id исходного персонажа и "" если связь не действует."""
+        current, seen, notes = str(character_id), {str(character_id)}, []
+        for _ in range(self.MAX_HOPS):
+            link = next((l for l in self.by_persona.get(current, []) if self._applies(l, chapter_id)), None)
+            if link is None or str(link.true_id) in seen:
+                break
+            notes.append(f"{link.relation}/{link.voice_policy}"
+                         + (f" с {link.revealed_in}" if link.voice_policy == "switch_after_reveal" else ""))
+            current = str(link.true_id)
+            seen.add(current)
+        return current, "; ".join(notes)
+
+
 def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config, speaker_id=None,
-                  link=None, extra_index: int = 0) -> VoiceChoice:
+                  link=None, extra_index: int = 0, identity: Optional[IdentityVoices] = None,
+                  chapter_id: Optional[str] = None) -> VoiceChoice:
     """
     Персонаж ищется по speaker_id реплики, имя — запасной путь: после переименования
     («Евнух» → «Джинши») старые реплики хранят прежнее имя, но тот же id.
@@ -143,11 +193,13 @@ def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config
     Порядок: рассказчик → voice_base персонажа (если папка голоса есть) →
     config.character_voices[id персонажа] → общий голос по полу/возрасту (если создан) →
     голос рассказчика (откат).
+    identity + chapter_id — связи личностей: персонаж звучит голосом владельца (IdentityVoices.owner).
     """
     narrator = book_config.default_narrator_voice
+    via = ""
 
     def choice(voice_id: str, source: str, wanted: str = "") -> VoiceChoice:
-        return VoiceChoice(voice_id, source, path_manager.get_voice_path(voice_id), wanted)
+        return VoiceChoice(voice_id, source, path_manager.get_voice_path(voice_id), wanted, via)
 
     characters = list(characters)
     if speaker_id is None and link is not None and link.kind == "character" and link.status == "confirmed":
@@ -157,6 +209,12 @@ def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config
         return choice(narrator, SOURCE_NARRATOR)
     if char is None:
         char = next((c for c in characters if c.name == speaker_name), None)
+    if char and identity is not None:
+        owner_id, note = identity.owner(char.id, chapter_id)
+        owner = next((c for c in characters if str(c.id) == owner_id), None) if owner_id != str(char.id) else None
+        if owner is not None:
+            via = f"{char.name} → {owner.name} ({note})"
+            char = owner
     if char and char.voice_base and path_manager.get_voice_path(char.voice_base).exists():
         return choice(char.voice_base, SOURCE_VOICE_BASE)
 

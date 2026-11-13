@@ -150,5 +150,71 @@ class TestIdentityPipeline(unittest.TestCase):
         self.assertEqual((link.revealed_in, link.source), ("vol_4_chap_14", "secret_scan"))
 
 
+class TestIdentityVoices(unittest.TestCase):
+    """Чьим голосом звучит персонаж: политика связи, глава раскрытия, период подмены, цепочки."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+        from uuid import uuid4
+        from core import voices
+        self.voices = voices
+        self.lib = Path(tempfile.mkdtemp())
+        for name in ("narrator", "shisui_v", "loulan_v", "brother_v", "aduo_v"):
+            (self.lib / name).mkdir()
+            (self.lib / name / "reference.wav").write_bytes(b"RIFF")
+        p = patch.object(voices.path_manager, "get_voice_path", side_effect=lambda vid: self.lib / vid / "reference.wav")
+        p.start()
+        self.addCleanup(p.stop)
+        mk = lambda name, v: SimpleNamespace(id=uuid4(), name=name, voice_base=v)
+        self.shisui, self.loulan = mk("Шисуй", "shisui_v"), mk("Лоулан", "loulan_v")
+        self.brother, self.aduo = mk("Младший брат Императора", "brother_v"), mk("А-Дуо", "aduo_v")
+        self.chars = [self.shisui, self.loulan, self.brother, self.aduo]
+        self.config = SimpleNamespace(default_narrator_voice="narrator", character_voices={})
+        self.order = {"vol_3_chap_3": 1, "vol_4_chap_9": 2, "vol_4_chap_14": 3, "vol_4_chap_20": 4}
+
+    def _link(self, persona, true, relation="same_person", policy="separate", status="confirmed",
+              revealed_in=None, active=()):
+        from types import SimpleNamespace
+        return SimpleNamespace(persona_id=persona.id, true_id=true.id, relation=relation, voice_policy=policy,
+                               status=status, revealed_in=revealed_in, active_chapters=list(active))
+
+    def _voice(self, char, chapter, *links):
+        identity = self.voices.IdentityVoices(links, self.order)
+        return self.voices.resolve_voice(char.name, self.chars, self.config, speaker_id=char.id,
+                                         identity=identity, chapter_id=chapter)
+
+    def test_separate_keeps_own_voice(self):
+        v = self._voice(self.shisui, "vol_4_chap_20", self._link(self.shisui, self.loulan, revealed_in="vol_4_chap_14"))
+        self.assertEqual((v.voice_id, v.via), ("shisui_v", ""))
+
+    def test_switch_after_reveal(self):
+        link = self._link(self.shisui, self.loulan, policy="switch_after_reveal", revealed_in="vol_4_chap_14")
+        self.assertEqual(self._voice(self.shisui, "vol_3_chap_3", link).voice_id, "shisui_v")
+        v = self._voice(self.shisui, "vol_4_chap_14", link)
+        self.assertEqual(v.voice_id, "loulan_v")
+        self.assertIn("Шисуй → Лоулан", v.via)
+
+    def test_shared_everywhere_and_unconfirmed_ignored(self):
+        self.assertEqual(self._voice(self.shisui, "vol_3_chap_3", self._link(self.shisui, self.loulan, policy="shared")).voice_id, "loulan_v")
+        self.assertEqual(self._voice(self.shisui, "vol_3_chap_3",
+                                     self._link(self.shisui, self.loulan, policy="shared", status="suggested")).voice_id, "shisui_v")
+
+    def test_impersonation_only_in_active_chapters(self):
+        link = self._link(self.brother, self.aduo, relation="impersonation", policy="shared",
+                          revealed_in="vol_4_chap_9", active=["vol_4_chap_9"])
+        self.assertEqual(self._voice(self.brother, "vol_4_chap_9", link).voice_id, "aduo_v")
+        self.assertEqual(self._voice(self.brother, "vol_4_chap_14", link).voice_id, "brother_v")
+
+    def test_duplicate_always_merges_voice(self):
+        v = self._voice(self.shisui, "vol_3_chap_3", self._link(self.shisui, self.loulan, relation="duplicate"))
+        self.assertEqual(v.voice_id, "loulan_v")
+
+    def test_chain_and_cycle(self):
+        chain = [self._link(self.shisui, self.loulan, policy="shared"), self._link(self.loulan, self.aduo, policy="shared")]
+        self.assertEqual(self._voice(self.shisui, "vol_3_chap_3", *chain).voice_id, "aduo_v")
+        cycle = [self._link(self.shisui, self.loulan, policy="shared"), self._link(self.loulan, self.shisui, policy="shared")]
+        self.assertEqual(self._voice(self.shisui, "vol_3_chap_3", *cycle).voice_id, "loulan_v")
+
+
 if __name__ == "__main__":
     unittest.main()

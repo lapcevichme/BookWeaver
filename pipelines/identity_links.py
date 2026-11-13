@@ -331,6 +331,15 @@ class IdentitySuggestPipeline:
         return counts
 
 
+def identity_voices(repo: BookRepository):
+    """Резолвер голоса по подтвержденным связям книги (core.voices.IdentityVoices)."""
+    from core.voices import IdentityVoices
+    with repo.get_session() as session:
+        links = session.exec(select(IdentityLink).where(IdentityLink.book_id == repo.book_id,
+                                                        IdentityLink.status == "confirmed")).all()
+    return IdentityVoices(links, chapter_order(repo.get_all_chapters()))
+
+
 def list_links(repo: BookRepository, include_all: bool = False) -> List[dict]:
     names = {c.id: c.name for c in repo.get_characters()}
     order = chapter_order(repo.get_all_chapters())
