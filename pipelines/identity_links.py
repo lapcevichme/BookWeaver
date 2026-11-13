@@ -81,6 +81,11 @@ class LlmIdentityJudgement(BaseModel):
     evidence: str = Field("", description="Коротко, на что опирается ответ, с номерами глав")
 
 
+class LlmImpersonationScope(BaseModel):
+    chapters: List[str] = Field(default_factory=list, description="id глав, где самозванец действует под видом персоны")
+    evidence: str = ""
+
+
 class LlmSecretLink(BaseModel):
     fact_id: int
     a: str = Field(..., description="Точное имя записи базы")
@@ -148,6 +153,96 @@ def scan_secret_facts(llm, chars: List[Character]) -> List[dict]:
         found.append({"x": a, "y": b, "chapter": fact.get("chapter"),
                       "evidence": f"{owner.name}, гл. {_ch(fact.get('chapter'))}: {fact['fact']}"})
     return found
+
+
+def scope_prompt(persona: Character, impostor: Character, order: Dict[str, int]) -> str:
+    """Действия обоих по главам (где появляется хоть один) + их secret-факты."""
+    chapters = sorted(set(persona.chapter_mentions or {}) | set(impostor.chapter_mentions or {}),
+                      key=lambda k: order.get(k, 1 << 30))
+    rows = []
+    for k in chapters:
+        rows.append(f"{k}:")
+        if k in (persona.chapter_mentions or {}):
+            rows.append(f"  «{persona.name}»: {persona.chapter_mentions[k]}")
+        if k in (impostor.chapter_mentions or {}):
+            rows.append(f"  «{impostor.name}»: {impostor.chapter_mentions[k]}")
+    secrets = [f"  - {c.name}, {f.get('chapter')}: {f['fact']}" for c in (persona, impostor)
+               for f in (c.facts or []) if f.get("kind") == "secret"]
+    return f"""В книге «{impostor.name}» выдает себя за «{persona.name}» (двойник, подмена). Читатель видит «{persona.name}»,
+а на деле это «{impostor.name}». Определи ГЛАВЫ, в которых под видом «{persona.name}» действует «{impostor.name}»:
+- в том числе главы ДО раскрытия, если текст потом объясняет, что подмена уже шла (сцены «{persona.name}» там — это «{impostor.name}»);
+- НЕ включай главы, где «{persona.name}» — сам(а) себя, или где о подмене только вспоминают.
+Опирайся на действия по главам и тайны. Используй только id глав из списка.
+
+Тайны:
+{chr(10).join(secrets) or '  —'}
+
+Действия по главам:
+{chr(10).join(rows)}
+
+Ответ — JSON: {{"chapters": ["vol_N_chap_M", ...], "evidence": "коротко, почему эти главы"}}"""
+
+
+def scope_impersonation(llm, persona: Character, impostor: Character, order: Dict[str, int]) -> Optional[LlmImpersonationScope]:
+    result = llm.call_for_pydantic(LlmImpersonationScope, scope_prompt(persona, impostor, order),
+                                   prompt_type="identity_scope")
+    if result is None:
+        return None
+    known = set(persona.chapter_mentions or {}) | set(impostor.chapter_mentions or {})
+    dropped = [c for c in result.chapters if c not in order]
+    if dropped:
+        logger.warning(f"Период подмены {impostor.name} -> {persona.name}: неизвестные главы {dropped}")
+    result.chapters = sorted({c for c in result.chapters if c in order}, key=order.__getitem__)
+    outside = [c for c in result.chapters if c not in known]
+    if outside:
+        logger.info(f"Период подмены {impostor.name} -> {persona.name}: главы без упоминаний обоих {outside}")
+    return result
+
+
+def update_scopes(repo: BookRepository, llm, prefix: Optional[str] = None, force: bool = False) -> List[dict]:
+    """Период для подмен без него (или для одной связи по id). Решение человека о статусе не трогает."""
+    metrics_collector.start_book(repo.book_id)
+    chars = {c.id: c for c in repo.get_characters()}
+    order = chapter_order(repo.get_all_chapters())
+    with repo.get_session() as session:
+        links = session.exec(select(IdentityLink).where(IdentityLink.book_id == repo.book_id,
+                                                        IdentityLink.relation == "impersonation")).all()
+    if prefix:
+        links = [l for l in links if str(l.id).startswith(prefix)]
+    else:
+        links = [l for l in links if l.status in ("suggested", "confirmed") and (force or not l.active_chapters)]
+    links = [l for l in links if l.persona_id in chars and l.true_id in chars]
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        results = list(ex.map(lambda l: (l, scope_impersonation(llm, chars[l.persona_id], chars[l.true_id], order)), links))
+    done = []
+    with repo.get_session() as session:
+        for link, r in results:
+            if r is None:
+                logger.warning(f"Период подмены {str(link.id)[:8]}: LLM не вернула валидный ответ")
+                continue
+            link = session.get(IdentityLink, link.id)
+            link.active_chapters = r.chapters
+            if r.evidence:
+                link.evidence = f"{link.evidence}\nпериод: {r.evidence}".strip()
+            session.add(link)
+            done.append({"id": str(link.id)[:8], "chapters": r.chapters})
+        session.commit()
+    return done
+
+
+def set_scope(book_name: str, prefix: str, chapters: List[str]) -> IdentityLink:
+    repo = BookRepository(book_name)
+    order = chapter_order(repo.get_all_chapters())
+    unknown = [c for c in chapters if c not in order]
+    if unknown:
+        raise KeyError(f"Нет глав: {unknown}")
+    with repo.get_session() as session:
+        link = _get_by_prefix(session, book_name, prefix)
+        link.active_chapters = sorted(set(chapters), key=order.__getitem__)
+        session.add(link)
+        session.commit()
+        session.refresh(link)
+        return link
 
 
 def _find_pair(session, book_id: str, a: UUID, b: UUID) -> Optional[IdentityLink]:
@@ -231,6 +326,7 @@ class IdentitySuggestPipeline:
                     counts["suggested"] += 1
                 session.add(link)
             session.commit()
+        counts["scoped"] = len(update_scopes(repo, llm))
         logger.info(f"Связи личностей {book_name}: {counts}")
         return counts
 
@@ -247,7 +343,23 @@ def list_links(repo: BookRepository, include_all: bool = False) -> List[dict]:
              "relation": l.relation, "revealed_in": l.revealed_in or "", "confidence":
                  f"{l.confidence:.3f}" if l.confidence is not None else "", "status": l.status,
              "source": l.source, "voice_policy": l.voice_policy,
+             "chapters": _ranges(l.active_chapters, order),
              "evidence": " | ".join(x for x in (l.evidence or "").splitlines() if x)} for l in links]
+
+
+def _ranges(chapters: List[str], order: Dict[str, int]) -> str:
+    """['vol_3_chap_3', 'vol_3_chap_4', 'vol_3_chap_8'] -> '3.3–3.4, 3.8' (подряд по порядку книги — диапазоном)."""
+    if not chapters:
+        return ""
+    by_pos = {v: k for k, v in order.items()}
+    pos = sorted(order[c] for c in chapters if c in order)
+    out, start = [], None
+    for i, p in enumerate(pos):
+        start = p if start is None else start
+        if i + 1 == len(pos) or pos[i + 1] != p + 1:
+            out.append(_ch(by_pos[start]) + ("" if start == p else f"–{_ch(by_pos[p])}"))
+            start = None
+    return ", ".join(out)
 
 
 def _get_by_prefix(session, book_id: str, prefix: str) -> IdentityLink:

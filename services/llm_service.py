@@ -22,7 +22,7 @@ PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 # отвечает «не изменилось» (14 отметок из 122 против 45), docs/experiments/2026-11-13_character-cards.md
 # Судья связей личностей: low хватает (11/11 на парах Кусурии), docs/experiments/2026-11-13_identity-signals.md
 STAGE_REASONING_DEFAULTS = {"ambient_design": "none", "character_recon": "low",
-                            "identity_scan": "low", "identity_judge": "low"}
+                            "identity_scan": "low", "identity_judge": "low", "identity_scope": "low"}
 
 PRICING_REGISTRY = {
     "xiaomi/mimo-v2-flash:free": {"input": 0.0, "output": 0.0}

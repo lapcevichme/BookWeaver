@@ -364,6 +364,9 @@ class IdentityLink(SQLModel, table=True):
     true_id: UUID = Field(sa_column=Column(ForeignKey("character.id", ondelete="CASCADE"), nullable=False))
     relation: str = Field(default="same_person")
     revealed_in: Optional[str] = None           # глава, где узнает читатель; пусто — подозрение без раскрытия
+    # Главы, где самозванец действует под видом персоны (impersonation): «брата Императора» в 4.9 играет А-Дуо,
+    # в остальных главах — сам Джинши. Пусто — без ограничения (same_person, duplicate) или еще не определено.
+    active_chapters: List[str] = Field(default_factory=list, sa_column=Column(MutableList.as_mutable(JSON)))
     confidence: Optional[float] = None          # вероятность выбранного варианта (logprobs); None — не оценено
     scores: Dict[str, float] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
     evidence: str = Field(default="", sa_column=Column(Text))

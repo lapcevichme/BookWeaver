@@ -102,15 +102,28 @@ class TestIdentityPipeline(unittest.TestCase):
         # Шисуй ~ Лоулан: A (Шисуй — маска); Лоулан ~ Рэмпу: D (Y=Рэмпу выдает себя за X=Лоулан)
         llm = MagicMock()
         llm.choice_probabilities.side_effect = lambda prompt, *a, **k: {"A": 0.99} if "X («Шисуй»)" in prompt else {"D": 0.98}
-        llm.call_for_pydantic.side_effect = lambda model, prompt, **k: il.LlmIdentityJudgement(
-            answer="A" if "X («Шисуй»)" in prompt else "D")
+        llm.call_for_pydantic.side_effect = lambda model, prompt, **k: (
+            il.LlmImpersonationScope(chapters=["vol_3_chap_3", "vol_4_chap_12", "vol_9_chap_9"])
+            if model is il.LlmImpersonationScope else
+            il.LlmIdentityJudgement(answer="A" if "X («Шисуй»)" in prompt else "D"))
         counts = self._run(llm, scan=False)
-        self.assertEqual((counts["suggested"], counts["judged"]), (2, 2))
+        self.assertEqual((counts["suggested"], counts["judged"], counts["scoped"]), (2, 2, 1))
         by_relation = {l.relation: l for l in self._links()}
         same = by_relation["same_person"]
         self.assertEqual((same.persona_id, same.true_id, same.status), (self.shisui.id, self.loulan.id, "suggested"))
         imp = by_relation["impersonation"]
         self.assertEqual((imp.persona_id, imp.true_id), (self.loulan.id, self.rempu.id))  # видят Лоулан, на деле Рэмпу
+        # Период подмены — только у impersonation; несуществующая глава отброшена
+        self.assertEqual(imp.active_chapters, ["vol_3_chap_3", "vol_4_chap_12"])
+        self.assertEqual(same.active_chapters, [])
+
+    def test_manual_scope_and_ranges(self):
+        link = il.add_candidate(self.repo, self.loulan, self.rempu, "vol_4_chap_12", "human", "")
+        il.set_scope("b", str(link.id)[:8], ["vol_4_chap_14", "vol_3_chap_3", "vol_4_chap_12"])
+        row = il.list_links(self.repo, include_all=True)[0]
+        self.assertEqual(row["chapters"], "3.3–4.14")  # три главы подряд по порядку книги
+        with self.assertRaises(KeyError):
+            il.set_scope("b", str(link.id)[:8], ["vol_9_chap_9"])
 
     def test_no_link_is_dismissed_and_human_decision_is_not_rescored(self):
         il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")

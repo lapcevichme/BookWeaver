@@ -195,6 +195,11 @@ def init_book_db(book_path: Path, force: bool = False) -> Engine:
                 logger.info(f"Migration: Adding alias_meta column to {resolved_path.name}")
                 conn.execute(text("ALTER TABLE character ADD COLUMN alias_meta JSON DEFAULT '{}'"))
                 conn.commit()
+            id_columns = [row[1] for row in conn.execute(text("PRAGMA table_info(identitylink)"))]
+            if id_columns and "active_chapters" not in id_columns:
+                logger.info(f"Migration: Adding active_chapters column to identitylink in {resolved_path.name}")
+                conn.execute(text("ALTER TABLE identitylink ADD COLUMN active_chapters JSON DEFAULT '[]'"))
+                conn.commit()
             if char_columns and "name_timeline" not in char_columns:
                 logger.info(f"Migration: Adding name_timeline column to {resolved_path.name}")
                 conn.execute(text("ALTER TABLE character ADD COLUMN name_timeline JSON DEFAULT '{}'"))
