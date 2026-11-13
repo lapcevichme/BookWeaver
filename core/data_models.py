@@ -4,6 +4,7 @@
 """
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Literal, Any, Union
 from uuid import UUID, uuid4
@@ -341,6 +342,36 @@ class SpeakerLink(SQLModel, table=True):
     age_group: Optional[str] = None             # для массовки: child | adult | old
     person_key: str = Field(default="")         # одинаковый ключ в главе — один и тот же человек
     status: str = Field(default=SpeakerLinkStatus.SUGGESTED.value)
+
+
+IDENTITY_RELATIONS = ("same_person", "impersonation", "possession", "duplicate")
+IDENTITY_STATUSES = ("candidate", "suggested", "dismissed", "confirmed", "rejected")
+IDENTITY_VOICE_POLICIES = ("separate", "shared", "switch_after_reveal")
+
+
+class IdentityLink(SQLModel, table=True):
+    """
+    Две записи о персонажах — одна личность (docs/design/identity-links.md): Шисуй = Лоулан, Рэмпу выдает себя
+    за Лоулан. Персонажи не сливаются: сценарий, speaker_id и описания по главам остаются, связь — слой поверх.
+
+    persona_id — кого видит читатель (маска, псевдоним, тело, лишний дубль); true_id — кто это на самом деле
+    (настоящая личность, самозванец, вселившийся, основная запись). Для impersonation: персона — Лоулан, true — Рэмпу.
+    Статусы: candidate (сигнал без оценки) -> suggested | dismissed (LLM: связь есть / нет) -> confirmed | rejected (человек).
+    """
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    book_id: str = Field(sa_column=Column(String, ForeignKey("book.id", ondelete="CASCADE"), index=True, nullable=False))
+    persona_id: UUID = Field(sa_column=Column(ForeignKey("character.id", ondelete="CASCADE"), nullable=False))
+    true_id: UUID = Field(sa_column=Column(ForeignKey("character.id", ondelete="CASCADE"), nullable=False))
+    relation: str = Field(default="same_person")
+    revealed_in: Optional[str] = None           # глава, где узнает читатель; пусто — подозрение без раскрытия
+    confidence: Optional[float] = None          # вероятность выбранного варианта (logprobs); None — не оценено
+    scores: Dict[str, float] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
+    evidence: str = Field(default="", sa_column=Column(Text))
+    status: str = Field(default="candidate")
+    voice_policy: str = Field(default="separate")
+    source: str = Field(default="human")        # alias_collision | secret_scan | human
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    decided_at: Optional[datetime] = None
 
 
 # --- Non-Table Models (Prompts/API DTOs) ---

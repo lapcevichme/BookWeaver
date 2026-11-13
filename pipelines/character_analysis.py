@@ -35,6 +35,7 @@ class CharacterAnalysisPipeline:
     def __init__(self, model_manager: ModelManager):
         self.model_manager = model_manager
         self.stats = Counter()  # счетчики решений по патчам (для экспериментов и логов)
+        self._alias_collisions = []  # (персонаж, занятое имя): кандидаты IdentityLink текущей главы
         self._load_blacklist()
         logger.info("✅ Пайплайн CharacterAnalysisPipeline инициализирован.")
 
@@ -62,6 +63,7 @@ class CharacterAnalysisPipeline:
                 progress_callback(progress, stage, message)
 
         self.stats = Counter()  # статистика за этот запуск, а не за жизнь процесса
+        self._alias_collisions = []  # (персонаж, занятое имя) за текущую главу
         stage = "Подготовка"
         update_progress(0.0, stage, f"Запуск анализа персонажей для книги '{book_name}'")
 
@@ -102,6 +104,7 @@ class CharacterAnalysisPipeline:
                 def chapter_progress(message: str):
                     update_progress(progress, stage, f"Глава {idx + 1}/{total_chapters}: {message}")
 
+                self._alias_collisions = []
                 try:
                     self._process_chapter(chap, master_archive, summary_archive, repo, book_name, chapter_progress)
                 except _ChapterFailed as e:
@@ -116,6 +119,7 @@ class CharacterAnalysisPipeline:
                     ) from None
 
                 repo.save_characters(master_archive.characters)
+                self._flush_alias_collisions(repo, master_archive, chapter_id)
                 repo.set_characters_state([chapter_id], "done")
                 self._mark_chapter_processed(master_archive, chapter_id)
                 if chap.status in (ChapterStatus.DRAFT, ChapterStatus.PROCESSING, None):
@@ -512,6 +516,27 @@ class CharacterAnalysisPipeline:
             return match[0]
         return None
 
+    def _flush_alias_collisions(self, repo: BookRepository, archive: CharacterArchive, chapter_id: str):
+        """
+        Занятое имя («Лоулан» для Шисуй в 4.14) — сигнал «это один человек»: кандидат IdentityLink
+        с главой раскрытия. Оценивает и предлагает человеку `cli.py identity suggest`.
+        """
+        if not self._alias_collisions:
+            return
+        from pipelines.identity_links import add_candidate
+        by_name = {c.name: c for c in archive.characters}
+        for name, alias in dict.fromkeys(self._alias_collisions):
+            char = by_name.get(name)
+            owner = next((c for c in archive.characters if c is not char and
+                          alias.lower() in {n.lower() for n in [c.name, *(c.aliases or [])]}), None)
+            if char is None or owner is None:
+                continue
+            add_candidate(repo, char, owner, chapter_id, "alias_collision",
+                          f"гл. {chapter_id}: имя '{alias}' для '{name}' уже у '{owner.name}'")
+            self.stats["identity_candidates"] += 1
+            logger.info(f"🎭 Кандидат связи личностей: '{name}' ~ '{owner.name}' (имя '{alias}', {chapter_id})")
+        self._alias_collisions = []
+
     def _is_personal_alias(self, alias: str, kind: Optional[str]) -> bool:
         """Принадлежит ли алиас человеку. Вид от модели главнее; без вида — нет ли слов-ролей."""
         if kind:
@@ -537,6 +562,8 @@ class CharacterAnalysisPipeline:
             if text_.lower() in taken:
                 self.stats["alias_taken_skipped"] += 1
                 logger.info(f"   - алиас '{text_}' для '{name}' пропущен: занят другим персонажем")
+                if self._is_personal_alias(text_, kind):
+                    self._alias_collisions.append((name, text_))  # кандидат IdentityLink
                 continue
             result[text_] = kind
         return result

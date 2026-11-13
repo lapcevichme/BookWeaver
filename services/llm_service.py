@@ -20,7 +20,9 @@ PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 # эмбиент без reasoning выбирается так же (2026-11-06), а SFX теперь правила (utils/sfx_rules.py).
 # Разведка персонажей: low урезает reasoning в 2.5-3 раза без потери полноты; none — модель по умолчанию
 # отвечает «не изменилось» (14 отметок из 122 против 45), docs/experiments/2026-11-13_character-cards.md
-STAGE_REASONING_DEFAULTS = {"ambient_design": "none", "character_recon": "low"}
+# Судья связей личностей: low хватает (11/11 на парах Кусурии), docs/experiments/2026-11-13_identity-signals.md
+STAGE_REASONING_DEFAULTS = {"ambient_design": "none", "character_recon": "low",
+                            "identity_scan": "low", "identity_judge": "low"}
 
 PRICING_REGISTRY = {
     "xiaomi/mimo-v2-flash:free": {"input": 0.0, "output": 0.0}
@@ -122,6 +124,58 @@ class LLMService:
                 **getattr(self._call_info, "data", {}),
             ))
         return None
+
+    def choice_probabilities(self, prompt: str, options: Tuple[str, ...], prompt_type: str = "unknown") -> Optional[dict]:
+        """
+        Вероятности вариантов ответа по первому токену (прием «модели решений»: docs/experiments/2026-11-13_decision-models.md).
+        Варианты должны различаться первым токеном (буквы A-H, да/нет). Без reasoning: первым должен идти ответ.
+        Провайдер выбирается среди тех, кто отдает logprobs (require_parameters), закрепление порядка не действует.
+        Возвращает {вариант: вероятность} по видимым top-10 (нормировано) или None.
+        """
+        if self.provider != "openrouter":
+            logger.warning("choice_probabilities: logprobs поддержаны только для OpenRouter")
+            return None
+        import math
+        start_time, usage, status, error_msg = time.time(), (0, 0), "success", None
+        self._call_info.data = {"attempts": 1}
+        try:
+            completion = self.client.with_options(timeout=self._timeout_for(prompt_type)).chat.completions.create(
+                model=self.model_name, messages=[{"role": "user", "content": prompt}], temperature=0,
+                max_tokens=1, logprobs=True, top_logprobs=10,
+                extra_body={"provider": {"require_parameters": True}, "reasoning": {"enabled": False}},
+            )
+            if completion.usage:
+                usage = (completion.usage.prompt_tokens, completion.usage.completion_tokens)
+                real_cost = getattr(completion.usage, "cost", None)
+                self._track_usage(*usage, real_cost=real_cost)
+                self._call_info.data.update(cost_usd=real_cost)
+            content = completion.choices[0].logprobs.content if completion.choices and completion.choices[0].logprobs else None
+            if not content:
+                status = "api_error"
+                error_msg = "провайдер не вернул logprobs"
+                return None
+            wanted = {o.strip().lower(): o for o in options}
+            dist = {}
+            for cand in content[0].top_logprobs:
+                key = wanted.get(cand.token.strip().lower())
+                if key:
+                    dist[key] = dist.get(key, 0.0) + math.exp(cand.logprob)
+            total = sum(dist.values())
+            if not total:
+                status = "json_error"
+                error_msg = f"ни одного варианта в top-10: {[c.token for c in content[0].top_logprobs]}"
+                return None
+            return {k: v / total for k, v in sorted(dist.items(), key=lambda kv: -kv[1])}
+        except Exception as e:
+            status, error_msg = "api_error", str(e)
+            logger.warning(f"choice_probabilities ({prompt_type}): {e}")
+            return None
+        finally:
+            metrics_collector.log_llm_call(LLMMetrics(
+                prompt_type=prompt_type, model_name=self.model_name, input_tokens=usage[0], output_tokens=usage[1],
+                latency_ms=(time.time() - start_time) * 1000, status=status, error_message=error_msg,
+                **getattr(self._call_info, "data", {}),
+            ))
 
     def _dump_failed_response(self, prompt_type: str, prompt: str, response_text: str):
         """Сохраняет полный промпт и сырой ответ модели, если ответ не прошел валидацию."""

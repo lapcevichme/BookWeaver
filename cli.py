@@ -11,6 +11,10 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py inspect cost|timeline|audio <книга> [--chapter ID]     # аналитика: деньги, время, озвучка
     uv run cli.py link resolve|auto <книга> [--chapter ID] [--force]   # кто стоит за подписями без имени
     uv run cli.py link confirm|reject <книга> --chapter ID --label 'Красавец-евнух'
+    uv run cli.py identity suggest|list <книга> [--all] [--no-scan] [--rescore]  # связи личностей (Шисуй = Лоулан)
+    uv run cli.py identity confirm|reject <книга> --id 1a2b3c4d
+    uv run cli.py identity policy <книга> --id 1a2b3c4d --voice separate|shared|switch_after_reveal
+    uv run cli.py identity add <книга> --persona Шисуй --true Лоулан --relation same_person [--revealed-in vol_4_chap_14]
     uv run cli.py cast profile|design <книга> [--character Имя] [--force] # кастинг: профиль от LLM, затем голос
     uv run cli.py cast set <книга> --character Имя --age 22 [--pitch ...]  # правка профиля, затем design --force
     uv run cli.py cast design <книга> --character Имя --variant low --pitch low   # кандидат для выбора на слух
@@ -407,6 +411,33 @@ def cmd_link(args) -> dict:
             "status": link.status}
 
 
+def cmd_identity(args) -> dict:
+    from pipelines import identity_links as il
+    repo = _repo(args.book)
+    if args.action == "suggest":
+        counts = il.IdentitySuggestPipeline(_app().model_manager).run(args.book, scan=not args.no_scan, rescore=args.rescore)
+        return {"book": args.book, "action": "suggest", **counts, "links": il.list_links(repo, args.all)}
+    if args.action == "list":
+        return {"book": args.book, "action": "list", "links": il.list_links(repo, args.all)}
+    try:
+        if args.action == "add":
+            if not (args.persona and args.true and args.relation):
+                raise CliError("add: нужны --persona, --true и --relation")
+            link = il.add_human_link(args.book, args.persona, args.true, args.relation, args.revealed_in)
+        elif not args.id:
+            raise CliError(f"{args.action}: нужен --id (из identity list)")
+        elif args.action == "policy":
+            if not args.voice:
+                raise CliError("policy: нужен --voice")
+            link = il.set_policy(args.book, args.id, args.voice)
+        else:
+            link = il.set_status(args.book, args.id, "confirmed" if args.action == "confirm" else "rejected")
+    except KeyError as e:
+        raise CliError(str(e.args[0]), EXIT_NOT_FOUND)
+    return {"book": args.book, "action": args.action, "links": [r for r in il.list_links(repo, include_all=True)
+                                                                 if r["id"] == str(link.id)[:8]]}
+
+
 def cmd_cast(args) -> dict:
     if args.action != "generics":
         _repo(args.book)
@@ -669,6 +700,14 @@ def _human(command: str, result: dict) -> str:
     if command == "links":
         rows = [{**r, "hidden": "да" if r["hidden"] else ""} for r in result["links"]]
         return _table(rows, ["chapter", "label", "kind", "target", "person_key", "confidence", "hidden", "status", "evidence"])
+    if command == "identity":
+        head = ""
+        if result.get("action") == "suggest":
+            head = (f"Найдено по secret-фактам: {result['scanned']}, оценено пар: {result['scored']} "
+                    f"(перепроверено судьей: {result['judged']}), предложено: {result['suggested']}, "
+                    f"отсеяно: {result['dismissed']}\n")
+        return head + _table(result["links"], ["id", "persona", "true", "relation", "revealed_in", "confidence",
+                                               "status", "source", "voice_policy", "evidence"])
     if command == "characters":
         return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "wanted", "voice_profile"])
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
@@ -734,6 +773,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--label", help="подпись говорящего, например 'Красавец-евнух'")
     p.add_argument("--force", action="store_true", help="resolve: переспросить LLM о неподтвержденных связях")
     p.set_defaults(func=cmd_link)
+
+    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, add")
+    p.add_argument("action", choices=["suggest", "list", "confirm", "reject", "policy", "add"])
+    p.add_argument("book")
+    p.add_argument("--id", help="начало id связи из identity list")
+    p.add_argument("--all", action="store_true", help="list/suggest: показать и отсеянные/отклоненные")
+    p.add_argument("--no-scan", action="store_true", help="suggest: без поиска по secret-фактам, только оценить кандидатов")
+    p.add_argument("--rescore", action="store_true", help="suggest: переоценить уже оцененные (кроме решений человека)")
+    p.add_argument("--voice", choices=["separate", "shared", "switch_after_reveal"], help="policy")
+    p.add_argument("--persona", help="add: кем выступает (маска, двойник, тело)")
+    p.add_argument("--true", help="add: кто на самом деле")
+    p.add_argument("--relation", choices=["same_person", "impersonation", "possession", "duplicate"], help="add")
+    p.add_argument("--revealed-in", help="add: глава раскрытия, vol_4_chap_14")
+    p.set_defaults(func=cmd_identity)
 
     p = sub.add_parser("cast", parents=[common], help="кастинг голосов: profile (LLM), design (голоса), generics (массовка)")
     p.add_argument("action", choices=["profile", "set", "design", "pick", "compare", "distinct", "generics"])
