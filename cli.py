@@ -706,8 +706,14 @@ def _human(command: str, result: dict) -> str:
             head = (f"Найдено по secret-фактам: {result['scanned']}, оценено пар: {result['scored']} "
                     f"(перепроверено судьей: {result['judged']}), предложено: {result['suggested']}, "
                     f"отсеяно: {result['dismissed']}\n")
-        return head + _table(result["links"], ["id", "persona", "true", "relation", "revealed_in", "confidence",
-                                               "status", "source", "voice_policy", "evidence"])
+        # Доводы длинные и многострочные — в таблице их обрезало бы до 60 символов, поэтому отдельно и целиком
+        out = [head + _table(result["links"], ["id", "persona", "true", "relation", "revealed_in", "confidence",
+                                               "status", "source", "voice_policy"])]
+        for r in result["links"]:
+            if r["evidence"]:
+                out.append(f"\n[{r['id']}] {r['persona']} → {r['true']}")
+                out += [f"  - {e}" for e in r["evidence"].split(" | ")]
+        return "\n".join(out)
     if command == "characters":
         return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "wanted", "voice_profile"])
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
