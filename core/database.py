@@ -194,6 +194,10 @@ def init_book_db(book_path: Path, force: bool = False) -> Engine:
                 logger.info(f"Migration: Adding alias_meta column to {resolved_path.name}")
                 conn.execute(text("ALTER TABLE character ADD COLUMN alias_meta JSON DEFAULT '{}'"))
                 conn.commit()
+            if char_columns and "name_timeline" not in char_columns:
+                logger.info(f"Migration: Adding name_timeline column to {resolved_path.name}")
+                conn.execute(text("ALTER TABLE character ADD COLUMN name_timeline JSON DEFAULT '{}'"))
+                conn.commit()
 
             # 3. Миграция тяжелых кэшей из chapter в chaptercache
             res_chap = conn.execute(text("PRAGMA table_info(chapter)"))

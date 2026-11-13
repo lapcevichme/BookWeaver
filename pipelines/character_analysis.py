@@ -574,6 +574,16 @@ class CharacterAnalysisPipeline:
         char.embedding = self.model_manager.get_embedding_service().get_embedding(f"{char.name}. {description}")
         return char
 
+    @classmethod
+    def _rename(cls, char: Character, new_name: str, chapter_id: str):
+        """Меняет имя и помнит, с какой главы оно такое: до нее слушатель знает прежнее имя."""
+        timeline = dict(char.name_timeline or {})
+        if not timeline:
+            timeline[cls._first_chapter(char) or chapter_id] = char.name
+        timeline[chapter_id] = new_name
+        char.name_timeline = timeline
+        char.name = new_name
+
     @staticmethod
     def _first_chapter(char: Character) -> Optional[str]:
         """Первая глава персонажа по порядку вставки упоминаний/версий (главы обрабатываются по порядку)."""
@@ -616,7 +626,7 @@ class CharacterAnalysisPipeline:
                 logger.info(f"   - ИМЯ: {char.name} -> {new_name}")
                 if not self._is_role_name(char.name):
                     self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
-                char.name = new_name
+                self._rename(char, new_name, chapter_id)
             elif not self._is_role_name(new_name) and new_name.lower() not in taken:
                 logger.info(f"   - имя '{new_name}' -> алиас (остается '{char.name}')")
                 self._add_aliases(char, {new_name: "name"}, chapter_id)
@@ -631,7 +641,7 @@ class CharacterAnalysisPipeline:
             self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
             char.aliases = sorted(set(char.aliases) - {personal})
             char.alias_meta = {k: v for k, v in (char.alias_meta or {}).items() if k != personal}
-            char.name = personal
+            self._rename(char, personal, chapter_id)
             self.stats["personal_name_renames"] += 1
         if self._facts_mode() and (patch.new_facts or patch.retired_facts):
             self._add_facts(char, patch, chapter_id)

@@ -21,6 +21,7 @@ def chapter_order(chapters: Iterable[Chapter]) -> Dict[str, int]:
 @dataclass
 class CharacterAsOf:
     character: Character
+    name: str                                # имя, известное к этой главе (до раскрытия — прежнее)
     description: str
     description_from: Optional[str]          # глава, из которой взята версия описания; None — запасное описание
     first_chapter: Optional[str]
@@ -55,9 +56,21 @@ def character_as_of(char: Character, order: Dict[str, int], as_of: str) -> Optio
         description, description_from = (char.spoiler_free_description or ""), None
 
     mentions = {k: v for k, v in (char.chapter_mentions or {}).items() if k in order and order[k] <= limit}
-    return CharacterAsOf(character=char, description=description, description_from=description_from,
+    return CharacterAsOf(character=char, name=name_as_of(char, order, limit),
+                         description=description, description_from=description_from,
                          first_chapter=known[0], chapter_mentions=mentions,
                          aliases=_aliases_as_of(char, order, limit))
+
+
+def name_as_of(char: Character, order: Dict[str, int], limit: int) -> str:
+    """Последнее имя из name_timeline не позже главы; без истории — текущее имя.
+    Если вся история позже главы — самое раннее имя (текущее было бы спойлером)."""
+    timeline = {k: v for k, v in (char.name_timeline or {}).items() if k in order}
+    if not timeline:
+        return char.name
+    known = [k for k in timeline if order[k] <= limit]
+    pick = max(known, key=order.__getitem__) if known else min(timeline, key=order.__getitem__)
+    return timeline[pick]
 
 
 def _aliases_as_of(char: Character, order: Dict[str, int], limit: int) -> List[str]:
@@ -67,8 +80,11 @@ def _aliases_as_of(char: Character, order: Dict[str, int], limit: int) -> List[s
     известным с первого появления персонажа.
     """
     meta = char.alias_meta or {}
+    name = name_as_of(char, order, limit)
     result = []
     for alias in char.aliases or []:
+        if alias == name:
+            continue
         since = (meta.get(alias) or {}).get("since")
         if since is None or since not in order or order[since] <= limit:
             result.append(alias)

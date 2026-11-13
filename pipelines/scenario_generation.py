@@ -134,7 +134,11 @@ class ScenarioGenerationPipeline:
                 # Очищаем старое
                 session.exec(delete(ScenarioEntry).where(ScenarioEntry.chapter_id == chapter_id))
                 
-                char_map = {char.name: char.id for char in contextual_characters.characters}
+                # Подписи сценария — имена на момент главы («Добродетельная супруга» до 1.17), поэтому
+                # и прежние имена из name_timeline ведут к персонажу; текущее имя главнее.
+                char_map = {n: char.id for char in contextual_characters.characters
+                            for n in (char.name_timeline or {}).values()}
+                char_map.update({char.name: char.id for char in contextual_characters.characters})
                 
                 from uuid import UUID
                 for i, entry_data in enumerate(emotion_enriched_scenario):
@@ -186,7 +190,7 @@ class ScenarioGenerationPipeline:
         order = chapter_order(repo.get_all_chapters())
         if chapter_id not in order:
             return None
-        return {v.character.name: v.description for v in characters_as_of(chars, order, chapter_id)}
+        return {v.name: v.description for v in characters_as_of(chars, order, chapter_id)}
 
     def _generate_chunk(self, llm, prompt: str, chunk_text: str, i: int) -> Optional[RawScenario]:
         """Генерирует один чанк с повторами по покрытию текста. Возвращает лучший вариант или None."""

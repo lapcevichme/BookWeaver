@@ -226,6 +226,8 @@ class Character(SQLModel, table=True):
     # Алиас -> {"kind": ALIAS_KINDS | "previous_name", "since": id главы}: с какой главы читатель знает это имя.
     # Алиасы без записи — из проектов до версионирования, считаются известными с первого появления.
     alias_meta: Dict[str, Dict[str, Optional[str]]] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
+    # Глава -> имя с этой главы: «Добродетельная супруга» (1.15) -> «Лишу» (1.17). Пусто — имя не менялось.
+    name_timeline: Dict[str, str] = Field(default_factory=dict, sa_column=Column(MutableDict.as_mutable(JSON)))
     gender: Optional[CharacterGender] = Field(default=None, sa_column=Column(String, nullable=True))
     role_tier: RoleTier = Field(default=RoleTier.BACKGROUND, sa_column=Column(String, default=RoleTier.BACKGROUND))
     spoiler_free_description: str = Field(..., sa_column=Column(Text))

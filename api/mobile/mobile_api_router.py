@@ -208,14 +208,15 @@ async def get_book_characters(
         db_chars = repo.get_characters()
         if asOfChapter:
             order = _chapter_order_or_404(repo, asOfChapter)
-            db_chars = [c for c in db_chars if character_as_of(c, order, asOfChapter) is not None]
+            views = {c.id: character_as_of(c, order, asOfChapter) for c in db_chars}
+            db_chars = [c for c in db_chars if views[c.id] is not None]
         result_list = []
 
         for char in db_chars:
             avatar_url = f"/static/books/{bookId}/chars/{char.id}.jpg"
             result_list.append(CharacterListEntryDto(
                 id=str(char.id),
-                name=char.name,
+                name=views[char.id].name if asOfChapter else char.name,
                 avatar_url=avatar_url,
                 short_role=char.role_tier
             ))
@@ -254,7 +255,7 @@ async def get_character_details(
                 raise HTTPException(status_code=404, detail="Персонаж к этой главе еще не появлялся.")
             return CharacterDetailsDto(
                 id=str(target_char.id),
-                name=target_char.name,
+                name=view.name,
                 avatar_url=f"/static/books/{bookId}/chars/{target_char.id}.jpg",
                 description=view.description,
                 spoiler_free_description=target_char.spoiler_free_description,

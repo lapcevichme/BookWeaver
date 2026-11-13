@@ -234,5 +234,50 @@ class TestAliasesAsOf(unittest.TestCase):
         self.assertEqual(character_as_of(char, order, "vol_3_chap_20").aliases, ["Ка Зуйгэцу", "Красивый евнух"])
 
 
+class TestNameTimeline(unittest.TestCase):
+    """Имя на момент главы: «Лишу» до 1.17 — спойлер, слушатель знает «Добродетельную супругу»."""
+
+    def setUp(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        self.pipeline = CharacterAnalysisPipeline(MagicMock())
+        patcher = patch("pipelines.character_analysis.config")
+        patcher.start().CHARACTER_DESCRIPTION_MODE = "facts"
+        self.addCleanup(patcher.stop)
+        self.order = {"vol_1_chap_15": 15, "vol_1_chap_16": 16, "vol_1_chap_17": 17}
+
+    def _lishu(self):
+        from core.data_models import LlmCharacterPatch
+        char = Character(book_id="b", name="Добродетельная супруга", description="d", spoiler_free_description="d",
+                         chapter_mentions={"vol_1_chap_15": "x"})
+        self.pipeline._update_character(char, LlmCharacterPatch.model_validate({"ref": "x", "personal_name": "Лишу"}),
+                                        "vol_1_chap_17", {})
+        return char
+
+    def test_rename_writes_timeline(self):
+        char = self._lishu()
+        self.assertEqual(char.name_timeline, {"vol_1_chap_15": "Добродетельная супруга", "vol_1_chap_17": "Лишу"})
+
+    def test_name_as_of(self):
+        from core.character_view import character_as_of
+        char = self._lishu()
+        early = character_as_of(char, self.order, "vol_1_chap_16")
+        self.assertEqual(early.name, "Добродетельная супруга")
+        self.assertNotIn("Добродетельная супруга", early.aliases)
+        late = character_as_of(char, self.order, "vol_1_chap_17")
+        self.assertEqual(late.name, "Лишу")
+        self.assertEqual(late.aliases, ["Добродетельная супруга"])
+
+    def test_history_after_chapter_gives_earliest_name(self):
+        from core.character_view import name_as_of
+        char = Character(book_id="b", name="Лишу", description="d", spoiler_free_description="d",
+                         name_timeline={"vol_1_chap_16": "Добродетельная супруга", "vol_1_chap_17": "Лишу"})
+        self.assertEqual(name_as_of(char, self.order, 15), "Добродетельная супруга")
+
+    def test_no_history_keeps_name(self):
+        from core.character_view import name_as_of
+        char = Character(book_id="b", name="Маомао", description="d", spoiler_free_description="d")
+        self.assertEqual(name_as_of(char, self.order, 15), "Маомао")
+
+
 if __name__ == "__main__":
     unittest.main()
