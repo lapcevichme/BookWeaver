@@ -248,17 +248,87 @@ class CharacterAnalysisPipeline:
     _RELATION_WORDS = {
         "отец", "мать", "сын", "дочь", "брат", "сестра", "дед", "дедушка", "бабушка", "бабуля",
         "муж", "жена", "дядя", "тетя", "тётя", "господин", "госпожа", "хозяин", "хозяйка",
-        "принц", "принцесса", "императрица", "король", "королева",
+        "принц", "принцесса", "император", "императрица", "король", "королева",
     }
 
+    _GENERIC_OFFICE_WORDS = {
+        "министр", "советник", "чиновник", "капитан", "командир", "стратег", "судья",
+        "жрец", "глава", "наследник", "правитель", "посланник", "слуга", "помощник",
+        "мастер", "учитель", "старейшина", "наложница", "фаворитка", "дегустатор",
+        "страж", "воин", "боец", "рыцарь",
+    }
+
+    _TITLE_MODIFIERS = {
+        "целомудренная", "целомудренный", "целомудренное",
+        "благородная", "благородный", "благородное",
+        "чистая", "чистый", "чистое",
+        "добродетельная", "добродетельный", "добродетельное",
+        "мудрая", "мудрый", "мудрое",
+        "красивый", "красивая", "красивое",
+        "старший", "старшая", "старшее", "старшие",
+        "младший", "младшая", "младшее", "младшие",
+        "старый", "старая", "старое", "старые",
+        "молодой", "молодая", "молодое", "молодые",
+        "новый", "новая", "новое", "новые",
+        "бывший", "бывшая", "бывшее", "бывшие",
+        "главный", "главная", "главное", "главные",
+        "великий", "великая", "великое", "великие",
+        "верховный", "верховная", "верховное", "верховные",
+        "юный", "юная", "юное", "юные",
+        "маленький", "маленькая", "маленькое",
+        "любимый", "любимая", "любимое",
+        "придворный", "придворная", "придворное",
+        "королевский", "королевская", "королевское",
+        "императорский", "императорская", "императорское",
+        "тайный", "тайная", "тайное",
+        "военный", "военная", "военное",
+    }
+
+    def _is_role_noun(self, word: str) -> bool:
+        if not word:
+            return False
+        w = word.lower()
+        bases = self.GENERIC_ROLES_BLACKLIST | self._RELATION_WORDS | self._GENERIC_OFFICE_WORDS
+        if w in bases:
+            return True
+        for ending_len in (1, 2):
+            if len(w) > ending_len + 2:
+                stem = w[:-ending_len]
+                if any(b.startswith(stem) and len(b) - len(stem) <= 2 for b in bases):
+                    return True
+        return False
+
+    def _is_modifier_word(self, word: str) -> bool:
+        if not word:
+            return False
+        w = word.lower()
+        if w in self._ORDINALS or w in self._TITLE_MODIFIERS:
+            return True
+        if w in {"по", "из", "в", "во", "от", "для", "с", "со", "при", "на"}:
+            return True
+        if len(w) >= 4:
+            if any(w.endswith(sfx) for sfx in ("ский", "ская", "ское", "ские", "цкий", "цкая", "цкое", "цкие", "ов", "ин")):
+                return False
+            if any(w.endswith(adj_end) for adj_end in (
+                "ая", "яя", "ое", "ее", "ый", "ой", "ий", "ые", "ие",
+                "ую", "юю", "ом", "ем", "ым", "им", "их", "ых"
+            )):
+                return True
+        return False
+
     def _is_role_word(self, word: str) -> bool:
-        return word in self.GENERIC_ROLES_BLACKLIST or word in self._ORDINALS or word in self._RELATION_WORDS
+        return self._is_role_noun(word) or word in self._ORDINALS or self._is_modifier_word(word)
 
     def _is_role_name(self, name: str) -> bool:
         """
-        Имя считается ролью, если ВСЕ его слова — роли из черного списка или порядковые
-        ("Доктор", "Деревенщина Один", "Евнух (Красивый)"). Пояснения в скобках не учитываются.
-        "Супруга Гёкуё" и "Генерал Лакан" — имена; "Воронцов" не роль, хотя содержит "вор".
+        Имя считается ролью/должностью/описанием, если оно не содержит имени собственного.
+        Определяется, если:
+        1. Все слова — порядковые («Первый», «1»);
+        2. Либо содержит хотя бы одно ролевое слово/должность (или его падежную форму),
+           и ВСЕ остальные слова — модификаторы/прилагательные, предлоги, порядковые или другие роли
+           («Целомудренная супруга», «Красивый евнух», «Старший советник», «Младший брат императора»).
+        «Супруга Гёкуё», «Генерал Лакан», «Евнух Джинши» — содержат имена собственные -> False.
+        «Генерал Вяземский», «Воронцов» -> фамилии -> False.
         """
         if not name or len(name.strip()) < 2:
             return True
@@ -266,7 +336,12 @@ class CharacterAnalysisPipeline:
         words = re.findall(r"\w+", core)
         if not words:
             return True
-        return all(w in self.GENERIC_ROLES_BLACKLIST or w in self._ORDINALS for w in words)
+        if all(w in self._ORDINALS for w in words):
+            return True
+        has_role_noun = any(self._is_role_noun(w) for w in words)
+        if not has_role_noun:
+            return False
+        return all(self._is_role_noun(w) or w in self._ORDINALS or self._is_modifier_word(w) for w in words)
 
     def _is_dangerous_rename(self, current_name: str, new_name: str) -> bool:
         return not self._is_role_name(current_name) and self._is_role_name(new_name)
@@ -355,8 +430,14 @@ class CharacterAnalysisPipeline:
                             chapter_summary: Optional[str] = None) -> Optional[LlmReconCardResult]:
         fast_llm = self.model_manager.get_llm_service('character_analyzer')
         refs = self._assign_refs(archive.characters)
-        known = [{"ref": ref, "name": c.name, "aliases": c.aliases, "card": c.description or ""}
-                 for ref, c in refs.items()]
+        known = []
+        for ref, c in refs.items():
+            entry = {"ref": ref, "name": c.name, "aliases": c.aliases, "card": c.description or ""}
+            if self._facts_mode():
+                statuses = [f["fact"] for f in (c.facts or []) if f.get("kind") == "status" and not f.get("until")]
+                if statuses:
+                    entry["current_status"] = statuses
+            known.append(entry)
         known_json = json.dumps(known, ensure_ascii=False) if known else "[]"
         prompt = prompts.format_character_recon_card_prompt(chapter_text, known_json, chapter_summary)
         return fast_llm.call_for_pydantic(LlmReconCardResult, prompt, prompt_type="character_recon")
@@ -429,8 +510,10 @@ class CharacterAnalysisPipeline:
         return None
 
     def _strip_roles(self, name: str) -> str:
+        if self._is_role_name(name):
+            return ""
         words = re.findall(r"\w+", re.sub(r"\([^)]*\)", " ", name.lower()))
-        return " ".join(w for w in words if w not in self.GENERIC_ROLES_BLACKLIST and w not in self._ORDINALS)
+        return " ".join(w for w in words if not self._is_role_noun(w) and w not in self._ORDINALS and not self._is_modifier_word(w))
 
     def _apply_patch(self, archive: CharacterArchive, patch_list: LlmCharacterPatchList, refs: dict,
                      to_update: List[Character], candidates: List[str], chapter_id: str, book_id: str) -> set:
@@ -541,9 +624,12 @@ class CharacterAnalysisPipeline:
         """Принадлежит ли алиас человеку. Вид от модели главнее; без вида — нет ли слов-ролей."""
         if kind:
             return kind in ALIAS_KINDS_PERSONAL
-        return bool(alias) and not any(self._is_role_word(w) for w in re.findall(r"\w+", alias.lower()))
+        if not alias or self._is_role_name(alias):
+            return False
+        return not any(self._is_role_word(w) for w in re.findall(r"\w+", alias.lower()))
 
-    def _free_aliases(self, aliases, name: str, taken: frozenset) -> Dict[str, Optional[str]]:
+    def _free_aliases(self, aliases, name: str, taken: frozenset,
+                      char: Optional[Character] = None, chapter_id: Optional[str] = None) -> Dict[str, Optional[str]]:
         """
         Алиасы патча, которые можно дать персонажу: алиас -> вид.
         Не даются: описания (титул, роль, родство — они в фактах-состояниях и переходят к другим людям),
@@ -553,11 +639,13 @@ class CharacterAnalysisPipeline:
         result = {}
         for a in aliases or []:
             text_, kind = (a.alias or "").strip(), a.kind
-            if not text_ or text_ == name or self._is_role_name(text_):
+            if not text_ or text_ == name:
                 continue
-            if kind == "description":
+            if kind == "description" or self._is_role_name(text_):
                 self.stats["alias_description_skipped"] += 1
                 logger.info(f"   - '{text_}' для '{name}' не алиас: описание (титул/роль)")
+                if self._facts_mode() and char is not None and chapter_id is not None:
+                    self._add_role_status_fact(char, text_, chapter_id)
                 continue
             if text_.lower() in taken:
                 self.stats["alias_taken_skipped"] += 1
@@ -579,6 +667,17 @@ class CharacterAnalysisPipeline:
             meta.setdefault(alias, {"kind": kind, "since": chapter_id})
         char.alias_meta = meta
 
+    @staticmethod
+    def _add_role_status_fact(char: Character, role_name: str, chapter_id: str):
+        facts = list(char.facts or [])
+        if any(f.get("fact") == role_name and f.get("kind") == "status" for f in facts):
+            return
+        next_id = max((int(f["id"][1:]) for f in facts if str(f.get("id", "")).startswith("f")
+                       and f["id"][1:].isdigit()), default=0) + 1
+        facts.append({"id": f"f{next_id}", "fact": role_name, "kind": "status", "chapter": chapter_id,
+                      "until": None})
+        char.facts = facts
+
     def _create_character(self, patch: LlmCharacterPatch, chapter_id: str, book_id: str,
                           taken: frozenset = frozenset()) -> Character:
         description = (patch.description_update or "").strip() or "Новый персонаж."
@@ -594,10 +693,13 @@ class CharacterAnalysisPipeline:
             visual_base=patch.visual_base or "", voice_profile=patch.voice_profile or "",
             chapter_mentions={chapter_id: patch.current_chapter_action} if patch.current_chapter_action else {},
         )
-        self._add_aliases(char, self._free_aliases(patch.aliases, name, taken), chapter_id)
+        self._add_aliases(char, self._free_aliases(patch.aliases, name, taken, char=char, chapter_id=chapter_id), chapter_id)
         self._apply_timelines(char, patch, chapter_id)
-        if self._facts_mode() and patch.new_facts:
-            self._add_facts(char, patch, chapter_id)
+        if self._facts_mode():
+            if patch.new_facts:
+                self._add_facts(char, patch, chapter_id)
+            if self._is_role_name(name):
+                self._add_role_status_fact(char, name, chapter_id)
         char.embedding = self.model_manager.get_embedding_service().get_embedding(f"{char.name}. {description}")
         return char
 
@@ -653,19 +755,24 @@ class CharacterAnalysisPipeline:
                 logger.info(f"   - ИМЯ: {char.name} -> {new_name}")
                 if not self._is_role_name(char.name):
                     self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
+                elif self._facts_mode():
+                    self._add_role_status_fact(char, char.name, self._first_chapter(char) or chapter_id)
                 self._rename(char, new_name, chapter_id)
             elif not self._is_role_name(new_name) and new_name.lower() not in taken:
                 logger.info(f"   - имя '{new_name}' -> алиас (остается '{char.name}')")
                 self._add_aliases(char, {new_name: "name"}, chapter_id)
         if patch.aliases:
-            self._add_aliases(char, self._free_aliases(patch.aliases, char.name, taken), chapter_id)
+            self._add_aliases(char, self._free_aliases(patch.aliases, char.name, taken, char=char, chapter_id=chapter_id), chapter_id)
         # Личное имя вместо роли («Добродетельная супруга» -> «Лишу»): модель часто кладет имя в алиасы,
         # поэтому отдельное поле и то же правило повышения, что для `name`
         personal = (patch.personal_name or "").strip()
         if personal and personal != char.name and allow_rename and self._is_name_upgrade(char.name, personal, taken):
             logger.info(f"   - ЛИЧНОЕ ИМЯ: {char.name} -> {personal}")
             # Прежнее имя-роль знали с первого появления; само личное имя — с этой главы, но это теперь name
-            self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
+            if not self._is_role_name(char.name):
+                self._add_aliases(char, {char.name: "previous_name"}, self._first_chapter(char) or chapter_id)
+            elif self._facts_mode():
+                self._add_role_status_fact(char, char.name, self._first_chapter(char) or chapter_id)
             char.aliases = sorted(set(char.aliases) - {personal})
             char.alias_meta = {k: v for k, v in (char.alias_meta or {}).items() if k != personal}
             self._rename(char, personal, chapter_id)

@@ -104,8 +104,9 @@ class TestFactsMode(unittest.TestCase):
         char = Character(book_id="b", name="Добродетельная супруга", description="d", spoiler_free_description="d")
         pipeline._update_character(char, self._patch(personal_name="Лишу", aliases=["Лишу"]), "c1", {})
         self.assertEqual(char.name, "Лишу")
-        self.assertIn("Добродетельная супруга", char.aliases)
+        self.assertNotIn("Добродетельная супруга", char.aliases)
         self.assertNotIn("Лишу", char.aliases)
+        self.assertTrue(any(f["fact"] == "Добродетельная супруга" and f["kind"] == "status" for f in char.facts))
 
     def test_personal_name_does_not_rename_a_name(self):
         pipeline = self._pipeline()
@@ -137,6 +138,7 @@ class TestTitleSuccession(unittest.TestCase):
         cfg = patcher.start()
         self.addCleanup(patcher.stop)
         cfg.CHARACTER_DESCRIPTION_MODE = "facts"
+        self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
         self.pipeline.GENERIC_ROLES_BLACKLIST = {"супруга", "евнух"}
         self.aduo = Character(book_id="b", name="А-Дуо", aliases=["Целомудренная супруга"],
                               description="Бывшая супруга.", spoiler_free_description="Бывшая супруга.")
@@ -172,6 +174,53 @@ class TestTitleSuccession(unittest.TestCase):
         p = self._patch(ref="unknown", name="Лоулан", aliases=["Целомудренная супруга"])
         self.assertIs(self.pipeline._resolve_patch(p, self.refs, self.archive), self.aduo)
 
+    def test_is_role_name_detects_compound_titles(self):
+        self.assertTrue(self.pipeline._is_role_name("Целомудренная супруга"))
+        self.assertTrue(self.pipeline._is_role_name("Добродетельная супруга"))
+        self.assertTrue(self.pipeline._is_role_name("Благородная супруга"))
+        self.assertTrue(self.pipeline._is_role_name("Красивый евнух"))
+        self.assertTrue(self.pipeline._is_role_name("Младший брат императора"))
+        self.assertTrue(self.pipeline._is_role_name("Старший советник"))
+        self.assertFalse(self.pipeline._is_role_name("Супруга Гёкуё"))
+        self.assertFalse(self.pipeline._is_role_name("Генерал Лакан"))
+        self.assertFalse(self.pipeline._is_role_name("Отец Маомао"))
+        self.assertFalse(self.pipeline._is_role_name("Генерал Вяземский"))
+
+    def test_role_to_personal_name_upgrade_does_not_pollute_aliases(self):
+        char = Character(book_id="b", name="Целомудренная супруга", description="Супруга императора.",
+                         chapter_mentions={"vol_1_chap_1": "Появление."})
+        self.pipeline._update_character(char, self._patch(ref="x", personal_name="А-Дуо"), "vol_1_chap_10", {})
+        self.assertEqual(char.name, "А-Дуо")
+        self.assertNotIn("Целомудренная супруга", char.aliases)
+        self.assertEqual(char.name_timeline, {"vol_1_chap_1": "Целомудренная супруга", "vol_1_chap_10": "А-Дуо"})
+        self.assertTrue(any(f["fact"] == "Целомудренная супруга" and f["kind"] == "status" for f in char.facts))
+
+    def test_succession_flow_aduo_and_loulan(self):
+        from core.data_models import LlmCharacterPatchList
+        aduo = Character(
+            book_id="b", name="А-Дуо", aliases=[],
+            description="Бывшая Целомудренная супруга.",
+            facts=[{"id": "f1", "fact": "Целомудренная супруга", "kind": "status",
+                    "chapter": "vol_1_chap_1", "until": "vol_1_chap_30"}],
+            chapter_mentions={"vol_1_chap_1": "во дворце"}
+        )
+        archive = CharacterArchive(characters=[aduo])
+        refs = self.pipeline._assign_refs(archive.characters)
+        p = self._patch(ref=None, name="Лоулан", aliases=["Целомудренная супруга"])
+        self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
+        with patch.object(self.pipeline, "_vector_match", return_value=None):
+            self.pipeline._apply_patch(archive, LlmCharacterPatchList(patches=[p]), refs, [], ["Лоулан"],
+                                       "vol_2_chap_3", "b")
+        self.assertEqual(len(archive.characters), 2)
+        loulan = next(c for c in archive.characters if c.name == "Лоулан")
+        self.assertIsNotNone(loulan)
+        self.assertNotIn("Целомудренная супруга", aduo.aliases)
+        self.assertNotIn("Целомудренная супруга", loulan.aliases)
+        self.assertEqual(aduo.name, "А-Дуо")
+        self.assertEqual(aduo.description, "Бывшая Целомудренная супруга.")
+        self.assertEqual(aduo.facts[0]["until"], "vol_1_chap_30")
+        self.assertTrue(any(f["fact"] == "Целомудренная супруга" and f["kind"] == "status" for f in loulan.facts))
+
 
 class TestAliasKinds(unittest.TestCase):
     """Вид алиаса пишет модель: описание (титул/роль) не становится алиасом и не сопоставляет персонажей."""
@@ -183,6 +232,7 @@ class TestAliasKinds(unittest.TestCase):
         cfg = patcher.start()
         self.addCleanup(patcher.stop)
         cfg.CHARACTER_DESCRIPTION_MODE = "facts"
+        self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
         self.pipeline.GENERIC_ROLES_BLACKLIST = {"супруга", "евнух"}
 
     def _patch(self, **kw):
@@ -215,12 +265,22 @@ class TestAliasKinds(unittest.TestCase):
         self.assertIsNone(self.pipeline._resolve_patch(by_title, refs, archive))
         self.assertIs(self.pipeline._resolve_patch(by_name, refs, archive), heir)
 
-    def test_personal_name_keeps_role_as_previous_name(self):
+    def test_personal_name_role_not_added_to_aliases_but_status_and_timeline(self):
         char = Character(book_id="b", name="Добродетельная супруга", description="d", spoiler_free_description="d",
                          chapter_mentions={"vol_1_chap_15": "x"})
         self.pipeline._update_character(char, self._patch(ref="x", personal_name="Лишу"), "vol_1_chap_17", {})
         self.assertEqual(char.name, "Лишу")
-        self.assertEqual(char.alias_meta["Добродетельная супруга"], {"kind": "previous_name", "since": "vol_1_chap_15"})
+        self.assertNotIn("Добродетельная супруга", char.aliases)
+        self.assertEqual(char.name_timeline, {"vol_1_chap_15": "Добродетельная супруга", "vol_1_chap_17": "Лишу"})
+        self.assertTrue(any(f["fact"] == "Добродетельная супруга" and f["kind"] == "status" for f in char.facts))
+
+    def test_personal_name_proper_name_kept_in_aliases(self):
+        char = Character(book_id="b", name="Смит", description="d", spoiler_free_description="d",
+                         chapter_mentions={"vol_1_chap_15": "x"})
+        self.pipeline._update_character(char, self._patch(ref="x", name="Уинстон Смит"), "vol_1_chap_17", {})
+        self.assertEqual(char.name, "Уинстон Смит")
+        self.assertIn("Смит", char.aliases)
+        self.assertEqual(char.alias_meta["Смит"], {"kind": "previous_name", "since": "vol_1_chap_15"})
 
 
 class TestAliasesAsOf(unittest.TestCase):
@@ -265,7 +325,7 @@ class TestNameTimeline(unittest.TestCase):
         self.assertNotIn("Добродетельная супруга", early.aliases)
         late = character_as_of(char, self.order, "vol_1_chap_17")
         self.assertEqual(late.name, "Лишу")
-        self.assertEqual(late.aliases, ["Добродетельная супруга"])
+        self.assertNotIn("Добродетельная супруга", late.aliases)
 
     def test_history_after_chapter_gives_earliest_name(self):
         from core.character_view import name_as_of
