@@ -30,6 +30,8 @@ from utils.metrics import metrics_collector
 logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.95  # ниже — перепроверка судьей с reasoning (единственная ошибка эксперимента — 0.847)
+IDENTITY_SIMILARITY_MIN = 0.78  # целевой коридор ECAPA: ниже — чужой голос, нет узнаваемости
+IDENTITY_SIMILARITY_MAX = 0.88  # выше — голос не отличим от оригинала (маска не работает)
 
 # Буква -> (relation, кто персона). X, Y — порядок записей в вопросе.
 OPTIONS: Dict[str, Tuple[Optional[str], Optional[str]]] = {
@@ -349,20 +351,35 @@ def identity_voices(repo: BookRepository):
 
 
 def list_links(repo: BookRepository, include_all: bool = False) -> List[dict]:
-    names = {c.id: c.name for c in repo.get_characters()}
+    chars = {c.id: c for c in repo.get_characters()}
+    names = {c_id: c.name for c_id, c in chars.items()}
     order = chapter_order(repo.get_all_chapters())
     with repo.get_session() as session:
         links = session.exec(select(IdentityLink).where(IdentityLink.book_id == repo.book_id)).all()
     if not include_all:
         links = [l for l in links if l.status not in ("dismissed", "rejected")]
     links.sort(key=lambda l: (l.status != "suggested", -(l.confidence or 0), order.get(l.revealed_in, 1 << 30)))
-    return [{"id": str(l.id)[:8], "persona": names.get(l.persona_id, "?"), "true": names.get(l.true_id, "?"),
-             "relation": l.relation, "revealed_in": l.revealed_in or "", "confidence":
-                 f"{l.confidence:.3f}" if l.confidence is not None else "", "status": l.status,
-             "source": l.source, "voice_policy": l.voice_policy,
-             "shift": f"{l.voice_shift:+g}" if l.voice_shift is not None else "",
-             "chapters": _ranges(l.active_chapters, order),
-             "evidence": " | ".join(x for x in (l.evidence or "").splitlines() if x)} for l in links]
+    rows = []
+    for l in links:
+        p_char = chars.get(l.persona_id)
+        vc = (p_char.voice_casting or {}) if p_char else {}
+        sim_val = vc.get("identity_similarity")
+        passed = vc.get("guardrail_passed", True)
+        sim_str = ""
+        if sim_val is not None:
+            sim_str = f"{sim_val:.3f}" + ("" if passed else " ⚠️")
+        rows.append({
+            "id": str(l.id)[:8], "persona": names.get(l.persona_id, "?"),
+            "true": names.get(l.true_id, "?"),
+            "relation": l.relation, "revealed_in": l.revealed_in or "", "confidence":
+                f"{l.confidence:.3f}" if l.confidence is not None else "", "status": l.status,
+            "source": l.source, "voice_policy": l.voice_policy,
+            "shift": f"{l.voice_shift:+g}" if l.voice_shift is not None else "",
+            "sim": sim_str,
+            "chapters": _ranges(l.active_chapters, order),
+            "evidence": " | ".join(x for x in (l.evidence or "").splitlines() if x)
+        })
+    return rows
 
 
 def _ranges(chapters: List[str], order: Dict[str, int]) -> str:
@@ -426,11 +443,61 @@ def set_voice(book_name: str, prefix: str, policy: Optional[str] = None,
     return link
 
 
-def apply_voice_shift(repo: BookRepository, link: IdentityLink):
+def verify_identity_voice_similarity(source_path, target_path, tts_client=None) -> Optional[dict]:
+    """
+    Проверяет сходство двух голосов через ECAPA-TDNN (косинусное сходство нормированных векторов).
+    Целевой коридор для масок/альтер-эго одного человека: [0.78, 0.88].
+    """
+    if tts_client is None:
+        try:
+            from services.qwen_tts_client import QwenTTSClient
+            client = QwenTTSClient(base_url="http://localhost:9233")
+            if client.check_health():
+                tts_client = client
+        except Exception:
+            tts_client = None
+    if tts_client is None:
+        return None
+
+    from pathlib import Path
+    source_path, target_path = Path(source_path), Path(target_path)
+    if not source_path.exists() or not target_path.exists():
+        return None
+
+    try:
+        emb_src = tts_client.speaker_embedding(source_path)
+        emb_tgt = tts_client.speaker_embedding(target_path)
+    except Exception as e:
+        logger.warning(f"ECAPA guardrail: ошибка при получении эмбеддингов ({e})")
+        return None
+    if not emb_src or not emb_tgt:
+        return None
+
+    sim = round(float(sum(x * y for x, y in zip(emb_src, emb_tgt))), 3)
+    if sim < IDENTITY_SIMILARITY_MIN:
+        verdict = "too_different"
+        passed = False
+    elif sim > IDENTITY_SIMILARITY_MAX:
+        verdict = "too_similar"
+        passed = False
+    else:
+        verdict = "ok"
+        passed = True
+
+    return {
+        "similarity": sim,
+        "passed": passed,
+        "verdict": verdict,
+        "min": IDENTITY_SIMILARITY_MIN,
+        "max": IDENTITY_SIMILARITY_MAX,
+    }
+
+
+def apply_voice_shift(repo: BookRepository, link: IdentityLink, tts_client=None):
     """
     Создает образец голоса для маски: сдвиг высоты образца истинной личности через rubberband
     (с сохранением формант: formant=preserved). Сохраняет reference.wav и reference.txt
-    в storage/voices/<id>/ и назначает persona.voice_base.
+    в storage/voices/<id>/, валидирует через ECAPA guardrail и назначает persona.voice_base.
     """
     if link.voice_shift is None:
         return None
@@ -475,11 +542,71 @@ def apply_voice_shift(repo: BookRepository, link: IdentityLink):
         vc = dict(persona_char.voice_casting or {})
         vc.update(status=casting.STATUS_DESIGNED, voice_id=target_voice_id,
                   shift=link.voice_shift, source_voice=true_char.voice_base)
+
+        guardrail = verify_identity_voice_similarity(source_path, target_path, tts_client)
+        if guardrail:
+            vc.update(identity_similarity=guardrail["similarity"],
+                      guardrail_passed=guardrail["passed"],
+                      guardrail_verdict=guardrail["verdict"])
+            if not guardrail["passed"]:
+                logger.warning(
+                    f"⚠️ Guardrail ECAPA: сходство голоса маски '{persona_char.name}' с '{true_char.name}' "
+                    f"составляет {guardrail['similarity']:.3f} ({guardrail['verdict']}) — вне целевого коридора [{IDENTITY_SIMILARITY_MIN}, {IDENTITY_SIMILARITY_MAX}]"
+                )
+            else:
+                logger.info(
+                    f"✅ Guardrail ECAPA: сходство голоса маски '{persona_char.name}' с '{true_char.name}' "
+                    f"= {guardrail['similarity']:.3f} (в коридоре [{IDENTITY_SIMILARITY_MIN}, {IDENTITY_SIMILARITY_MAX}])"
+                )
+
         persona_char.voice_casting = vc
         session.add(persona_char)
         session.commit()
         logger.info(f"Голос для маски '{persona_char.name}' создан со сдвигом {link.voice_shift:+g} из '{true_char.name}' ({target_voice_id})")
         return target_path
+
+
+def check_identity_guardrails(book_name: str, tts_client=None) -> dict:
+    """
+    Проверяет все подтвержденные связи масок (same_person, possession) в книге на соответствие
+    коридору схожести ECAPA [0.78, 0.88].
+    """
+    repo = BookRepository(book_name)
+    chars = {c.id: c for c in repo.get_characters()}
+    with repo.get_session() as session:
+        links = session.exec(select(IdentityLink).where(
+            IdentityLink.book_id == book_name,
+            IdentityLink.status == "confirmed"
+        )).all()
+
+    from core import path_manager
+    rows = []
+    for l in links:
+        if l.relation not in ("same_person", "possession"):
+            continue
+        persona = chars.get(l.persona_id)
+        true_char = chars.get(l.true_id)
+        if not persona or not true_char:
+            continue
+        p_voice = persona.voice_base
+        t_voice = true_char.voice_base
+        p_path = path_manager.get_voice_path(p_voice) if p_voice else None
+        t_path = path_manager.get_voice_path(t_voice) if t_voice else None
+        has_audio = bool(p_path and p_path.exists() and t_path and t_path.exists())
+        guardrail = None
+        if has_audio:
+            guardrail = verify_identity_voice_similarity(t_path, p_path, tts_client)
+
+        rows.append({
+            "id": str(l.id)[:8],
+            "persona": persona.name,
+            "true": true_char.name,
+            "shift": f"{l.voice_shift:+g}" if l.voice_shift is not None else "—",
+            "similarity": guardrail["similarity"] if guardrail else None,
+            "status": ("ok" if guardrail["passed"] else guardrail["verdict"]) if guardrail else ("нет аудио" if not has_audio else "ошибка"),
+            "passed": guardrail["passed"] if guardrail else False,
+        })
+    return {"book": book_name, "checks": rows}
 
 
 def add_human_link(book_name: str, persona: str, true: str, relation: str,

@@ -213,7 +213,7 @@ def design_voices(book_name: str, tts_service, names: Optional[List[str]] = None
                                                               IdentityLink.persona_id == c.id,
                                                               IdentityLink.status == "confirmed")).first()
         if id_link and id_link.voice_shift is not None:
-            shifted_path = apply_voice_shift(repo, id_link)
+            shifted_path = apply_voice_shift(repo, id_link, tts_client=getattr(tts_service, "tts_client", None))
             if shifted_path:
                 voice_id = casting.voice_id_for(book_name, c.name)
                 summary["designed"].append({"name": c.name, "voice": voice_id, "shift": id_link.voice_shift, "source": "shifted"})

@@ -83,8 +83,19 @@ class TTSPipeline:
             chars = repo.get_characters()
             from pipelines.speaker_resolution import chapter_links
             links = link_context(chapter_links(repo, chapter_id), scenario_entries)
-            from pipelines.identity_links import identity_voices
+            from pipelines.identity_links import identity_voices, IDENTITY_SIMILARITY_MIN, IDENTITY_SIMILARITY_MAX
             identity = identity_voices(repo)  # связи личностей: чьим голосом звучит персонаж в этой главе
+
+            for c in chars:
+                vc = c.voice_casting or {}
+                if vc.get("guardrail_passed") is False:
+                    sim = vc.get("identity_similarity")
+                    verdict = vc.get("guardrail_verdict", "out of band")
+                    logger.warning(
+                        f"⚠️ Голос персонажа-маски '{c.name}' (сходство {sim:.3f}, {verdict}) "
+                        f"вне рамок guardrail [{IDENTITY_SIMILARITY_MIN}, {IDENTITY_SIMILARITY_MAX}]. "
+                        f"Рекомендуется прослушать аудио."
+                    )
 
             update_progress(0.1, stage, "Все данные успешно загружены.")
 

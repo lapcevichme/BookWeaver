@@ -15,6 +15,7 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py identity confirm|reject <книга> --id 1a2b3c4d
     uv run cli.py identity policy <книга> --id 1a2b3c4d --voice separate|shared|switch_after_reveal
     uv run cli.py identity voice <книга> --id 1a2b3c4d --shift +0.75  # голос маски со сдвигом высоты
+    uv run cli.py identity check <книга>  # проверка сходства масок по ECAPA guardrail
     uv run cli.py identity scope <книга> [--id 1a2b3c4d] [--chapters vol_4_chap_9,vol_4_chap_10]  # главы подмены
     uv run cli.py identity add <книга> --persona Шисуй --true Лоулан --relation same_person [--shift +0.75] [--revealed-in vol_4_chap_14]
     uv run cli.py cast profile|design <книга> [--character Имя] [--force] # кастинг: профиль от LLM, затем голос
@@ -428,6 +429,9 @@ def cmd_identity(args) -> dict:
         return {"book": args.book, "action": "suggest", **counts, "links": il.list_links(repo, args.all)}
     if args.action == "list":
         return {"book": args.book, "action": "list", "links": il.list_links(repo, args.all)}
+    if args.action == "check":
+        tts = _app().model_manager.get_tts_service()
+        return {"action": "check", **il.check_identity_guardrails(args.book, tts_client=getattr(tts, "tts_client", None))}
     if args.action == "scope" and not args.chapters:
         done = il.update_scopes(repo, _app().model_manager.get_llm_service('character_analyzer'),
                                 prefix=args.id, force=bool(args.id))
@@ -721,6 +725,11 @@ def _human(command: str, result: dict) -> str:
         rows = [{**r, "hidden": "да" if r["hidden"] else ""} for r in result["links"]]
         return _table(rows, ["chapter", "label", "kind", "target", "person_key", "confidence", "hidden", "status", "evidence"])
     if command == "identity":
+        if "checks" in result:
+            from pipelines import identity_links as il
+            out = [f"Проверка guardrail схожести масок (коридор [{il.IDENTITY_SIMILARITY_MIN}, {il.IDENTITY_SIMILARITY_MAX}]):",
+                   _table(result["checks"], ["id", "persona", "true", "shift", "similarity", "status"])]
+            return "\n".join(out)
         head = ""
         if result.get("action") == "suggest":
             head = (f"Найдено по secret-фактам: {result['scanned']}, оценено пар: {result['scored']} "
@@ -728,7 +737,7 @@ def _human(command: str, result: dict) -> str:
                     f"отсеяно: {result['dismissed']}\n")
         # Доводы длинные и многострочные — в таблице их обрезало бы до 60 символов, поэтому отдельно и целиком
         out = [head + _table(result["links"], ["id", "persona", "true", "relation", "revealed_in", "chapters",
-                                               "confidence", "status", "source", "voice_policy", "shift"])]
+                                               "confidence", "status", "source", "voice_policy", "shift", "sim"])]
         for r in result["links"]:
             if r["evidence"]:
                 out.append(f"\n[{r['id']}] {r['persona']} → {r['true']}")
@@ -800,8 +809,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="resolve: переспросить LLM о неподтвержденных связях")
     p.set_defaults(func=cmd_link)
 
-    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, voice, scope, add")
-    p.add_argument("action", choices=["suggest", "list", "confirm", "reject", "policy", "voice", "scope", "add"])
+    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, voice, scope, add, check")
+    p.add_argument("action", choices=["suggest", "list", "confirm", "reject", "policy", "voice", "scope", "add", "check"])
     p.add_argument("book")
     p.add_argument("--id", help="начало id связи из identity list")
     p.add_argument("--all", action="store_true", help="list/suggest: показать и отсеянные/отклоненные")

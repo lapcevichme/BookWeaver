@@ -204,6 +204,73 @@ class TestIdentityPipeline(unittest.TestCase):
             shisui_dir = voices_dir / shisui_char.voice_base
             self.assertEqual((shisui_dir / "reference.txt").read_text(encoding="utf-8"), "Привет мир")
 
+    def test_verify_identity_voice_similarity_corridor(self):
+        tts = MagicMock()
+        tts.check_health.return_value = True
+
+        src = self.book_dir / "src.wav"
+        tgt = self.book_dir / "tgt.wav"
+        src.write_bytes(b"RIFF")
+        tgt.write_bytes(b"RIFF")
+
+        # В пределах коридора 0.78 - 0.88
+        tts.speaker_embedding.side_effect = [[1.0, 0.0], [0.84, 0.54]]  # cos = 0.84
+        res = il.verify_identity_voice_similarity(src, tgt, tts)
+        self.assertTrue(res["passed"])
+        self.assertEqual((res["similarity"], res["verdict"]), (0.84, "ok"))
+
+        # Слишком далеко (чужой голос < 0.78)
+        tts.speaker_embedding.side_effect = [[1.0, 0.0], [0.70, 0.71]]  # cos = 0.70
+        res = il.verify_identity_voice_similarity(src, tgt, tts)
+        self.assertFalse(res["passed"])
+        self.assertEqual(res["verdict"], "too_different")
+
+        # Слишком близко (маска не работает > 0.88)
+        tts.speaker_embedding.side_effect = [[1.0, 0.0], [0.95, 0.31]]  # cos = 0.95
+        res = il.verify_identity_voice_similarity(src, tgt, tts)
+        self.assertFalse(res["passed"])
+        self.assertEqual(res["verdict"], "too_similar")
+
+    def test_check_identity_guardrails(self):
+        link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "human", "")
+        il.set_status("b", str(link.id)[:8], "confirmed")
+        il.set_voice("b", str(link.id)[:8], shift=0.75)
+
+        tts = MagicMock()
+        tts.check_health.return_value = True
+        tts.speaker_embedding.side_effect = [[1.0, 0.0], [0.85, 0.52]]
+
+        # Голоса еще нет
+        res = il.check_identity_guardrails("b", tts)
+        self.assertEqual(len(res["checks"]), 1)
+        self.assertEqual(res["checks"][0]["status"], "нет аудио")
+
+        # Создаем файлы голосов
+        import config
+        voices_dir = self.temp_dir / "voices"
+        voices_dir.mkdir(parents=True, exist_ok=True)
+        with patch.object(config, "VOICES_DIR", voices_dir):
+            (voices_dir / "shisui_v").mkdir(parents=True, exist_ok=True)
+            (voices_dir / "loulan_v").mkdir(parents=True, exist_ok=True)
+            (voices_dir / "shisui_v" / "reference.wav").write_bytes(b"RIFF")
+            (voices_dir / "loulan_v" / "reference.wav").write_bytes(b"RIFF")
+
+            with self.repo.get_session() as s:
+                c1 = s.get(Character, self.shisui.id)
+                c2 = s.get(Character, self.loulan.id)
+                c1.voice_base = "shisui_v"
+                c2.voice_base = "loulan_v"
+                s.add(c1)
+                s.add(c2)
+                s.commit()
+
+            res = il.check_identity_guardrails("b", tts)
+            self.assertEqual(len(res["checks"]), 1)
+            self.assertEqual(res["checks"][0]["persona"], "Шисуй")
+            self.assertEqual(res["checks"][0]["true"], "Лоулан")
+            self.assertEqual(res["checks"][0]["status"], "ok")
+            self.assertEqual(res["checks"][0]["similarity"], 0.85)
+
 
 class TestIdentityVoices(unittest.TestCase):
     """Чьим голосом звучит персонаж: политика связи, глава раскрытия, период подмены, цепочки."""
