@@ -149,6 +149,61 @@ class TestIdentityPipeline(unittest.TestCase):
         link = self._links()[0]
         self.assertEqual((link.revealed_in, link.source), ("vol_4_chap_14", "secret_scan"))
 
+    def test_set_voice_shift_and_policy(self):
+        link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "human", "")
+        prefix = str(link.id)[:8]
+        il.set_voice("b", prefix, policy="shared", shift=0.75)
+        row = il.list_links(self.repo, include_all=True)[0]
+        self.assertEqual(row["voice_policy"], "shared")
+        self.assertEqual(row["shift"], "+0.75")
+
+        il.set_voice("b", prefix, shift=-0.5)
+        row = il.list_links(self.repo, include_all=True)[0]
+        self.assertEqual(row["voice_policy"], "shared")  # policy сохранился
+        self.assertEqual(row["shift"], "-0.5")
+
+        with self.assertRaises(ValueError):
+            il.set_voice("b", prefix, shift=15.0)  # вне диапазона [-12, 12]
+        with self.assertRaises(ValueError):
+            il.set_voice("b", prefix, policy="invalid")
+
+    @patch("subprocess.run")
+    def test_apply_voice_shift_creates_reference_and_sets_voice_base(self, mock_subp):
+        import config
+        voices_dir = self.temp_dir / "voices"
+        voices_dir.mkdir(parents=True, exist_ok=True)
+        with patch.object(config, "VOICES_DIR", voices_dir):
+            # Создаем исходный голос для Лоулан
+            loulan_dir = voices_dir / "loulan_voice"
+            loulan_dir.mkdir(parents=True, exist_ok=True)
+            (loulan_dir / "reference.wav").write_bytes(b"RIFF_SAMPLE")
+            (loulan_dir / "reference.txt").write_text("Привет мир", encoding="utf-8")
+
+            with self.repo.get_session() as s:
+                c = s.get(Character, self.loulan.id)
+                c.voice_base = "loulan_voice"
+                s.add(c)
+                s.commit()
+
+            link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "human", "")
+            il.set_status("b", str(link.id)[:8], "confirmed")
+            il.set_voice("b", str(link.id)[:8], shift=0.75)
+
+            mock_subp.assert_called_once()
+            cmd = mock_subp.call_args[0][0]
+            self.assertIn("rubberband=pitch=1.0443:formant=preserved", " ".join(cmd))
+
+            with self.repo.get_session() as s:
+                shisui_char = s.get(Character, self.shisui.id)
+                self.assertTrue(shisui_char.voice_base.startswith("b__"))
+                self.assertEqual(shisui_char.voice_casting.get("shift"), 0.75)
+                self.assertEqual(shisui_char.voice_casting.get("source_voice"), "loulan_voice")
+                self.assertEqual(shisui_char.voice_casting.get("status"), "designed")
+
+            # Проверяем копирование транскрипта
+            shisui_dir = voices_dir / shisui_char.voice_base
+            self.assertEqual((shisui_dir / "reference.txt").read_text(encoding="utf-8"), "Привет мир")
+
 
 class TestIdentityVoices(unittest.TestCase):
     """Чьим голосом звучит персонаж: политика связи, глава раскрытия, период подмены, цепочки."""

@@ -5,3 +5,4 @@ soundfile>=0.12.1
 torch>=2.2.0
 torchaudio>=2.2.0
 qwen-tts>=0.1.0
+speechbrain>=1.0.0  # ECAPA: сходство голосов (cast compare/distinct)

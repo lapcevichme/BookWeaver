@@ -13,7 +13,7 @@ from sqlmodel import select
 
 from core import casting
 from core.book_repository import BookRepository
-from core.data_models import Character, LlmVoiceCastList, ScenarioEntry, SpeakerLink
+from core.data_models import Character, IdentityLink, LlmVoiceCastList, ScenarioEntry, SpeakerLink
 from pipelines import prompts
 from services.model_manager import ModelManager
 from utils.metrics import metrics_collector
@@ -46,7 +46,11 @@ class CastingPipeline:
                 return False  # голос уже звучит в озвучке: не менять
             return force or not (c.voice_casting or {}).get("profile")
 
-        candidates = sorted([c for c in chars if wanted(c)], key=lambda c: -counts.get(str(c.id), 0))
+        from pipelines.identity_links import same_person_targets
+        same_as = same_person_targets(repo)  # персона -> настоящая личность: голос персоны похож на ее голос
+        candidates = [c for c in chars if wanted(c)]
+        # Настоящие личности — раньше своих персон: профиль персоны строится от их профиля
+        candidates.sort(key=lambda c: (str(c.id) in same_as, -counts.get(str(c.id), 0)))
         summary = {"candidates": [c.name for c in candidates], "profiled": [], "missing": []}
         if not candidates:
             return summary
@@ -55,11 +59,13 @@ class CastingPipeline:
         llm = self.model_manager.get_llm_service('character_analyzer')
         for i in range(0, len(candidates), BATCH):
             batch = candidates[i:i + BATCH]
+            fresh = {c.id: c for c in repo.get_characters()}  # профили, подобранные в прошлых пачках
             prompt = prompts.format_casting_prompt(
                 candidates=[{"name": c.name, "gender": getattr(c.gender, "value", c.gender),
                              "description": c.description or c.spoiler_free_description or "",
-                             "voice_tags": c.voice_profile, "lines": lines.get(str(c.id), [])} for c in batch],
-                cast=self._cast(repo.get_characters(), counts))
+                             "voice_tags": c.voice_profile, "lines": lines.get(str(c.id), []),
+                             **self._same_person_as(fresh.get(same_as.get(str(c.id))))} for c in batch],
+                cast=self._cast(list(fresh.values()), counts))
             result = llm.call_for_pydantic(LlmVoiceCastList, prompt, prompt_type="casting")
             if result is None:
                 raise ValueError(f"Кастинг: LLM не вернула валидный ответ для {[c.name for c in batch]}")
@@ -81,6 +87,16 @@ class CastingPipeline:
             logger.warning(f"Кастинг: модель пропустила {summary['missing']}")
         logger.info(f"Кастинг: {summary}")
         return summary
+
+    @staticmethod
+    def _same_person_as(true_char: Optional[Character]) -> dict:
+        """Подсказка кастингу: это тот же человек, что true_char, — голос похожий, отличие в подаче."""
+        profile = ((true_char.voice_casting or {}).get("profile") if true_char else None)
+        if not profile:
+            return {}
+        return {"same_person_as": {"name": true_char.name,
+                                   "voice": {k: profile[k] for k in ("gender", "age", "pitch", "timbre", "pace", "manner")
+                                             if k in profile}}}
 
     @staticmethod
     def _cast(chars, counts) -> List[dict]:
@@ -177,7 +193,12 @@ def design_voices(book_name: str, tts_service, names: Optional[List[str]] = None
         links = session.exec(select(SpeakerLink)).all()
     voiced = CastingPipeline._voiced_character_ids(entries, links)
     summary = {"designed": [], "skipped": [], "needs_review": []}
-    for c in repo.get_characters():
+    from pipelines.identity_links import same_person_targets, apply_voice_shift
+    same_as = same_person_targets(repo)
+    chars = repo.get_characters()
+    # Настоящие личности вперед, чтобы для масок уже был создан исходный голос
+    chars.sort(key=lambda c: str(c.id) in same_as)
+    for c in chars:
         vc = dict(c.voice_casting or {})
         if not vc.get("profile") or (names and c.name not in names):
             continue
@@ -185,6 +206,19 @@ def design_voices(book_name: str, tts_service, names: Optional[List[str]] = None
                 or (c.voice_base and c.voice_base != vc.get("voice_id")):
             summary["skipped"].append(c.name)
             continue
+
+        # Если для маски подтвержден сдвиг высоты — создаем голос напрямую из образца настоящей личности
+        with repo.get_session() as session:
+            id_link = session.exec(select(IdentityLink).where(IdentityLink.book_id == repo.book_id,
+                                                              IdentityLink.persona_id == c.id,
+                                                              IdentityLink.status == "confirmed")).first()
+        if id_link and id_link.voice_shift is not None:
+            shifted_path = apply_voice_shift(repo, id_link)
+            if shifted_path:
+                voice_id = casting.voice_id_for(book_name, c.name)
+                summary["designed"].append({"name": c.name, "voice": voice_id, "shift": id_link.voice_shift, "source": "shifted"})
+                continue
+
         logger.info(f"🎨 Кастинг: голос для {c.name}")
         # Описания всегда из профиля по текущей лесенке: сохраненные могли собираться старым шаблоном
         vc["instructs"] = casting.instruct_variants(vc["profile"])

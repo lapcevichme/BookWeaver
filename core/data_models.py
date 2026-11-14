@@ -372,6 +372,7 @@ class IdentityLink(SQLModel, table=True):
     evidence: str = Field(default="", sa_column=Column(Text))
     status: str = Field(default="candidate")
     voice_policy: str = Field(default="separate")
+    voice_shift: Optional[float] = None        # сдвиг высоты в полутонах (+0.75, -0.5) для похожих голосов
     source: str = Field(default="human")        # alias_collision | secret_scan | human
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     decided_at: Optional[datetime] = None

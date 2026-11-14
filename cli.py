@@ -14,8 +14,9 @@ BookWeaver CLI: команды без интерактива — для аген
     uv run cli.py identity suggest|list <книга> [--all] [--no-scan] [--rescore]  # связи личностей (Шисуй = Лоулан)
     uv run cli.py identity confirm|reject <книга> --id 1a2b3c4d
     uv run cli.py identity policy <книга> --id 1a2b3c4d --voice separate|shared|switch_after_reveal
+    uv run cli.py identity voice <книга> --id 1a2b3c4d --shift +0.75  # голос маски со сдвигом высоты
     uv run cli.py identity scope <книга> [--id 1a2b3c4d] [--chapters vol_4_chap_9,vol_4_chap_10]  # главы подмены
-    uv run cli.py identity add <книга> --persona Шисуй --true Лоулан --relation same_person [--revealed-in vol_4_chap_14]
+    uv run cli.py identity add <книга> --persona Шисуй --true Лоулан --relation same_person [--shift +0.75] [--revealed-in vol_4_chap_14]
     uv run cli.py cast profile|design <книга> [--character Имя] [--force] # кастинг: профиль от LLM, затем голос
     uv run cli.py cast set <книга> --character Имя --age 22 [--pitch ...]  # правка профиля, затем design --force
     uv run cli.py cast design <книга> --character Имя --variant low --pitch low   # кандидат для выбора на слух
@@ -436,15 +437,16 @@ def cmd_identity(args) -> dict:
         if args.action == "add":
             if not (args.persona and args.true and args.relation):
                 raise CliError("add: нужны --persona, --true и --relation")
-            link = il.add_human_link(args.book, args.persona, args.true, args.relation, args.revealed_in)
+            link = il.add_human_link(args.book, args.persona, args.true, args.relation,
+                                      args.revealed_in, shift=args.shift)
         elif not args.id:
             raise CliError(f"{args.action}: нужен --id (из identity list)")
         elif args.action == "scope":
             link = il.set_scope(args.book, args.id, [c.strip() for c in args.chapters.split(",") if c.strip()])
-        elif args.action == "policy":
-            if not args.voice:
-                raise CliError("policy: нужен --voice")
-            link = il.set_policy(args.book, args.id, args.voice)
+        elif args.action in ("policy", "voice"):
+            if not args.voice and args.shift is None:
+                raise CliError(f"{args.action}: укажите --shift (+0.75, -0.5) или --voice")
+            link = il.set_voice(args.book, args.id, policy=args.voice, shift=args.shift)
         else:
             link = il.set_status(args.book, args.id, "confirmed" if args.action == "confirm" else "rejected")
     except KeyError as e:
@@ -726,7 +728,7 @@ def _human(command: str, result: dict) -> str:
                     f"отсеяно: {result['dismissed']}\n")
         # Доводы длинные и многострочные — в таблице их обрезало бы до 60 символов, поэтому отдельно и целиком
         out = [head + _table(result["links"], ["id", "persona", "true", "relation", "revealed_in", "chapters",
-                                               "confidence", "status", "source", "voice_policy"])]
+                                               "confidence", "status", "source", "voice_policy", "shift"])]
         for r in result["links"]:
             if r["evidence"]:
                 out.append(f"\n[{r['id']}] {r['persona']} → {r['true']}")
@@ -798,14 +800,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="resolve: переспросить LLM о неподтвержденных связях")
     p.set_defaults(func=cmd_link)
 
-    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, scope, add")
-    p.add_argument("action", choices=["suggest", "list", "confirm", "reject", "policy", "scope", "add"])
+    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, voice, scope, add")
+    p.add_argument("action", choices=["suggest", "list", "confirm", "reject", "policy", "voice", "scope", "add"])
     p.add_argument("book")
     p.add_argument("--id", help="начало id связи из identity list")
     p.add_argument("--all", action="store_true", help="list/suggest: показать и отсеянные/отклоненные")
     p.add_argument("--no-scan", action="store_true", help="suggest: без поиска по secret-фактам, только оценить кандидатов")
     p.add_argument("--rescore", action="store_true", help="suggest: переоценить уже оцененные (кроме решений человека)")
-    p.add_argument("--voice", choices=["separate", "shared", "switch_after_reveal"], help="policy")
+    p.add_argument("--voice", choices=["separate", "shared", "switch_after_reveal"], help="policy/voice")
+    p.add_argument("--shift", type=float, help="voice/add: сдвиг высоты в полутонах (+0.75, -0.5) для похожих голосов")
     p.add_argument("--chapters", help="scope: главы подмены через запятую (без --chapters — определить LLM)")
     p.add_argument("--persona", help="add: кем выступает (маска, двойник, тело)")
     p.add_argument("--true", help="add: кто на самом деле")

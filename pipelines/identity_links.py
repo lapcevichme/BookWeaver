@@ -331,6 +331,14 @@ class IdentitySuggestPipeline:
         return counts
 
 
+def same_person_targets(repo: BookRepository) -> Dict[str, UUID]:
+    """Персона -> настоящая личность по подтвержденным same_person/possession: голос персоны делается похожим."""
+    with repo.get_session() as session:
+        links = session.exec(select(IdentityLink).where(IdentityLink.book_id == repo.book_id,
+                                                        IdentityLink.status == "confirmed")).all()
+    return {str(l.persona_id): l.true_id for l in links if l.relation in ("same_person", "possession")}
+
+
 def identity_voices(repo: BookRepository):
     """Резолвер голоса по подтвержденным связям книги (core.voices.IdentityVoices)."""
     from core.voices import IdentityVoices
@@ -352,6 +360,7 @@ def list_links(repo: BookRepository, include_all: bool = False) -> List[dict]:
              "relation": l.relation, "revealed_in": l.revealed_in or "", "confidence":
                  f"{l.confidence:.3f}" if l.confidence is not None else "", "status": l.status,
              "source": l.source, "voice_policy": l.voice_policy,
+             "shift": f"{l.voice_shift:+g}" if l.voice_shift is not None else "",
              "chapters": _ranges(l.active_chapters, order),
              "evidence": " | ".join(x for x in (l.evidence or "").splitlines() if x)} for l in links]
 
@@ -387,23 +396,96 @@ def set_status(book_name: str, prefix: str, status: str) -> IdentityLink:
         session.add(link)
         session.commit()
         session.refresh(link)
-        return link
+    if link.status == "confirmed" and link.voice_shift is not None:
+        apply_voice_shift(repo, link)
+    return link
 
 
 def set_policy(book_name: str, prefix: str, policy: str) -> IdentityLink:
-    if policy not in IDENTITY_VOICE_POLICIES:
+    return set_voice(book_name, prefix, policy=policy)
+
+
+def set_voice(book_name: str, prefix: str, policy: Optional[str] = None,
+              shift: Optional[float] = None) -> IdentityLink:
+    if policy is not None and policy not in IDENTITY_VOICE_POLICIES:
         raise ValueError(f"voice_policy: {', '.join(IDENTITY_VOICE_POLICIES)}")
+    if shift is not None and not (-12.0 <= shift <= 12.0):
+        raise ValueError("shift: сдвиг в полутонах должен быть от -12.0 до +12.0")
     repo = BookRepository(book_name)
     with repo.get_session() as session:
         link = _get_by_prefix(session, book_name, prefix)
-        link.voice_policy = policy
+        if policy is not None:
+            link.voice_policy = policy
+        if shift is not None:
+            link.voice_shift = shift
         session.add(link)
         session.commit()
         session.refresh(link)
-        return link
+    if link.voice_shift is not None and link.status == "confirmed":
+        apply_voice_shift(repo, link)
+    return link
 
 
-def add_human_link(book_name: str, persona: str, true: str, relation: str, revealed_in: Optional[str]) -> IdentityLink:
+def apply_voice_shift(repo: BookRepository, link: IdentityLink):
+    """
+    Создает образец голоса для маски: сдвиг высоты образца истинной личности через rubberband
+    (с сохранением формант: formant=preserved). Сохраняет reference.wav и reference.txt
+    в storage/voices/<id>/ и назначает persona.voice_base.
+    """
+    if link.voice_shift is None:
+        return None
+    import subprocess
+    from pathlib import Path
+    import config
+    from core import casting, path_manager
+    with repo.get_session() as session:
+        true_char = session.get(Character, link.true_id)
+        persona_char = session.get(Character, link.persona_id)
+        if not true_char or not persona_char:
+            return None
+        if not true_char.voice_base:
+            logger.info(f"Сдвиг голоса: у '{true_char.name}' еще нет voice_base — будет применен при кастинге")
+            return None
+        source_path = path_manager.get_voice_path(true_char.voice_base)
+        if not source_path.exists():
+            logger.info(f"Сдвиг голоса: файл референса '{source_path}' не найден")
+            return None
+
+        target_voice_id = casting.voice_id_for(repo.book_id, persona_char.name)
+        target_dir = config.VOICES_DIR / target_voice_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / "reference.wav"
+
+        pitch_ratio = 2 ** (link.voice_shift / 12)
+        rb_filter = f"rubberband=pitch={pitch_ratio:.4f}:formant=preserved"
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(source_path), "-af", rb_filter, str(target_path)]
+        try:
+            subprocess.run(cmd, check=True)
+        except Exception as e:
+            logger.error(f"Ошибка при создании сдвинутого голоса через ffmpeg rubberband: {e}")
+            return None
+
+        txt_source = source_path.with_suffix(".txt")
+        if txt_source.exists():
+            target_path.with_suffix(".txt").write_text(txt_source.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            target_path.with_suffix(".txt").write_text(casting.SAMPLE_TEXT, encoding="utf-8")
+
+        persona_char.voice_base = target_voice_id
+        vc = dict(persona_char.voice_casting or {})
+        vc.update(status=casting.STATUS_DESIGNED, voice_id=target_voice_id,
+                  shift=link.voice_shift, source_voice=true_char.voice_base)
+        persona_char.voice_casting = vc
+        session.add(persona_char)
+        session.commit()
+        logger.info(f"Голос для маски '{persona_char.name}' создан со сдвигом {link.voice_shift:+g} из '{true_char.name}' ({target_voice_id})")
+        return target_path
+
+
+def add_human_link(book_name: str, persona: str, true: str, relation: str,
+                   revealed_in: Optional[str], shift: Optional[float] = None) -> IdentityLink:
+    if shift is not None and not (-12.0 <= shift <= 12.0):
+        raise ValueError("shift: сдвиг в полутонах должен быть от -12.0 до +12.0")
     repo = BookRepository(book_name)
     chars = {c.name: c for c in repo.get_characters()}
     if persona not in chars or true not in chars:
@@ -413,7 +495,11 @@ def add_human_link(book_name: str, persona: str, true: str, relation: str, revea
         link.persona_id, link.true_id = chars[persona].id, chars[true].id
         link.relation, link.revealed_in, link.source = relation, revealed_in, "human"
         link.status, link.decided_at = "confirmed", datetime.now(timezone.utc)
+        if shift is not None:
+            link.voice_shift = shift
         session.add(link)
         session.commit()
         session.refresh(link)
-        return link
+    if link.voice_shift is not None:
+        apply_voice_shift(repo, link)
+    return link

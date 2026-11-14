@@ -200,6 +200,10 @@ def init_book_db(book_path: Path, force: bool = False) -> Engine:
                 logger.info(f"Migration: Adding active_chapters column to identitylink in {resolved_path.name}")
                 conn.execute(text("ALTER TABLE identitylink ADD COLUMN active_chapters JSON DEFAULT '[]'"))
                 conn.commit()
+            if id_columns and "voice_shift" not in id_columns:
+                logger.info(f"Migration: Adding voice_shift column to identitylink in {resolved_path.name}")
+                conn.execute(text("ALTER TABLE identitylink ADD COLUMN voice_shift FLOAT DEFAULT NULL"))
+                conn.commit()
             if char_columns and "name_timeline" not in char_columns:
                 logger.info(f"Migration: Adding name_timeline column to {resolved_path.name}")
                 conn.execute(text("ALTER TABLE character ADD COLUMN name_timeline JSON DEFAULT '{}'"))
