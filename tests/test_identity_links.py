@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.book_repository import BookRepository
-from core.data_models import Book, Chapter, Character, IdentityLink
+from core.data_models import Book, Chapter, Character, CharacterGender, IdentityLink
 from core.database import dispose_engine, get_book_session, init_book_db
 from pipelines import identity_links as il
 
@@ -48,6 +48,73 @@ class TestScorePair(unittest.TestCase):
     def test_no_logprobs_falls_back_to_judge(self):
         r = il.score_pair(_llm(None, il.LlmIdentityJudgement(answer="g")), self.x, self.y)
         self.assertEqual((r["letter"], r["confidence"]), ("G", None))
+
+
+class TestDuplicateCandidates(unittest.TestCase):
+    def setUp(self):
+        self.order = {
+            "vol_1_chap_15": 0,
+            "vol_1_chap_27": 1,
+            "vol_1_chap_28": 2,
+            "vol_1_chap_29": 3,
+            "vol_1_chap_30": 4,
+            "vol_2_chap_1": 5
+        }
+        self.aduo = Character(
+            book_id="b",
+            name="А-Дуо",
+            aliases=["Целомудренная супруга"],
+            gender=CharacterGender.FEMALE,
+            description="А-Дуо, Целомудренная супруга. Молочная сестра императора. Родила сына, который умер.",
+            spoiler_free_description="Целомудренная супруга.",
+            chapter_mentions={"vol_1_chap_15": "x", "vol_1_chap_27": "x", "vol_1_chap_29": "x", "vol_1_chap_30": "x"},
+            facts=[
+                {"fact": "Является молочной сестрой императора.", "kind": "relation", "chapter": "vol_1_chap_29"},
+                {"fact": "Родила императору сына, который умер.", "kind": "past", "chapter": "vol_1_chap_27"},
+            ]
+        )
+        self.pure = Character(
+            book_id="b",
+            name="Чистая супруга",
+            gender=CharacterGender.FEMALE,
+            description="Чистая супруга. В прошлом молочная сестра императора. Родила сына, умершего в младенчестве.",
+            spoiler_free_description="Чистая супруга.",
+            chapter_mentions={"vol_1_chap_28": "y"},
+            facts=[
+                {"fact": "Была молочной сестрой императора.", "kind": "relation", "chapter": "vol_1_chap_28"},
+                {"fact": "Родила императору первого ребёнка, умершего в младенчестве.", "kind": "past", "chapter": "vol_1_chap_28"},
+            ]
+        )
+
+    def test_gap_fill_duplicate_candidate_found(self):
+        cands = il.find_duplicate_candidates([self.aduo, self.pure], self.order)
+        self.assertEqual(len(cands), 1)
+        cand = cands[0]
+        self.assertEqual(cand["x"].name, "Чистая супруга")
+        self.assertEqual(cand["y"].name, "А-Дуо")
+        self.assertEqual(cand["pattern"], "gap_fill")
+        self.assertEqual(cand["chapter"], "vol_1_chap_28")
+        self.assertIn("общая роль: супруга", cand["evidence"])
+
+    def test_co_occurrence_rejected(self):
+        # Если оба персонажа появляются в одной главе — это антипаттерн (не дубль)
+        self.pure.chapter_mentions["vol_1_chap_27"] = "together"
+        cands = il.find_duplicate_candidates([self.aduo, self.pure], self.order)
+        self.assertEqual(len(cands), 0)
+
+    def test_parallel_long_lives_rejected(self):
+        # Если оба персонажа живут > 3 глав параллельно — это не дубль перевода
+        self.pure.chapter_mentions = {
+            "vol_2_chap_1": "1", "vol_2_chap_2": "2", "vol_2_chap_3": "3", "vol_2_chap_4": "4"
+        }
+        order = {**self.order, "vol_2_chap_2": 6, "vol_2_chap_3": 7, "vol_2_chap_4": 8}
+        cands = il.find_duplicate_candidates([self.aduo, self.pure], order)
+        self.assertEqual(len(cands), 0)
+
+    def test_gender_mismatch_rejected(self):
+        self.pure.gender = CharacterGender.MALE
+        cands = il.find_duplicate_candidates([self.aduo, self.pure], self.order)
+        self.assertEqual(len(cands), 0)
 
 
 class TestIdentityPipeline(unittest.TestCase):
@@ -148,6 +215,48 @@ class TestIdentityPipeline(unittest.TestCase):
         self.assertEqual((counts["scanned"], counts["suggested"]), (1, 1))
         link = self._links()[0]
         self.assertEqual((link.revealed_in, link.source), ("vol_4_chap_14", "secret_scan"))
+
+    def test_dedup_scan_finds_and_suggests_duplicate(self):
+        with get_book_session(self.book_dir) as s:
+            for i, cid in enumerate(["vol_1_chap_15", "vol_1_chap_27", "vol_1_chap_28", "vol_1_chap_29"]):
+                s.add(Chapter(id=cid, book_id="b", volume_num=1, chapter_num=i, order_index=i, title=cid, raw_text="x"))
+            s.commit()
+        aduo = Character(
+            book_id="b", name="А-Дуо", aliases=["Целомудренная супруга"],
+            gender=CharacterGender.FEMALE,
+            description="А-Дуо, Целомудренная супруга. Молочная сестра императора.",
+            spoiler_free_description="d",
+            chapter_mentions={"vol_1_chap_15": "x", "vol_1_chap_27": "x", "vol_1_chap_29": "x"},
+            facts=[{"fact": "Является молочной сестрой императора.", "kind": "relation", "chapter": "vol_1_chap_29"}]
+        )
+        pure = Character(
+            book_id="b", name="Чистая супруга",
+            gender=CharacterGender.FEMALE,
+            description="Чистая супруга. Молочная сестра императора.",
+            spoiler_free_description="d",
+            chapter_mentions={"vol_1_chap_28": "y"},
+            facts=[{"fact": "Была молочной сестрой императора.", "kind": "relation", "chapter": "vol_1_chap_28"}]
+        )
+        self.repo.save_characters([self.shisui, self.loulan, self.rempu, aduo, pure])
+
+        llm = MagicMock()
+        llm.choice_probabilities.return_value = {"G": 0.99}
+        llm.call_for_pydantic.return_value = il.LlmIdentityJudgement(
+            answer="G",
+            evidence="Чистая супруга и Целомудренная супруга — разные переводы одного титула А-Дуо"
+        )
+
+        counts = self._run(llm, scan=False, dedup=True)
+        self.assertGreaterEqual(counts["dedup_found"], 1)
+        self.assertEqual(counts["suggested"], 1)
+
+        dup_links = [l for l in self._links() if l.relation == "duplicate"]
+        self.assertEqual(len(dup_links), 1)
+        l = dup_links[0]
+        self.assertEqual((l.persona_id, l.true_id), (pure.id, aduo.id))
+        self.assertEqual(l.status, "suggested")
+        self.assertEqual(l.revealed_in, "vol_1_chap_28")
+        self.assertIn("dedup_scan", l.source)
 
     def test_set_voice_shift_and_policy(self):
         link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "human", "")

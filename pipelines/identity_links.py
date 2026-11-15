@@ -14,9 +14,12 @@
 """
 import json
 import logging
+import math
+import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -157,6 +160,156 @@ def scan_secret_facts(llm, chars: List[Character]) -> List[dict]:
     return found
 
 
+DEDUP_STOP_WORDS = {
+    'и', 'в', 'во', 'не', 'что', 'он', 'на', 'я', 'с', 'со', 'как', 'а', 'то', 'все', 'она', 'так',
+    'его', 'но', 'да', 'ты', 'к', 'у', 'же', 'вы', 'за', 'бы', 'по', 'только', 'ее', 'мне', 'было',
+    'вот', 'от', 'меня', 'еще', 'нет', 'о', 'из', 'ему', 'теперь', 'когда', 'даже', 'ну', 'вдруг',
+    'ли', 'если', 'уже', 'или', 'ни', 'быть', 'был', 'была', 'были', 'него', 'до', 'вас', 'нибудь',
+    'опять', 'уж', 'вам', 'ведь', 'там', 'потом', 'себя', 'ничего', 'ей', 'может', 'они', 'тут',
+    'где', 'есть', 'надо', 'ней', 'для', 'мы', 'тебя', 'их', 'чем', 'была', 'сам', 'чтоб', 'без',
+    'будто', 'чего', 'раз', 'тоже', 'себе', 'под', 'будет', 'ж', 'тогда', 'кто', 'этот', 'того',
+    'потому', 'этого', 'какой', 'совсем', 'ним', 'здесь', 'этом', 'один', 'почти', 'мой', 'тем',
+    'чтобы', 'нее', 'сейчас', 'были', 'куда', 'зачем', 'всех', 'никогда', 'можно', 'при', 'наконец',
+    'два', 'об', 'другой', 'хоть', 'после', 'над', 'больше', 'тот', 'через', 'эти', 'нас', 'про',
+    'всего', 'них', 'какая', 'много', 'разве', 'три', 'эту', 'моя', 'впрочем', 'хорошо', 'свою',
+    'этой', 'перед', 'иногда', 'лучше', 'чуть', 'том', 'нельзя', 'такой', 'им', 'более', 'всегда',
+    'конечно', 'всю', 'между', 'глава', 'гл', 'том', 'персонаж', 'одна', 'один', 'одно', 'одного'
+}
+
+DEDUP_ROLE_WORDS = {
+    'супруга', 'супруги', 'супругой', 'супругу', 'супруг',
+    'наложница', 'наложницы', 'наложницей', 'наложницу', 'наложниц',
+    'куртизанка', 'куртизанки', 'куртизанкой', 'куртизанку',
+    'евнух', 'евнуха', 'евнухом', 'евнухе',
+    'служанка', 'служанки', 'служанкой', 'служанку',
+    'фрейлина', 'фрейлины', 'фрейлиной', 'фрейлину',
+    'хозяйка', 'хозяйки', 'хозяйкой', 'хозяйку',
+    'доктор', 'доктора', 'доктором', 'врач', 'врача',
+    'командир', 'командира', 'страж', 'стража', 'стражник',
+    'посланница', 'посланницы', 'эмиссар', 'принц', 'принцесса'
+}
+
+
+def _tokenize_for_dedup(text: str) -> Set[str]:
+    return {w for w in re.findall(r'[a-zA-Zа-яА-ЯёЁ0-9]+', text.lower())
+            if len(w) > 2 and w not in DEDUP_STOP_WORDS}
+
+
+def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
+                              max_candidates: int = 15) -> List[dict]:
+    """
+    Находит кандидатов на дубликаты базы (ошибки перевода/парсинга) по поведенческим паттернам и фактам.
+
+    Дисквалификаторы (антипаттерны):
+    - Совместное появление в одной главе (co-occurrence);
+    - Параллельная долгая жизнь (оба персонажа > 3 глав);
+    - Конфликт сущностей (PERSON vs ANIMAL) или несовпадающий пол (male vs female).
+
+    Положительные поведенческие паттерны:
+    - gap_fill: эпизодический персонаж (<= 2 глав) появляется строго внутри интервала активного персонажа;
+    - relay: передача эстафеты (один персонаж заканчивается, другой начинается в пределах 3 глав без пересечения);
+    - flash: одноразовый персонаж (<= 2 глав) с совпадением редких фактов-биографических якорей.
+    """
+    doc_freq = Counter()
+    char_tokens: Dict[UUID, Set[str]] = {}
+    char_roles: Dict[UUID, Set[str]] = {}
+
+    for c in chars:
+        texts = [c.name, c.description or ''] + (c.aliases or [])
+        for f in (c.facts or []):
+            texts.append(f.get('fact', ''))
+        tokens = _tokenize_for_dedup(' '.join(texts))
+        char_tokens[c.id] = tokens
+        for t in tokens:
+            doc_freq[t] += 1
+        name_words = _tokenize_for_dedup(c.name + ' ' + ' '.join(c.aliases or []))
+        char_roles[c.id] = {w for w in name_words if w in DEDUP_ROLE_WORDS}
+
+    N = len(chars)
+    idf = {t: math.log((N - df + 0.5) / (df + 0.5) + 1.0) for t, df in doc_freq.items()}
+
+    char_chaps: Dict[UUID, List[str]] = {}
+    for c in chars:
+        ch_list = [ch for ch in (c.chapter_mentions or {}).keys() if ch in order]
+        char_chaps[c.id] = sorted(ch_list, key=order.__getitem__)
+
+    candidates = []
+    for i in range(len(chars)):
+        for j in range(i + 1, len(chars)):
+            c1, c2 = chars[i], chars[j]
+            ch1, ch2 = char_chaps.get(c1.id, []), char_chaps.get(c2.id, [])
+            if not ch1 or not ch2:
+                continue
+            if set(ch1) & set(ch2):
+                continue
+            if len(ch1) > 3 and len(ch2) > 3:
+                continue
+            if c1.entity_type != c2.entity_type and c1.entity_type and c2.entity_type:
+                continue
+
+            g1 = getattr(c1.gender, 'value', c1.gender)
+            g2 = getattr(c2.gender, 'value', c2.gender)
+            if g1 and g2 and g1 != g2:
+                continue
+
+            if len(ch1) <= len(ch2):
+                minor, major = c1, c2
+                minor_ch, major_ch = ch1, ch2
+            else:
+                minor, major = c2, c1
+                minor_ch, major_ch = ch2, ch1
+
+            pattern = None
+            if len(major_ch) >= 4 and len(minor_ch) <= 2:
+                min_maj, max_maj = order[major_ch[0]], order[major_ch[-1]]
+                if all(min_maj < order[ch] < max_maj for ch in minor_ch):
+                    pattern = 'gap_fill'
+            if not pattern:
+                if order[minor_ch[-1]] < order[major_ch[0]] and (order[major_ch[0]] - order[minor_ch[-1]]) <= 3:
+                    pattern = 'relay'
+                elif order[major_ch[-1]] < order[minor_ch[0]] and (order[minor_ch[0]] - order[major_ch[-1]]) <= 3:
+                    pattern = 'relay'
+            if not pattern and len(minor_ch) <= 2:
+                pattern = 'flash'
+
+            if not pattern:
+                continue
+
+            common = char_tokens.get(minor.id, set()) & char_tokens.get(major.id, set())
+            rare = [t for t in common if doc_freq[t] <= 3]
+            rare_score = sum(idf[t] for t in rare)
+            shared_roles = char_roles.get(minor.id, set()) & char_roles.get(major.id, set())
+            role_bonus = 3.5 if shared_roles else 0.0
+            total_score = rare_score + role_bonus
+
+            if pattern == 'gap_fill' and (total_score >= 6.0 or (shared_roles and rare)):
+                pass
+            elif pattern == 'relay' and total_score >= 6.0:
+                pass
+            elif pattern == 'flash' and (total_score >= 8.0 or (len(rare) >= 2 and total_score >= 6.0)):
+                pass
+            else:
+                continue
+
+            evidence = f"паттерн {pattern} (гл. {_ch(minor_ch[0])})"
+            if shared_roles:
+                evidence += f", общая роль: {list(shared_roles)[0]}"
+            if rare:
+                evidence += f", редкие факты: {', '.join(sorted(rare)[:4])}"
+
+            candidates.append({
+                'x': minor,
+                'y': major,
+                'chapter': minor_ch[0],
+                'pattern': pattern,
+                'score': total_score,
+                'evidence': evidence
+            })
+
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return candidates[:max_candidates]
+
+
 def scope_prompt(persona: Character, impostor: Character, order: Dict[str, int]) -> str:
     """Действия обоих по главам (где появляется хоть один) + их secret-факты."""
     chapters = sorted(set(persona.chapter_mentions or {}) | set(impostor.chapter_mentions or {}),
@@ -280,7 +433,7 @@ class IdentitySuggestPipeline:
     def __init__(self, model_manager):
         self.model_manager = model_manager
 
-    def run(self, book_name: str, scan: bool = True, rescore: bool = False) -> dict:
+    def run(self, book_name: str, scan: bool = True, dedup: bool = True, rescore: bool = False) -> dict:
         repo = BookRepository(book_name)
         chars = repo.get_characters()
         by_id = {c.id: c for c in chars}
@@ -294,6 +447,12 @@ class IdentitySuggestPipeline:
                 add_candidate(repo, found["x"], found["y"], found["chapter"], "secret_scan", found["evidence"], order)
                 scanned += 1
 
+        dedup_found = 0
+        if dedup:
+            for cand in find_duplicate_candidates(chars, order):
+                add_candidate(repo, cand["x"], cand["y"], cand["chapter"], "dedup_scan", cand["evidence"], order)
+                dedup_found += 1
+
         with repo.get_session() as session:
             todo = session.exec(select(IdentityLink).where(IdentityLink.book_id == book_name)).all()
         todo = [l for l in todo if l.status == "candidate" or (rescore and l.status in ("suggested", "dismissed"))]
@@ -305,7 +464,7 @@ class IdentitySuggestPipeline:
         with ThreadPoolExecutor(max_workers=6) as ex:
             results = list(ex.map(work, todo))
 
-        counts = {"scanned": scanned, "scored": 0, "suggested": 0, "dismissed": 0, "judged": 0}
+        counts = {"scanned": scanned, "dedup_found": dedup_found, "scored": 0, "suggested": 0, "dismissed": 0, "judged": 0}
         with repo.get_session() as session:
             for link, r in results:
                 link = session.get(IdentityLink, link.id)

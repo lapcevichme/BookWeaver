@@ -425,7 +425,8 @@ def cmd_identity(args) -> dict:
     from pipelines import identity_links as il
     repo = _repo(args.book)
     if args.action == "suggest":
-        counts = il.IdentitySuggestPipeline(_app().model_manager).run(args.book, scan=not args.no_scan, rescore=args.rescore)
+        counts = il.IdentitySuggestPipeline(_app().model_manager).run(args.book, scan=not args.no_scan,
+                                                                      dedup=not args.no_dedup, rescore=args.rescore)
         return {"book": args.book, "action": "suggest", **counts, "links": il.list_links(repo, args.all)}
     if args.action == "list":
         return {"book": args.book, "action": "list", "links": il.list_links(repo, args.all)}
@@ -815,6 +816,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", help="начало id связи из identity list")
     p.add_argument("--all", action="store_true", help="list/suggest: показать и отсеянные/отклоненные")
     p.add_argument("--no-scan", action="store_true", help="suggest: без поиска по secret-фактам, только оценить кандидатов")
+    p.add_argument("--no-dedup", action="store_true", help="suggest: без поиска дубликатов базы по паттернам и фактам")
     p.add_argument("--rescore", action="store_true", help="suggest: переоценить уже оцененные (кроме решений человека)")
     p.add_argument("--voice", choices=["separate", "shared", "switch_after_reveal"], help="policy/voice")
     p.add_argument("--shift", type=float, help="voice/add: сдвиг высоты в полутонах (+0.75, -0.5) для похожих голосов")
