@@ -60,6 +60,20 @@ class CharacterListEntryDto(BaseModel):
     short_role: Optional[str] = Field(None, description="Короткая роль (пока не реализовано в бэкенде, резерв)")
 
 
+class IdentityRevealDto(BaseModel):
+    """
+    Раскрытие тайны личности / связи персонажей (без спойлеров к текущей главе)
+    """
+    link_id: str
+    relation: str = Field(description="same_person | impersonation | possession | duplicate")
+    role: str = Field(description="persona (маска) | true_identity (настоящая личность)")
+    other_character_id: str
+    other_character_name: str
+    revealed_in: Optional[str] = None
+    evidence: Optional[str] = None
+    active_chapters: List[str] = Field(default_factory=list)
+
+
 # /characters/{id}
 
 class CharacterDetailsDto(BaseModel):
@@ -78,6 +92,10 @@ class CharacterDetailsDto(BaseModel):
     description_from_chapter: Optional[str] = Field(
         None, description="Глава, из которой взята версия описания; null — первое описание персонажа")
     first_chapter: Optional[str] = Field(None, description="Глава первого появления (только с as_of_chapter)")
+    reveals: List[IdentityRevealDto] = Field(
+        default_factory=list,
+        description="Раскрытые к этой главе связи личностей (альтер-эго, маски, подмены)"
+    )
 
 
 # /chapters/{id}/info

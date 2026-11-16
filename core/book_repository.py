@@ -4,7 +4,7 @@ from core.database import get_book_session, init_book_db
 from core.data_models import (
     Book, Chapter, ChapterCache, Character, ScenarioEntry, ChapterSummary,
     CharacterArchive, ChapterSummaryArchive, BookManifest, ManifestMeta,
-    ManifestChapterEntry, ManifestConfig, ChapterStatus
+    ManifestChapterEntry, ManifestConfig, ChapterStatus, IdentityLink
 )
 from core import path_manager
 from pathlib import Path
@@ -140,6 +140,13 @@ class BookRepository:
     def get_characters(self) -> List[Character]:
         with self.get_session() as session:
             return session.exec(select(Character).where(Character.book_id == self.book_id)).all()
+
+    def get_identity_links(self, status: Optional[str] = "confirmed") -> List[IdentityLink]:
+        with self.get_session() as session:
+            q = select(IdentityLink).where(IdentityLink.book_id == self.book_id)
+            if status is not None:
+                q = q.where(IdentityLink.status == status)
+            return session.exec(q).all()
 
     def get_character_archive(self) -> CharacterArchive:
         chars = self.get_characters()

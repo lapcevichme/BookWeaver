@@ -28,7 +28,8 @@ from api.mobile.mobile_api_models import (
     PingResponseDto,
     PlaybackDataResponseDto,
     SyncMapEntryDto,
-    BookManifestDto
+    BookManifestDto,
+    IdentityRevealDto
 )
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,9 @@ async def get_book_characters(
         db_chars = repo.get_characters()
         if asOfChapter:
             order = _chapter_order_or_404(repo, asOfChapter)
-            views = {c.id: character_as_of(c, order, asOfChapter) for c in db_chars}
+            confirmed_links = repo.get_identity_links(status="confirmed")
+            views = {c.id: character_as_of(c, order, asOfChapter, identity_links=confirmed_links, all_characters=db_chars)
+                     for c in db_chars}
             db_chars = [c for c in db_chars if views[c.id] is not None]
         result_list = []
 
@@ -249,10 +252,29 @@ async def get_character_details(
         if not target_char:
             raise HTTPException(status_code=404, detail="Персонаж не найден.")
 
+        confirmed_links = repo.get_identity_links(status="confirmed")
+        all_chars = repo.get_characters()
+
         if asOfChapter:
-            view = character_as_of(target_char, _chapter_order_or_404(repo, asOfChapter), asOfChapter)
+            order = _chapter_order_or_404(repo, asOfChapter)
+            view = character_as_of(target_char, order, asOfChapter,
+                                   identity_links=confirmed_links,
+                                   all_characters=all_chars)
             if view is None:
                 raise HTTPException(status_code=404, detail="Персонаж к этой главе еще не появлялся.")
+            reveals_dto = [
+                IdentityRevealDto(
+                    link_id=r.link_id,
+                    relation=r.relation,
+                    role=r.role,
+                    other_character_id=r.other_character_id,
+                    other_character_name=r.other_character_name,
+                    revealed_in=r.revealed_in,
+                    evidence=r.evidence,
+                    active_chapters=r.active_chapters,
+                )
+                for r in view.reveals
+            ]
             return CharacterDetailsDto(
                 id=str(target_char.id),
                 name=view.name,
@@ -264,7 +286,31 @@ async def get_character_details(
                 as_of_chapter=asOfChapter,
                 description_from_chapter=view.description_from,
                 first_chapter=view.first_chapter,
+                reveals=reveals_dto,
             )
+
+        # Полный вид (без asOfChapter): все подтвержденные связи
+        chars_by_id = {str(c.id): c for c in all_chars}
+        reveals_dto = []
+        char_id_str = str(target_char.id)
+        for l in confirmed_links:
+            p_id, t_id = str(l.persona_id), str(l.true_id)
+            if char_id_str == p_id:
+                other_c = chars_by_id.get(t_id)
+                reveals_dto.append(IdentityRevealDto(
+                    link_id=str(l.id), relation=l.relation, role="persona",
+                    other_character_id=t_id, other_character_name=other_c.name if other_c else t_id,
+                    revealed_in=l.revealed_in, evidence=l.evidence or "",
+                    active_chapters=list(l.active_chapters or [])
+                ))
+            elif char_id_str == t_id:
+                other_c = chars_by_id.get(p_id)
+                reveals_dto.append(IdentityRevealDto(
+                    link_id=str(l.id), relation=l.relation, role="true_identity",
+                    other_character_id=p_id, other_character_name=other_c.name if other_c else p_id,
+                    revealed_in=l.revealed_in, evidence=l.evidence or "",
+                    active_chapters=list(l.active_chapters or [])
+                ))
 
         return CharacterDetailsDto(
             id=str(target_char.id),
@@ -273,7 +319,8 @@ async def get_character_details(
             description=target_char.description,
             spoiler_free_description=target_char.spoiler_free_description,
             aliases=target_char.aliases,
-            chapter_mentions=target_char.chapter_mentions
+            chapter_mentions=target_char.chapter_mentions,
+            reveals=reveals_dto,
         )
     except HTTPException as e:
         raise e

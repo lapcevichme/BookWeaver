@@ -59,6 +59,62 @@ class TestCharacterView(unittest.TestCase):
         with self.assertRaises(KeyError):
             characters_as_of([_jinshi()], self.order, "vol_9_chap_9")
 
+    def test_identity_reveals_hidden_before_revealed_in(self):
+        from uuid import uuid4
+        from core.data_models import IdentityLink
+        shisui = Character(id=uuid4(), book_id="b", name="Шисуй",
+                           description_timeline={"vol_1_chap_2": "Веселая служанка."},
+                           chapter_mentions={"vol_1_chap_2": "Гуляет в саду."})
+        loulan = Character(id=uuid4(), book_id="b", name="Лоулан",
+                           description_timeline={"vol_1_chap_2": "Загадочная наложница."},
+                           chapter_mentions={"vol_1_chap_2": "Сидит во дворце."})
+        link = IdentityLink(book_id="b", persona_id=shisui.id, true_id=loulan.id,
+                            relation="same_person", revealed_in="vol_1_chap_10",
+                            status="confirmed", evidence="Шисуй — это Лоулан")
+
+        # В главе 2 (до главы 10) связь СТРОГО скрыта
+        view_shisui = character_as_of(shisui, self.order, "vol_1_chap_2",
+                                      identity_links=[link], all_characters=[shisui, loulan])
+        self.assertEqual(view_shisui.reveals, [])
+
+        view_loulan = character_as_of(loulan, self.order, "vol_1_chap_2",
+                                     identity_links=[link], all_characters=[shisui, loulan])
+        self.assertEqual(view_loulan.reveals, [])
+
+        # В главе 10 (глава раскрытия) связь появляется у обоих персонажей
+        view_shisui_10 = character_as_of(shisui, self.order, "vol_1_chap_10",
+                                         identity_links=[link], all_characters=[shisui, loulan])
+        self.assertEqual(len(view_shisui_10.reveals), 1)
+        r_shisui = view_shisui_10.reveals[0]
+        self.assertEqual(r_shisui.role, "persona")
+        self.assertEqual(r_shisui.other_character_name, "Лоулан")
+        self.assertEqual(r_shisui.relation, "same_person")
+
+        view_loulan_10 = character_as_of(loulan, self.order, "vol_1_chap_10",
+                                        identity_links=[link], all_characters=[shisui, loulan])
+        self.assertEqual(len(view_loulan_10.reveals), 1)
+        r_loulan = view_loulan_10.reveals[0]
+        self.assertEqual(r_loulan.role, "true_identity")
+        self.assertEqual(r_loulan.other_character_name, "Шисуй")
+
+    def test_unconfirmed_link_never_revealed(self):
+        from uuid import uuid4
+        from core.data_models import IdentityLink
+        shisui = Character(id=uuid4(), book_id="b", name="Шисуй",
+                           description_timeline={"vol_1_chap_10": "Служанка."},
+                           chapter_mentions={"vol_1_chap_10": "В саду."})
+        loulan = Character(id=uuid4(), book_id="b", name="Лоулан",
+                           description_timeline={"vol_1_chap_10": "Наложница."},
+                           chapter_mentions={"vol_1_chap_10": "Во дворце."})
+        # Связь только предложена, но не подтверждена человеком
+        link = IdentityLink(book_id="b", persona_id=shisui.id, true_id=loulan.id,
+                            relation="same_person", revealed_in="vol_1_chap_2",
+                            status="suggested", evidence="Гипотеза")
+
+        view = character_as_of(shisui, self.order, "vol_1_chap_10",
+                               identity_links=[link], all_characters=[shisui, loulan])
+        self.assertEqual(view.reveals, [])
+
 
 class TestMobileCharactersAsOf(unittest.TestCase):
     def setUp(self):
@@ -116,6 +172,41 @@ class TestMobileCharactersAsOf(unittest.TestCase):
     def test_details_before_first_appearance_and_unknown_chapter(self):
         self.assertEqual(self._get(f"/characters/{self.jinshi_id}", asOfChapter="vol_1_chap_1").status_code, 404)
         self.assertEqual(self._get("/characters", asOfChapter="vol_7_chap_7").status_code, 404)
+
+    def test_mobile_api_reveals_identity_link_as_of_chapter(self):
+        from uuid import UUID
+        from sqlmodel import select
+        from core.database import get_book_session
+        from core.data_models import IdentityLink
+        with get_book_session(self.book_dir) as session:
+            maomao = session.exec(select(Character).where(Character.name == "Маомао")).first()
+            link = IdentityLink(
+                book_id=self.book_id,
+                persona_id=UUID(self.jinshi_id),
+                true_id=maomao.id,
+                relation="same_person",
+                revealed_in="vol_1_chap_10",
+                status="confirmed",
+                evidence="Тестовое раскрытие"
+            )
+            session.add(link)
+            session.commit()
+
+        # В главе 2 раскрытия еще нет
+        res_chap2 = self._get(f"/characters/{self.jinshi_id}", asOfChapter="vol_1_chap_2").json()
+        self.assertEqual(res_chap2["reveals"], [])
+
+        # В главе 10 раскрытие появляется
+        res_chap10 = self._get(f"/characters/{self.jinshi_id}", asOfChapter="vol_1_chap_10").json()
+        self.assertEqual(len(res_chap10["reveals"]), 1)
+        self.assertEqual(res_chap10["reveals"][0]["other_character_name"], "Маомао")
+        self.assertEqual(res_chap10["reveals"][0]["role"], "persona")
+        self.assertEqual(res_chap10["reveals"][0]["relation"], "same_person")
+
+        # Без asOfChapter (полный вид)
+        res_full = self._get(f"/characters/{self.jinshi_id}").json()
+        self.assertEqual(len(res_full["reveals"]), 1)
+        self.assertEqual(res_full["reveals"][0]["other_character_name"], "Маомао")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,18 @@ def chapter_order(chapters: Iterable[Chapter]) -> Dict[str, int]:
 
 
 @dataclass
+class IdentityRevealView:
+    link_id: str
+    relation: str                                # same_person, impersonation, possession, duplicate
+    role: str                                    # 'persona' (маска) или 'true_identity' (настоящая личность)
+    other_character_id: str                      # id связанного персонажа
+    other_character_name: str                    # имя связанного персонажа (на момент главы)
+    revealed_in: Optional[str]                   # глава раскрытия
+    evidence: str = ""                           # краткое обоснование
+    active_chapters: List[str] = field(default_factory=list)  # для impersonation: главы подмены
+
+
+@dataclass
 class CharacterAsOf:
     character: Character
     name: str                                # имя, известное к этой главе (до раскрытия — прежнее)
@@ -27,6 +39,7 @@ class CharacterAsOf:
     first_chapter: Optional[str]
     chapter_mentions: Dict[str, str] = field(default_factory=dict)
     aliases: List[str] = field(default_factory=list)  # только те, что читатель знает к этой главе
+    reveals: List[IdentityRevealView] = field(default_factory=list)  # связи личностей, раскрытые к этой главе
 
 
 def _known_chapters(char: Character, order: Dict[str, int], limit: int) -> List[str]:
@@ -34,7 +47,52 @@ def _known_chapters(char: Character, order: Dict[str, int], limit: int) -> List[
     return sorted((k for k in keys if k in order and order[k] <= limit), key=order.__getitem__)
 
 
-def character_as_of(char: Character, order: Dict[str, int], as_of: str) -> Optional[CharacterAsOf]:
+def _reveals_as_of(char: Character, order: Dict[str, int], limit: int,
+                    identity_links: Optional[Iterable],
+                    all_characters: Optional[Iterable[Character]]) -> List[IdentityRevealView]:
+    """Связи личностей, раскрытые читателю не позже главы `limit`."""
+    if not identity_links:
+        return []
+    chars_by_id = {str(c.id): c for c in (all_characters or [])}
+    char_id_str = str(char.id)
+    reveals = []
+    for link in identity_links:
+        if getattr(link, "status", None) != "confirmed":
+            continue
+        p_id = str(link.persona_id)
+        t_id = str(link.true_id)
+        if char_id_str != p_id and char_id_str != t_id:
+            continue
+
+        rev = link.revealed_in
+        if rev:
+            if rev not in order or order[rev] > limit:
+                continue  # Раскрытие в будущей главе — спойлер, скрываем
+        else:
+            if link.relation != "duplicate":
+                continue
+
+        is_persona = (char_id_str == p_id)
+        other_id = t_id if is_persona else p_id
+        other_char = chars_by_id.get(other_id)
+        other_name = name_as_of(other_char, order, limit) if other_char is not None else other_id
+
+        reveals.append(IdentityRevealView(
+            link_id=str(link.id),
+            relation=link.relation,
+            role="persona" if is_persona else "true_identity",
+            other_character_id=other_id,
+            other_character_name=other_name,
+            revealed_in=link.revealed_in,
+            evidence=link.evidence or "",
+            active_chapters=list(link.active_chapters or []),
+        ))
+    return reveals
+
+
+def character_as_of(char: Character, order: Dict[str, int], as_of: str,
+                    identity_links: Optional[Iterable] = None,
+                    all_characters: Optional[Iterable[Character]] = None) -> Optional[CharacterAsOf]:
     """
     Версия персонажа на момент главы `as_of` (включительно).
     None — персонаж к этой главе еще не появлялся.
@@ -56,10 +114,12 @@ def character_as_of(char: Character, order: Dict[str, int], as_of: str) -> Optio
         description, description_from = (char.spoiler_free_description or ""), None
 
     mentions = {k: v for k, v in (char.chapter_mentions or {}).items() if k in order and order[k] <= limit}
+    reveals = _reveals_as_of(char, order, limit, identity_links, all_characters)
     return CharacterAsOf(character=char, name=name_as_of(char, order, limit),
                          description=description, description_from=description_from,
                          first_chapter=known[0], chapter_mentions=mentions,
-                         aliases=_aliases_as_of(char, order, limit))
+                         aliases=_aliases_as_of(char, order, limit),
+                         reveals=reveals)
 
 
 def name_as_of(char: Character, order: Dict[str, int], limit: int) -> str:
@@ -91,8 +151,11 @@ def _aliases_as_of(char: Character, order: Dict[str, int], limit: int) -> List[s
     return result
 
 
-def characters_as_of(chars: Iterable[Character], order: Dict[str, int], as_of: str) -> List[CharacterAsOf]:
+def characters_as_of(chars: Iterable[Character], order: Dict[str, int], as_of: str,
+                     identity_links: Optional[Iterable] = None) -> List[CharacterAsOf]:
     """Только персонажи, уже появившиеся к главе `as_of`."""
     if as_of not in order:
         raise KeyError(f"Глава '{as_of}' не найдена в книге.")
-    return [v for v in (character_as_of(c, order, as_of) for c in chars) if v is not None]
+    chars_list = list(chars)
+    return [v for v in (character_as_of(c, order, as_of, identity_links=identity_links, all_characters=chars_list)
+                        for c in chars_list) if v is not None]
