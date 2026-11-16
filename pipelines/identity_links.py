@@ -434,7 +434,8 @@ class IdentitySuggestPipeline:
     def __init__(self, model_manager):
         self.model_manager = model_manager
 
-    def run(self, book_name: str, scan: bool = True, dedup: bool = True, rescore: bool = False) -> dict:
+    def run(self, book_name: str, scan: bool = True, dedup: bool = True, rescore: bool = False,
+            volume_num: Optional[int] = None) -> dict:
         repo = BookRepository(book_name)
         chars = repo.get_characters()
         by_id = {c.id: c for c in chars}
@@ -493,7 +494,8 @@ class IdentitySuggestPipeline:
                 session.add(link)
             session.commit()
         counts["scoped"] = len(update_scopes(repo, llm))
-        logger.info(f"Связи личностей {book_name}: {counts}")
+        vol_str = f" (том {volume_num})" if volume_num is not None else ""
+        logger.info(f"Связи личностей {book_name}{vol_str}: {counts}")
         return counts
 
 
