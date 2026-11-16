@@ -152,6 +152,7 @@ class TestIdentityPipeline(unittest.TestCase):
     def _run(self, llm, **kw):
         mm = MagicMock()
         mm.get_llm_service.return_value = llm
+        kw.setdefault("auto_confirm", False)
         with patch("pipelines.identity_links.metrics_collector"):
             return il.IdentitySuggestPipeline(mm).run("b", **kw)
 
@@ -286,6 +287,51 @@ class TestIdentityPipeline(unittest.TestCase):
             il.set_voice("b", prefix, shift=15.0)  # вне диапазона [-12, 12]
         with self.assertRaises(ValueError):
             il.set_voice("b", prefix, policy="invalid")
+
+    def test_auto_confirm_at_high_confidence(self):
+        il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")
+        llm = _llm({"A": 0.99}, il.LlmIdentityJudgement(answer="A", evidence="4.14: Шисуй — это Лоулан"))
+        counts = self._run(llm, scan=False, auto_confirm=True)
+        self.assertEqual(counts["auto_confirmed"], 1)
+        self.assertEqual(counts["suggested"], 0)
+        link = self._links()[0]
+        self.assertEqual(link.status, "confirmed")
+        self.assertIsNotNone(link.decided_at)
+        self.assertIn("auto_confirmed", link.source)
+        # Так как revealed_in указан, назначается политика по умолчанию
+        self.assertEqual(link.voice_policy, "switch_after_reveal")
+
+    def test_auto_confirm_disabled_keeps_suggested(self):
+        il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")
+        llm = _llm({"A": 0.99}, il.LlmIdentityJudgement(answer="A", evidence="4.14: Шисуй — это Лоулан"))
+        counts = self._run(llm, scan=False, auto_confirm=False)
+        self.assertEqual(counts["auto_confirmed"], 0)
+        self.assertEqual(counts["suggested"], 1)
+        link = self._links()[0]
+        self.assertEqual(link.status, "suggested")
+
+    def test_blind_mode_hides_spoilers_and_reveal_shows_them(self):
+        link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "Секретный факт")
+        prefix = str(link.id)[:8]
+
+        # Слепой режим по умолчанию
+        blind_rows = il.list_links(self.repo, include_all=True, blind=True)
+        self.assertEqual(len(blind_rows), 1)
+        self.assertIn("Скрыто спойлер-щитом", blind_rows[0]["true"])
+        self.assertIn("Скрыто: cli.py identity reveal", blind_rows[0]["evidence"])
+        self.assertEqual(blind_rows[0]["true_actual"], "Лоулан")
+
+        # Открытый режим (--spoilers)
+        open_rows = il.list_links(self.repo, include_all=True, blind=False)
+        self.assertEqual(open_rows[0]["true"], "Лоулан")
+        self.assertIn("Секретный факт", open_rows[0]["evidence"])
+
+        # Команда reveal
+        revealed = il.reveal_link(self.repo, prefix)
+        self.assertEqual(revealed["persona"], "Шисуй")
+        self.assertEqual(revealed["true"], "Лоулан")
+        self.assertTrue(revealed["spoiler_warning"])
+        self.assertFalse(revealed["is_blind"])
 
     @patch("subprocess.run")
     def test_apply_voice_shift_creates_reference_and_sets_voice_base(self, mock_subp):
