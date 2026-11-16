@@ -69,6 +69,11 @@ _CHARACTER_PATCH_BATCH_DEFAULT = 8
 _CHARACTER_DESCRIPTION_MODE_DEFAULT = os.environ.get("CHARACTER_DESCRIPTION_MODE", "facts")
 _CHARACTER_CALL_ATTEMPTS_DEFAULT = 3  # попыток на разведку и на каждую пачку патча
 _LLM_REQUEST_TIMEOUT_DEFAULT = 1200  # сек; глава на 43k символов генерируется ~5 минут
+_LLM_MAX_NETWORK_RETRIES_DEFAULT = 6  # попыток при сетевых/транзиентных ошибках (окно ожидания ~3-4 мин)
+_LLM_RETRY_INITIAL_DELAY_DEFAULT = 2.0
+_LLM_RETRY_MAX_DELAY_DEFAULT = 60.0
+_LLM_RETRY_BACKOFF_FACTOR_DEFAULT = 2.0
+_LLM_RETRY_JITTER_DEFAULT = 0.2
 # Таймаут по этапам ≈ 2x максимума реальных вызовов в прогонах ноября 2026 (DeepSeek, DeepInfra):
 # recon макс. 108 с, patch 334 с, summary 65 с, sound_design (с reasoning) 159 с. Зависший провайдер
 # иначе съедает весь таймаут: 2026-11-12 sound_design молчал 600 с, повтор ответил за 2 минуты.
@@ -207,6 +212,16 @@ def __getattr__(name: str):
         return float(_get_db_setting("tts_request_timeout", _TTS_REQUEST_TIMEOUT_DEFAULT))
     elif name == "LLM_REQUEST_TIMEOUT":
         return float(_get_db_setting("llm_request_timeout", _LLM_REQUEST_TIMEOUT_DEFAULT))
+    elif name == "LLM_MAX_NETWORK_RETRIES":
+        return int(_get_db_setting("llm_max_network_retries", _LLM_MAX_NETWORK_RETRIES_DEFAULT))
+    elif name == "LLM_RETRY_INITIAL_DELAY":
+        return float(_get_db_setting("llm_retry_initial_delay", _LLM_RETRY_INITIAL_DELAY_DEFAULT))
+    elif name == "LLM_RETRY_MAX_DELAY":
+        return float(_get_db_setting("llm_retry_max_delay", _LLM_RETRY_MAX_DELAY_DEFAULT))
+    elif name == "LLM_RETRY_BACKOFF_FACTOR":
+        return float(_get_db_setting("llm_retry_backoff_factor", _LLM_RETRY_BACKOFF_FACTOR_DEFAULT))
+    elif name == "LLM_RETRY_JITTER":
+        return float(_get_db_setting("llm_retry_jitter", _LLM_RETRY_JITTER_DEFAULT))
     elif name == "SCENARIO_CHUNK_SIZE":
         return int(_get_db_setting("chunk_size", _SCENARIO_CHUNK_SIZE_DEFAULT))
     elif name == "ANALYZER_LLM_TEMPERATURE":

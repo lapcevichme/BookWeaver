@@ -4,8 +4,9 @@ import re
 import json
 import logging
 import os
+import random
 from pathlib import Path
-from typing import Type, TypeVar, Optional, Tuple
+from typing import Type, TypeVar, Optional, Tuple, Callable, Any
 from threading import Lock
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
@@ -15,6 +16,62 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
+
+
+def is_transient_error(e: Exception) -> bool:
+    """Определяет, является ли ошибка временным сетевым сбоем или перегрузкой сервера."""
+    import openai
+    import httpx
+
+    if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
+        return True
+    if isinstance(e, (httpx.TransportError, httpx.TimeoutException, ConnectionError, TimeoutError, OSError)):
+        return True
+    if isinstance(e, openai.RateLimitError):
+        return True
+    if isinstance(e, openai.InternalServerError):
+        return True
+    if isinstance(e, openai.APIStatusError):
+        code = getattr(e, "status_code", None)
+        if code in (408, 429) or (code is not None and 500 <= code <= 599):
+            return True
+    return False
+
+
+def is_fatal_error(e: Exception) -> bool:
+    """Определяет фатальные ошибки (400, 401, 403, 404, 422), которые бессмысленно повторять."""
+    import openai
+
+    if isinstance(e, (
+        openai.AuthenticationError,
+        openai.PermissionDeniedError,
+        openai.NotFoundError,
+        openai.BadRequestError,
+        openai.UnprocessableEntityError,
+    )):
+        return True
+    if isinstance(e, openai.APIStatusError):
+        code = getattr(e, "status_code", None)
+        if code in (400, 401, 403, 404, 422):
+            return True
+    return False
+
+
+def calculate_backoff_delay(
+    attempt: int,
+    base_delay: float = 2.0,
+    factor: float = 2.0,
+    max_delay: float = 60.0,
+    jitter: float = 0.2,
+) -> float:
+    """Вычисляет задержку с экспоненциальным ростом и случайным разбросом (jitter)."""
+    raw_delay = min(max_delay, base_delay * (factor ** attempt))
+    if jitter > 0:
+        jitter_range = jitter * raw_delay
+        jittered = raw_delay + random.uniform(-jitter_range, jitter_range)
+    else:
+        jittered = raw_delay
+    return max(0.5, min(max_delay, jittered))
 
 # Этапы, которым reasoning не нужен, если в настройке openrouter_reasoning_by_stage не сказано иное:
 # эмбиент без reasoning выбирается так же (2026-11-06), а SFX теперь правила (utils/sfx_rules.py).
@@ -47,6 +104,7 @@ class LLMService:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cost = 0.0
+        self._sleep_fn = time.sleep
 
         logger.info(
             f"Сервис LLMService сконфигурирован: провайдер '{self.provider}', модель '{self.model_name}'."
@@ -139,10 +197,14 @@ class LLMService:
         start_time, usage, status, error_msg = time.time(), (0, 0), "success", None
         self._call_info.data = {"attempts": 1}
         try:
-            completion = self.client.with_options(timeout=self._timeout_for(prompt_type)).chat.completions.create(
-                model=self.model_name, messages=[{"role": "user", "content": prompt}], temperature=0,
-                max_tokens=1, logprobs=True, top_logprobs=10,
-                extra_body={"provider": {"require_parameters": True}, "reasoning": {"enabled": False}},
+            client = self.client.with_options(timeout=self._timeout_for(prompt_type))
+            completion = self._execute_with_retry(
+                lambda: client.chat.completions.create(
+                    model=self.model_name, messages=[{"role": "user", "content": prompt}], temperature=0,
+                    max_tokens=1, logprobs=True, top_logprobs=10,
+                    extra_body={"provider": {"require_parameters": True}, "reasoning": {"enabled": False}},
+                ),
+                prompt_type=prompt_type,
             )
             if completion.usage:
                 usage = (completion.usage.prompt_tokens, completion.usage.completion_tokens)
@@ -246,68 +308,129 @@ class LLMService:
             return None
         return {"order": order, "allow_fallbacks": False}
 
-    def _raw_call_llm(self, prompt: str, prompt_type: str = "unknown") -> Tuple[Optional[str], Tuple[int, int]]:
-        max_retries = 3
+    def _execute_with_retry(
+        self,
+        call_fn: Callable[[], Any],
+        prompt_type: str = "unknown",
+        sleep_fn: Optional[Callable[[float], None]] = None,
+    ) -> Any:
+        """
+        Выполняет API-вызов с экспоненциальным backoff и jitter при транзиентных сетевых/серверных сбоях.
+        Фатальные ошибки (400, 401, 403, 404, 422) выбрасываются сразу без повторов.
+        """
+        import config
+
+        sleep_func = sleep_fn or getattr(self, "_sleep_fn", time.sleep)
+        max_retries = getattr(config, "LLM_MAX_NETWORK_RETRIES", 6)
+        initial_delay = getattr(config, "LLM_RETRY_INITIAL_DELAY", 2.0)
+        max_delay = getattr(config, "LLM_RETRY_MAX_DELAY", 60.0)
+        factor = getattr(config, "LLM_RETRY_BACKOFF_FACTOR", 2.0)
+        jitter = getattr(config, "LLM_RETRY_JITTER", 0.2)
+
+        last_error: Optional[Exception] = None
         for attempt in range(max_retries):
             if not hasattr(self._call_info, "data"):
                 self._call_info.data = {}
             self._call_info.data["attempts"] = attempt + 1
             if attempt > 0:
                 metrics_collector.increment("api_retries")
+
             try:
-                kwargs = {
-                    "model": self.model_name,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": self.temperature,
-                }
-                if "gemma" not in self.model_name.lower():
-                    kwargs["response_format"] = {"type": "json_object"}
-                if self.provider == "openrouter":
-                    extra = {}
-                    routing = self._openrouter_routing()
-                    if routing:
-                        extra["provider"] = routing
-                    reasoning = self._openrouter_reasoning(prompt_type)
-                    if reasoning:
-                        extra["reasoning"] = reasoning
-                    if extra:
-                        kwargs["extra_body"] = extra
-
-                client = self.client.with_options(timeout=self._timeout_for(prompt_type))
-                completion = client.chat.completions.create(**kwargs)
-                usage = (0, 0)
-                if completion.usage:
-                    usage = (completion.usage.prompt_tokens, completion.usage.completion_tokens)
-                    details = getattr(completion.usage, "prompt_tokens_details", None)
-                    cached = (getattr(details, "cached_tokens", 0) or 0) if details else 0
-                    out_details = getattr(completion.usage, "completion_tokens_details", None)
-                    reasoning_toks = (getattr(out_details, "reasoning_tokens", 0) or 0) if out_details else 0
-                    real_cost = getattr(completion.usage, "cost", None)
-                    self._track_usage(*usage, real_cost=real_cost)
-                    self._call_info.data.update(cost_usd=real_cost, cached_tokens=cached, reasoning_tokens=reasoning_toks)
-                    logger.info(
-                        f"LLM usage [{prompt_type} | {self.model_name} @ {getattr(completion, 'provider', '?')}]: "
-                        f"in={usage[0]} (cached={cached}), out={usage[1]} (reasoning={reasoning_toks}), cost=${real_cost if real_cost is not None else '?'}"
-                    )
-
-                content = completion.choices[0].message.content if completion.choices else None
-                return content, usage
+                return call_fn()
             except Exception as e:
-                from openai import RateLimitError, APITimeoutError
-                if isinstance(e, RateLimitError):
-                    delay = min(60, 5 * 2 ** attempt)
-                    logger.warning(f"LLM 429 (rate limit), попытка {attempt + 1}/{max_retries}. Жду {delay} с.")
-                elif isinstance(e, APITimeoutError):
-                    delay = 2
-                    logger.warning(
-                        f"LLM таймаут ({prompt_type}, {self._timeout_for(prompt_type):.0f} с), попытка {attempt + 1}/{max_retries}. Провайдер мог успеть "
-                        f"обработать и оплатить запрос; повторяю."
+                last_error = e
+                if is_fatal_error(e):
+                    logger.error(f"❌ Фатальная ошибка LLM API ({prompt_type}) [без повторов]: {e}")
+                    raise
+
+                if is_transient_error(e):
+                    if attempt == max_retries - 1:
+                        logger.error(
+                            f"❌ Исчерпаны все {max_retries} сетевых попыток LLM API ({prompt_type}): {e}"
+                        )
+                        raise
+
+                    delay = calculate_backoff_delay(
+                        attempt=attempt,
+                        base_delay=initial_delay,
+                        factor=factor,
+                        max_delay=max_delay,
+                        jitter=jitter,
                     )
+                    import openai
+                    if isinstance(e, openai.RateLimitError) and hasattr(e, "response") and e.response is not None:
+                        try:
+                            retry_after = e.response.headers.get("retry-after")
+                            if retry_after:
+                                delay = max(delay, min(max_delay, float(retry_after)))
+                        except (ValueError, TypeError):
+                            pass
+
+                    logger.warning(
+                        f"⚠️ Сетевой сбой LLM API ({prompt_type}, попытка {attempt + 1}/{max_retries}): {e}. "
+                        f"Повтор через {delay:.1f} с..."
+                    )
+                    sleep_func(delay)
                 else:
-                    delay = 2
-                    logger.warning(f"LLM API Call attempt {attempt + 1} failed: {e}")
-                time.sleep(delay)
-        return None, (0, 0)
+                    if attempt >= 1:
+                        logger.error(f"❌ Непредвиденная ошибка LLM API ({prompt_type}): {e}")
+                        raise
+                    delay = initial_delay
+                    logger.warning(
+                        f"⚠️ Ошибка LLM API ({prompt_type}, попытка {attempt + 1}/{max_retries}): {e}. "
+                        f"Повтор через {delay:.1f} с..."
+                    )
+                    sleep_func(delay)
+
+        if last_error:
+            raise last_error
+
+    def _raw_call_llm(self, prompt: str, prompt_type: str = "unknown") -> Tuple[Optional[str], Tuple[int, int]]:
+        kwargs = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.temperature,
+        }
+        if "gemma" not in self.model_name.lower():
+            kwargs["response_format"] = {"type": "json_object"}
+        if self.provider == "openrouter":
+            extra = {}
+            routing = self._openrouter_routing()
+            if routing:
+                extra["provider"] = routing
+            reasoning = self._openrouter_reasoning(prompt_type)
+            if reasoning:
+                extra["reasoning"] = reasoning
+            if extra:
+                kwargs["extra_body"] = extra
+
+        client = self.client.with_options(timeout=self._timeout_for(prompt_type))
+        try:
+            completion = self._execute_with_retry(
+                lambda: client.chat.completions.create(**kwargs),
+                prompt_type=prompt_type,
+            )
+        except Exception as e:
+            logger.error(f"LLM API Call failed permanently for {prompt_type}: {e}")
+            return None, (0, 0)
+
+        usage = (0, 0)
+        if completion and completion.usage:
+            usage = (completion.usage.prompt_tokens, completion.usage.completion_tokens)
+            details = getattr(completion.usage, "prompt_tokens_details", None)
+            cached = (getattr(details, "cached_tokens", 0) or 0) if details else 0
+            out_details = getattr(completion.usage, "completion_tokens_details", None)
+            reasoning_toks = (getattr(out_details, "reasoning_tokens", 0) or 0) if out_details else 0
+            real_cost = getattr(completion.usage, "cost", None)
+            self._track_usage(*usage, real_cost=real_cost)
+            self._call_info.data.update(cost_usd=real_cost, cached_tokens=cached, reasoning_tokens=reasoning_toks)
+            logger.info(
+                f"LLM usage [{prompt_type} | {self.model_name} @ {getattr(completion, 'provider', '?')}]: "
+                f"in={usage[0]} (cached={cached}), out={usage[1]} (reasoning={reasoning_toks}), cost=${real_cost if real_cost is not None else '?'}"
+            )
+
+        content = completion.choices[0].message.content if completion and completion.choices else None
+        return content, usage
 
     @staticmethod
     def _extract_json(text: str):
