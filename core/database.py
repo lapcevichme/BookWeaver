@@ -234,7 +234,19 @@ def init_book_db(book_path: Path, force: bool = False) -> Engine:
                     conn.execute(text(f"ALTER TABLE chapter DROP COLUMN {col}"))
                 conn.commit()
 
-            # 4. Создание недостающих индексов
+            # 4. Создание недостающих индексов и таблиц
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS volumesummary (
+                    id VARCHAR PRIMARY KEY,
+                    book_id VARCHAR NOT NULL,
+                    volume_num INTEGER NOT NULL,
+                    summary TEXT NOT NULL,
+                    created_at DATETIME,
+                    FOREIGN KEY(book_id) REFERENCES book (id) ON DELETE CASCADE
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_volumesummary_book_id ON volumesummary (book_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_volumesummary_volume_num ON volumesummary (volume_num)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chapter_book_order ON chapter (book_id, order_index)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_scenarioentry_chapter_order ON scenarioentry (chapter_id, order_index)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_scenarioentry_speaker_id ON scenarioentry (speaker_id)"))

@@ -61,6 +61,47 @@ class BookRepository:
                 session.add(chap)
                 session.commit()
 
+    def get_volume_summary(self, volume_num: int) -> Optional[Any]:
+        """Возвращает глобальный пересказ тома из БД, если он существует."""
+        from core.data_models import VolumeSummary, VolumeSummaryRecord
+        with self.get_session() as session:
+            rec = session.exec(
+                select(VolumeSummaryRecord)
+                .where(VolumeSummaryRecord.book_id == self.book_id, VolumeSummaryRecord.volume_num == volume_num)
+            ).first()
+            if rec:
+                return VolumeSummary(volume_num=rec.volume_num, summary=rec.summary)
+        return None
+
+    def get_all_volume_summaries(self) -> Dict[int, Any]:
+        """Возвращает словарь {volume_num: VolumeSummary} для всех сохраненных томов."""
+        from core.data_models import VolumeSummary, VolumeSummaryRecord
+        with self.get_session() as session:
+            records = session.exec(
+                select(VolumeSummaryRecord)
+                .where(VolumeSummaryRecord.book_id == self.book_id)
+                .order_by(VolumeSummaryRecord.volume_num)
+            ).all()
+            return {r.volume_num: VolumeSummary(volume_num=r.volume_num, summary=r.summary) for r in records}
+
+    def save_volume_summary(self, volume_num: int, summary_text: str):
+        """Сохраняет или обновляет пересказ тома в БД."""
+        from core.data_models import VolumeSummaryRecord
+        rec_id = f"vol_{volume_num}"
+        with self.get_session() as session:
+            rec = session.get(VolumeSummaryRecord, rec_id)
+            if not rec:
+                rec = VolumeSummaryRecord(
+                    id=rec_id,
+                    book_id=self.book_id,
+                    volume_num=volume_num,
+                    summary=summary_text
+                )
+            else:
+                rec.summary = summary_text
+            session.add(rec)
+            session.commit()
+
     def update_chapter_status(self, chapter_id: str, status: Union[ChapterStatus, str]):
         with self.get_session() as session:
             db_chap = session.get(Chapter, chapter_id)

@@ -211,9 +211,20 @@ class ChapterSummary(SQLModel, table=True):
     chapter: "Chapter" = Relationship(back_populates="summary")
 
 class VolumeSummary(PydanticBaseModel):
-    """Глобальный пересказ целого тома."""
+    """Глобальный пересказ целого тома (DTO)."""
     volume_num: int
     summary: str = Field(description="Сжатый пересказ событий всего тома.")
+
+class VolumeSummaryRecord(SQLModel, table=True):
+    """Таблица глобальных пересказов томов книги в SQLite."""
+    __tablename__ = "volumesummary"
+    id: str = Field(primary_key=True, description="vol_{volume_num}")
+    book_id: str = Field(
+        sa_column=Column(String, ForeignKey("book.id", ondelete="CASCADE"), index=True, nullable=False)
+    )
+    volume_num: int = Field(index=True)
+    summary: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Character(SQLModel, table=True):
     """Персонажи книги."""
