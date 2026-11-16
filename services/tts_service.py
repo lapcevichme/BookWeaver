@@ -3,7 +3,13 @@ from pathlib import Path
 from threading import Lock
 from typing import Optional, List, Dict, Any
 import config
-from core.audio_profiles import as_whisper_wav, get_tts_profile, TTSEngineProfile
+from core.audio_profiles import (
+    as_whisper_wav,
+    concat_wav_bytes,
+    get_tts_profile,
+    split_text_into_chunks,
+    TTSEngineProfile,
+)
 from services.qwen_tts_client import QwenTTSClient
 
 logger = logging.getLogger(__name__)
@@ -112,6 +118,39 @@ class TTSService:
             logger.error(f"Ошибка транскрипции pywhispercpp ({wav_path.name}): {e}")
             return ""
 
+    def _synthesize_chunked(
+        self,
+        text: str,
+        speaker_wav_path: Path,
+        prompt_text: str,
+        instruct_text: str,
+        voice_id: str,
+        max_chars: int
+    ) -> Optional[bytes]:
+        """
+        Синтезирует длинную реплику по частям и склеивает с паузой 150 мс для защиты от уползания тона (pitch drift).
+        """
+        chunks = split_text_into_chunks(text, max_chars)
+        logger.info(f"Длинная реплика ({len(text)} симв > {max_chars}) разбита на {len(chunks)} фрагментов для предотвращения дрейфа тона.")
+        wav_parts: List[bytes] = []
+
+        for idx, chunk in enumerate(chunks):
+            chunk_bytes = self.tts_client.synthesize(
+                text=chunk,
+                prompt_wav_path=speaker_wav_path,
+                prompt_text=prompt_text,
+                instruct_text=instruct_text,
+                voice_id=voice_id,
+                language="Russian",
+                mode="zero_shot"
+            )
+            if not chunk_bytes:
+                logger.error(f"Синтез фрагмента {idx + 1}/{len(chunks)} вернул пустой результат.")
+                return None
+            wav_parts.append(chunk_bytes)
+
+        return concat_wav_bytes(wav_parts, pause_ms=150)
+
     def synthesize(self, text: str, speaker_wav_path: Path, emotion: str = None) -> bytes | None:
         """Синтез речи через API Qwen3-TTS."""
         if not speaker_wav_path.exists():
@@ -125,6 +164,18 @@ class TTSService:
                            f"Положите рядом {speaker_wav_path.with_suffix('.txt').name} с точным текстом образца.")
         instruct_text = emotion if emotion and emotion.lower() != "neutral" else ""
         voice_id = speaker_wav_path.parent.name if speaker_wav_path.parent.name != "voices" else speaker_wav_path.stem
+
+        profile = getattr(self, "profile", None) or get_tts_profile()
+        max_chunk = getattr(profile, "max_chunk_chars", 0)
+        if max_chunk > 0 and len(text) > max_chunk:
+            return self._synthesize_chunked(
+                text=text,
+                speaker_wav_path=speaker_wav_path,
+                prompt_text=prompt_text,
+                instruct_text=instruct_text,
+                voice_id=voice_id,
+                max_chars=max_chunk
+            )
 
         return self.tts_client.synthesize(
             text=text,

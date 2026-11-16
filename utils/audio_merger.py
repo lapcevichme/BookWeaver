@@ -2,15 +2,37 @@ import logging
 import subprocess
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from core.data_models import Scenario
+import config
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_lines(src_dir: Path, dst_dir: Path, lufs: float = -20.0, sample_rate: Optional[int] = None) -> int:
+    """Копии реплик с одинаковой громкостью (loudnorm)."""
+    from core.audio_profiles import get_tts_profile
+    rate = sample_rate or get_tts_profile().native_sample_rate
+    count = 0
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for wav in sorted(src_dir.glob("*.wav")):
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(wav),
+            "-af", f"loudnorm=I={lufs}:TP=-2:LRA=11",
+            "-ar", str(rate),
+            "-ac", "1",
+            "-c:a", "pcm_s16le",
+            str(dst_dir / wav.name)
+        ], check=True)
+        count += 1
+    return count
 
 
 def ranged_file_response(request: Request, file_path: Path, content_type: Optional[str] = None):
@@ -166,16 +188,35 @@ def normalize_audio_file(
         return False
 
 def merge_chapter_audio(
-        scenario: Scenario,
+        scenario: Any,
         audio_dir: Path,
         output_file_path: Path,
-        gap_ms: int = 0
+        gap_ms: Optional[int] = None,
+        sfx_gain_db: Optional[float] = None,
+        normalize: bool = False,
+        lufs: float = -20.0,
+        subtitles_map: Optional[dict] = None,
+        **kwargs
 ) -> Tuple[int, List[dict]]:
     """
     Склеивает аудиофайлы главы через ffmpeg (стриминг, экономно по памяти).
     Создает карту синхронизации на основе метаданных файлов и данных из БД.
-    gap_ms — тишина между репликами: у Qwen в конце реплики тишины нет, встык звучит скороговоркой.
+    gap_ms — тишина между репликами (по умолчанию из config.TTS_AUDIO_GAP_MS: 450 мс).
+    sfx_gain_db — регулировка громкости SFX (по умолчанию из config.SFX_DEFAULT_GAIN_DB: -6.0 дБ).
+    normalize — выравнивание громкости реплик (loudnorm) перед склейкой.
     """
+    if gap_ms is None:
+        gap_ms = int(getattr(config, "TTS_AUDIO_GAP_MS", 450))
+    if sfx_gain_db is None:
+        sfx_gain_db = float(getattr(config, "SFX_DEFAULT_GAIN_DB", -6.0))
+
+    temp_norm_dir = None
+    working_audio_dir = audio_dir
+    if normalize:
+        temp_norm_dir = Path(tempfile.mkdtemp(prefix="bw_norm_"))
+        normalize_lines(audio_dir, temp_norm_dir, lufs=lufs)
+        working_audio_dir = temp_norm_dir
+
     sync_map = []
     current_offset_ms = 0
     audio_files_to_concat = []
@@ -184,7 +225,9 @@ def merge_chapter_audio(
     missing_files_count = 0
     logger.info(f"Начинаем оптимизированную склейку аудио для {output_file_path.name}")
 
-    for entry in scenario.entries:
+    entries = scenario.entries if hasattr(scenario, "entries") else (scenario or [])
+
+    for entry in entries:
         eid = str(entry.id)
         instruct = getattr(entry, 'instruct_prompt', 'neutral')
 
@@ -205,7 +248,7 @@ def merge_chapter_audio(
             continue
 
         audio_filename = f"{eid}.wav"
-        file_path = audio_dir / audio_filename
+        file_path = working_audio_dir / audio_filename
 
         segment_duration = 0
         if file_path.exists():
@@ -229,16 +272,18 @@ def merge_chapter_audio(
         sfx_name = getattr(entry, 'sfx', None)
         if sfx_name and str(sfx_name).lower() != 'none':
             sync_item["sfx"] = sfx_name
-            import config
             for ext in ['.wav', '.mp3', '.ogg', '.flac']:
                 sfx_path = config.SFX_DIR / f"{sfx_name}{ext}"
                 if sfx_path.exists():
                     sfx_events.append((entry_start, sfx_path))
                     break
 
-        # Alignment (субтитры по словам) - читаем из БД
-        if hasattr(entry, 'audio_subtitles') and entry.audio_subtitles and 'words' in entry.audio_subtitles:
-            relative_words = entry.audio_subtitles['words']
+        # Alignment (субтитры по словам) - читаем из БД или subtitles_map
+        subs = getattr(entry, 'audio_subtitles', None)
+        if not subs and subtitles_map:
+            subs = subtitles_map.get(eid)
+        if subs and 'words' in subs:
+            relative_words = subs['words']
             # Конвертируем относительные тайминги в глобальные
             global_words = []
             for w in relative_words:
@@ -302,11 +347,13 @@ def merge_chapter_audio(
                 for start_ms, sfx_path in sfx_events:
                     try:
                         sfx_track = AudioSegment.from_file(sfx_path)
+                        if sfx_gain_db != 0.0:
+                            sfx_track = sfx_track.apply_gain(sfx_gain_db)
                         main_track = main_track.overlay(sfx_track, position=start_ms)
                     except Exception as se:
                         logger.error(f"Ошибка подмешивания SFX {sfx_path.name}: {se}")
                 main_track.export(output_file_path, format="mp3", bitrate="192k")
-                logger.info(f"✅ Успешно подмешано {len(sfx_events)} SFX эффектов в {output_file_path.name}")
+                logger.info(f"✅ Успешно подмешано {len(sfx_events)} SFX эффектов в {output_file_path.name} (gain {sfx_gain_db} dB)")
             except Exception as e:
                 logger.error(f"Ошибка обработки SFX: {e}")
 
@@ -320,5 +367,7 @@ def merge_chapter_audio(
             os.remove(concat_list_path)
         if gap_path and gap_path.exists():
             gap_path.unlink()
+        if temp_norm_dir and temp_norm_dir.exists():
+            shutil.rmtree(temp_norm_dir, ignore_errors=True)
 
     return current_offset_ms, sync_map

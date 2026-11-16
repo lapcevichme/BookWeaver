@@ -3,13 +3,14 @@
 """
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import wave
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Generator, Optional, Tuple
+from typing import Dict, Generator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +152,107 @@ def as_whisper_wav(audio_path: Path) -> Generator[Path, None, None]:
                 tmp_wav_path.unlink()
             except Exception:
                 pass
+
+
+def split_text_into_chunks(text: str, max_chars: int) -> List[str]:
+    """
+    Разбивает текст на смысловые фрагменты длиной не более max_chars по границам предложений
+    (или пунктуации), чтобы избежать уползания тона (pitch drift) в авторегрессионных TTS-моделях.
+    """
+    text = text.strip()
+    if not text or max_chars <= 0 or len(text) <= max_chars:
+        return [text] if text else []
+
+    raw_sentences = [s.strip() for s in re.split(r'(?<=[.!?…\n])\s+', text) if s.strip()]
+
+    chunks: List[str] = []
+    current_parts: List[str] = []
+    current_len = 0
+
+    def flush_current():
+        nonlocal current_parts, current_len
+        if current_parts:
+            chunks.append(" ".join(current_parts))
+            current_parts = []
+            current_len = 0
+
+    for sentence in raw_sentences:
+        if len(sentence) <= max_chars:
+            added_len = len(sentence) + (1 if current_parts else 0)
+            if current_len + added_len <= max_chars:
+                current_parts.append(sentence)
+                current_len += added_len
+            else:
+                flush_current()
+                current_parts.append(sentence)
+                current_len = len(sentence)
+        else:
+            flush_current()
+            sub_clauses = [c.strip() for c in re.split(r'(?<=[,;:—\-])\s+', sentence) if c.strip()]
+            for clause in sub_clauses:
+                if len(clause) <= max_chars:
+                    added_len = len(clause) + (1 if current_parts else 0)
+                    if current_len + added_len <= max_chars:
+                        current_parts.append(clause)
+                        current_len += added_len
+                    else:
+                        flush_current()
+                        current_parts.append(clause)
+                        current_len = len(clause)
+                else:
+                    flush_current()
+                    words = clause.split()
+                    for word in words:
+                        added_len = len(word) + (1 if current_parts else 0)
+                        if current_len + added_len <= max_chars:
+                            current_parts.append(word)
+                            current_len += added_len
+                        else:
+                            flush_current()
+                            current_parts.append(word)
+                            current_len = len(word)
+            flush_current()
+
+    flush_current()
+    return chunks
+
+
+def concat_wav_bytes(wav_chunks: List[bytes], pause_ms: int = 150) -> bytes:
+    """
+    Склеивает несколько WAV файлов (байты) в один поток с добавлением тишины между ними.
+    Параметры аудио (частота, каналы, битность) берутся из первого чанка.
+    """
+    if not wav_chunks:
+        return b""
+    if len(wav_chunks) == 1:
+        return wav_chunks[0]
+
+    import io
+    import wave
+
+    first_io = io.BytesIO(wav_chunks[0])
+    with wave.open(first_io, "rb") as w:
+        channels = w.getnchannels()
+        sampwidth = w.getsampwidth()
+        framerate = w.getframerate()
+
+    silence_frames = b"\x00" * int(framerate * (pause_ms / 1000.0) * channels * sampwidth)
+
+    out_io = io.BytesIO()
+    with wave.open(out_io, "wb") as out_w:
+        out_w.setnchannels(channels)
+        out_w.setsampwidth(sampwidth)
+        out_w.setframerate(framerate)
+
+        for idx, chunk_bytes in enumerate(wav_chunks):
+            if not chunk_bytes:
+                continue
+            chunk_io = io.BytesIO(chunk_bytes)
+            with wave.open(chunk_io, "rb") as chunk_w:
+                frames = chunk_w.readframes(chunk_w.getnframes())
+                out_w.writeframes(frames)
+            if idx < len(wav_chunks) - 1 and silence_frames:
+                out_w.writeframes(silence_frames)
+
+    return out_io.getvalue()
+

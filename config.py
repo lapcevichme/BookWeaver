@@ -55,6 +55,8 @@ _OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get("OPENROUTER_REASONING_BY
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
 # TTS Settings Defaults
 _TTS_ENGINE_DEFAULT = os.environ.get("TTS_ENGINE", "qwen")
+_TTS_AUDIO_GAP_MS_DEFAULT = int(os.environ.get("TTS_AUDIO_GAP_MS", 450))
+_SFX_DEFAULT_GAIN_DB_DEFAULT = float(os.environ.get("SFX_DEFAULT_GAIN_DB", -6.0))
 # Проверка озвучки Whisper base: на хорошем аудио CER до ~0.25, на именах до 0.43; дефекты (утечка
 # образца, повторы, мусор) — 0.3–2.6. Калибровка 2026-11-12 на 149 репликах (docs/experiments/2026-11-12_from-zero-cli.md).
 _TTS_CER_THRESHOLD_DEFAULT = 0.35   # выше — попытка бракуется и повторяется
@@ -219,6 +221,10 @@ def __getattr__(name: str):
         return float(_get_db_setting("tts_request_timeout", _TTS_REQUEST_TIMEOUT_DEFAULT))
     elif name == "TTS_ENGINE":
         return str(_get_db_setting("tts_engine", _TTS_ENGINE_DEFAULT))
+    elif name == "TTS_AUDIO_GAP_MS":
+        return int(_get_db_setting("tts_audio_gap_ms", _TTS_AUDIO_GAP_MS_DEFAULT))
+    elif name == "SFX_DEFAULT_GAIN_DB":
+        return float(_get_db_setting("sfx_default_gain_db", _SFX_DEFAULT_GAIN_DB_DEFAULT))
     elif name == "LLM_REQUEST_TIMEOUT":
         return float(_get_db_setting("llm_request_timeout", _LLM_REQUEST_TIMEOUT_DEFAULT))
     elif name == "LLM_MAX_NETWORK_RETRIES":

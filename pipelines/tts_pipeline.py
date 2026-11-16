@@ -205,6 +205,17 @@ class TTSPipeline:
                                 if last_cer <= cer_threshold and not is_too_long:
                                     success = True
                                 else:
+                                    reasons = []
+                                    if last_cer > cer_threshold:
+                                        reasons.append(f"CER={last_cer:.2f} > {cer_threshold:.2f}")
+                                    if is_too_long:
+                                        reasons.append(f"аномальная длительность ({duration_sec:.1f}с на {word_count} слов)")
+                                    reason_str = ", ".join(reasons)
+                                    logger.warning(
+                                        f"⚠️ Попытка {attempt}/{max_attempts} забракована для реплики #{i + 1} ({character_name or 'Narrator'}): {reason_str}.\n"
+                                        f"   Оригинал:   {processed_text[:120]!r}\n"
+                                        f"   Распознано: {whisper_text[:120]!r}"
+                                    )
                                     if not is_too_long and (best is None or last_cer < best[0]):
                                         best = (last_cer, wav_bytes, audio_duration_ms)
                                     if audio_path.exists(): audio_path.unlink()
