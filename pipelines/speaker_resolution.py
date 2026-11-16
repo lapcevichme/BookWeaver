@@ -79,12 +79,14 @@ class SpeakerResolutionPipeline:
             return summary
 
         chars = repo.get_characters()
+        active_extras = self._active_extras(repo, chapter_id)
         prompt = prompts.format_speaker_resolution_prompt(
             chapter_id=chapter_id,
             chapter_text=repo.get_chapter_text(chapter_id)[:CHAPTER_TEXT_LIMIT],
             synopsis=self._synopsis(repo, chapter_id),
             speakers=[{"label": label, "lines": speakers[label]} for label in to_ask],
             characters=self._roster(repo, chars, chapter_id),
+            active_extras=active_extras,
         )
         metrics_collector.start_chapter(f"{book_name}:{chapter_id}")
         llm = self.model_manager.get_llm_service('character_analyzer')
@@ -158,6 +160,34 @@ class SpeakerResolutionPipeline:
                                                               key=lambda kv: order.get(kv[0], 0)) if cid in window},
             })
         return roster
+
+    @staticmethod
+    def _active_extras(repo: BookRepository, chapter_id: str) -> List[dict]:
+        """Фоновые персонажи (массовка) из соседних глав (окно ±NEIGHBOUR_CHAPTERS)."""
+        order = chapter_order(repo.get_all_chapters())
+        pos = order.get(chapter_id, 0)
+        window = {cid for cid, i in order.items() if abs(i - pos) <= NEIGHBOUR_CHAPTERS and cid != chapter_id}
+        if not window:
+            return []
+        with repo.get_session() as session:
+            links = session.exec(
+                select(SpeakerLink).where(
+                    SpeakerLink.chapter_id.in_(window),
+                    SpeakerLink.kind == SpeakerLinkKind.EXTRA.value,
+                    SpeakerLink.status != SpeakerLinkStatus.REJECTED.value,
+                )
+            ).all()
+        result = []
+        for l in links:
+            result.append({
+                "chapter": l.chapter_id,
+                "label": l.speaker_label,
+                "person_key": l.person_key,
+                "gender": l.gender,
+                "age_group": l.age_group,
+                "evidence": l.evidence,
+            })
+        return result
 
 
 def auto_confirm(book_name: str, chapter_id: Optional[str] = None) -> List[SpeakerLink]:

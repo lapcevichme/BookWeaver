@@ -125,6 +125,80 @@ class TestSpeakerResolution(unittest.TestCase):
         self.assertEqual(res["asked"], 0)
         llm.call_for_pydantic.assert_not_called()
 
+    def test_active_extras_extracts_only_neighbors_within_window(self):
+        with self.repo.get_session() as s:
+            s.add(Chapter(id="vol_1_chap_3", book_id="test_book", volume_num=1, chapter_num=3,
+                          order_index=2, title="Ch 3", raw_text="Текст главы 3"))
+            s.add(Chapter(id="vol_1_chap_10", book_id="test_book", volume_num=1, chapter_num=10,
+                          order_index=9, title="Ch 10", raw_text="Текст главы 10"))
+            # В соседней гл. 1 (активная массовка)
+            s.add(SpeakerLink(chapter_id="vol_1_chap_1", speaker_label="Служанка 1",
+                              kind=SpeakerLinkKind.EXTRA.value, character_id=None,
+                              person_key="maid_dining_1", gender="female", age_group="adult",
+                              status=SpeakerLinkStatus.SUGGESTED.value, confidence="high",
+                              evidence="Служанка в столовой"))
+            # В соседней гл. 1 (отклоненная человеком -> не должна попадать)
+            s.add(SpeakerLink(chapter_id="vol_1_chap_1", speaker_label="Служанка отклон",
+                              kind=SpeakerLinkKind.EXTRA.value, character_id=None,
+                              person_key="maid_bad", gender="female", age_group="adult",
+                              status=SpeakerLinkStatus.REJECTED.value, confidence="low"))
+            # В самой текущей гл. 2 (не должна попадать в память соседей для себя же)
+            s.add(SpeakerLink(chapter_id="vol_1_chap_2", speaker_label="Служанка 2",
+                              kind=SpeakerLinkKind.EXTRA.value, character_id=None,
+                              person_key="maid_dining_2", gender="female", age_group="adult",
+                              status=SpeakerLinkStatus.SUGGESTED.value, confidence="high"))
+            # В далекой гл. 10 (вне окна ±2)
+            s.add(SpeakerLink(chapter_id="vol_1_chap_10", speaker_label="Стражник",
+                              kind=SpeakerLinkKind.EXTRA.value, character_id=None,
+                              person_key="guard_far", gender="male", age_group="adult",
+                              status=SpeakerLinkStatus.SUGGESTED.value, confidence="high"))
+            s.commit()
+
+        extras = sr.SpeakerResolutionPipeline._active_extras(self.repo, "vol_1_chap_2")
+        self.assertEqual(len(extras), 1)
+        self.assertEqual(extras[0]["chapter"], "vol_1_chap_1")
+        self.assertEqual(extras[0]["label"], "Служанка 1")
+        self.assertEqual(extras[0]["person_key"], "maid_dining_1")
+
+    def test_pipeline_passes_active_extras_into_llm_prompt(self):
+        with self.repo.get_session() as s:
+            s.add(SpeakerLink(chapter_id="vol_1_chap_1", speaker_label="Служанка 1",
+                              kind=SpeakerLinkKind.EXTRA.value, character_id=None,
+                              person_key="maid_dining_1", gender="female", age_group="adult",
+                              status=SpeakerLinkStatus.SUGGESTED.value, confidence="high",
+                              evidence="Служанка у раздачи"))
+            s.add(ScenarioEntry(id=uuid4(), chapter_id="vol_1_chap_2", order_index=0,
+                                type="dialogue", speaker_name="Служанка", text="Опять ты тут."))
+            s.commit()
+
+        captured_prompt = {}
+
+        def fake_call(model_cls, prompt, prompt_type=None):
+            captured_prompt["text"] = prompt
+            return LlmSpeakerResolutionList(speakers=[
+                LlmSpeakerResolution(
+                    label="Служанка", kind="extra", character=None,
+                    confidence="high", evidence="Та же служанка у раздачи",
+                    gender="female", age_group="adult", person_key="maid_dining_1"
+                )
+            ])
+
+        llm = MagicMock()
+        llm.call_for_pydantic.side_effect = fake_call
+        mm = MagicMock()
+        mm.get_llm_service.return_value = llm
+
+        pipeline = sr.SpeakerResolutionPipeline(mm)
+        pipeline.run("test_book", "vol_1_chap_2")
+
+        self.assertIn("<active_extras>", captured_prompt["text"])
+        self.assertIn("maid_dining_1", captured_prompt["text"])
+        self.assertIn("Служанка у раздачи", captured_prompt["text"])
+
+        links = [l for l in self._links() if l.chapter_id == "vol_1_chap_2"]
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].person_key, "maid_dining_1")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -580,10 +580,12 @@ def format_emotion_analysis_prompt(
 
 
 def format_speaker_resolution_prompt(chapter_id: str, chapter_text: str, synopsis: Optional[str],
-                                     speakers: List[Dict], characters: List[Dict]) -> str:
+                                     speakers: List[Dict], characters: List[Dict],
+                                     active_extras: Optional[List[Dict]] = None) -> str:
     """Кто стоит за подписями говорящих, которых сценарий не связал с персонажами."""
     from core.data_models import LlmSpeakerResolutionList
     schema_description = generate_human_schema(LlmSpeakerResolutionList)
+    extras_block = json.dumps(active_extras, ensure_ascii=False, indent=1) if active_extras else "(нет фоновых персонажей в соседних главах)"
     return f"""
 <role>
 ТЫ — РЕДАКТОР АУДИОКНИГИ. В сценарии главы {chapter_id} есть реплики, у которых говорящий подписан ролью
@@ -601,11 +603,20 @@ def format_speaker_resolution_prompt(chapter_id: str, chapter_text: str, synopsi
 - `confidence`: high — несколько независимых доводов; medium — один сильный довод; low — догадка.
 - `evidence` — 1-2 коротких довода с опорой на текст.
 - Для `extra` обязательно `gender` и `age_group` по тексту (служанки обычно молодые женщины, «старик» — old).
-- `person_key` — одинаковый у подписей, за которыми один и тот же человек («Евнух» и «Красивый евнух» в одной сцене),
-  и разный у разных людей («Служанка 1» и «Служанка 2» — два человека). Для `character` — имя персонажа.
+- `person_key`:
+  - Для `character` — имя персонажа.
+  - Для `extra`: если это ТОТ ЖЕ САМЫЙ фоновый человек, что уже действовал в соседних главах из <active_extras>
+    (та же сцена, та же комната/локация, продолжение диалога) — ОБЯЗАТЕЛЬНО используй тот же `person_key` из <active_extras>.
+  - Если это ДРУГОЙ человек (другая локация, другая сцена, новый незнакомец) — создай НОВЫЙ уникальный смысловой
+    `person_key` (например `maid_teahouse`, `guard_gate_1`), НЕ совпадающий с персонажами из <active_extras>.
+  - Разные люди в одной главе («Служанка 1» и «Служанка 2») ОБЯЗАНЫ иметь разные `person_key`.
 - Верни ровно по одному объекту на КАЖДУЮ подпись из <speakers>. Новых персонажей не придумывай.
 - Описания персонажей могут содержать сведения из более поздних глав — используй их только для опознания.
 </rules>
+
+<active_extras>
+{extras_block}
+</active_extras>
 
 <synopsis>
 {synopsis or "(нет)"}
