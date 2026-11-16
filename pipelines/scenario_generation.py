@@ -82,6 +82,12 @@ class ScenarioGenerationPipeline:
 
         try:
             repo = BookRepository(book_name)
+            chap = repo.get_chapter(chapter_id)
+            if chap and chap.is_service:
+                logger.info(f"Глава {chapter_id} является служебной. Генерация сценария пропускается.")
+                update_progress(1.0, "Завершено", "Служебная глава пропущена.")
+                return
+
             path_manager.ensure_chapter_dirs(book_name, chapter_id)
             metrics_collector.start_chapter(f"{book_name}:{chapter_id}")
 
