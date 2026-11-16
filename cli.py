@@ -401,11 +401,15 @@ def cmd_link(args) -> dict:
         done_statuses = {"scenario_ready", "audio_ready", "tts_ready", "completed"}
         chapters = [c.id for c in repo.get_all_chapters()
                     if getattr(c.status, "value", c.status) in done_statuses and (not args.chapter or c.id == args.chapter)]
+        if getattr(args, "recheck", False):
+            recheck_chaps = set(sr.recheck_candidates(repo, args.chapter))
+            chapters = [ch for ch in chapters if ch in recheck_chaps]
         if args.chapter and not chapters:
             raise CliError(f"Глава {args.chapter} не найдена или у нее нет готового сценария", EXIT_NOT_FOUND)
         pipeline = sr.SpeakerResolutionPipeline(_app().model_manager)
-        return {"book": args.book, "action": "resolve",
-                "chapters": [pipeline.run(args.book, ch, force=args.force) for ch in chapters]}
+        return {"book": args.book, "action": "resolve", "recheck": getattr(args, "recheck", False),
+                "chapters": [pipeline.run(args.book, ch, force=args.force, recheck=getattr(args, "recheck", False))
+                             for ch in chapters]}
     if args.action == "auto":
         confirmed = sr.auto_confirm(args.book, args.chapter)
         return {"book": args.book, "action": "auto",
@@ -808,6 +812,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chapter", help="vol_1_chap_4")
     p.add_argument("--label", help="подпись говорящего, например 'Красавец-евнух'")
     p.add_argument("--force", action="store_true", help="resolve: переспросить LLM о неподтвержденных связях")
+    p.add_argument("--recheck", action="store_true", help="resolve: перепроверить только подписи extra/неуверенные с учетом новых персонажей")
     p.set_defaults(func=cmd_link)
 
     p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, voice, scope, add, check")

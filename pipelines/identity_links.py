@@ -33,6 +33,7 @@ from utils.metrics import metrics_collector
 logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.95  # ниже — перепроверка судьей с reasoning (единственная ошибка эксперимента — 0.847)
+CONFIDENCE_SUGGEST_MIN = 0.85  # ниже — связь помечается dismissed и видна только с --all (отсечение шума)
 IDENTITY_SIMILARITY_MIN = 0.78  # целевой коридор ECAPA: ниже — чужой голос, нет узнаваемости
 IDENTITY_SIMILARITY_MAX = 0.88  # выше — голос не отличим от оригинала (маска не работает)
 
@@ -483,8 +484,12 @@ class IdentitySuggestPipeline:
                         persona = "x" if len(x.chapter_mentions or {}) <= len(y.chapter_mentions or {}) else "y"
                     link.relation = relation
                     link.persona_id, link.true_id = (x.id, y.id) if persona == "x" else (y.id, x.id)
-                    link.status = "suggested"
-                    counts["suggested"] += 1
+                    if link.confidence is not None and link.confidence < CONFIDENCE_SUGGEST_MIN:
+                        link.status = "dismissed"
+                        counts["dismissed"] += 1
+                    else:
+                        link.status = "suggested"
+                        counts["suggested"] += 1
                 session.add(link)
             session.commit()
         counts["scoped"] = len(update_scopes(repo, llm))

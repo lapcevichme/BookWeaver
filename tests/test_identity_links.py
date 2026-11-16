@@ -203,6 +203,17 @@ class TestIdentityPipeline(unittest.TestCase):
         self.assertEqual(self._links()[0].status, "confirmed")
         llm.choice_probabilities.assert_not_called()
 
+    def test_low_confidence_link_is_dismissed(self):
+        il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")
+        # LLM judge says 'A', but confidence is 0.50 (< 0.85)
+        llm = _llm({"A": 0.50}, il.LlmIdentityJudgement(answer="A"))
+        counts = self._run(llm, scan=False)
+        self.assertEqual(counts["dismissed"], 1)
+        self.assertEqual(counts["suggested"], 0)
+        link = self._links()[0]
+        self.assertEqual(link.status, "dismissed")
+        self.assertEqual(link.confidence, 0.50)
+
     def test_scan_adds_candidates_from_secret_facts(self):
         self.shisui.facts = [{"id": "f1", "fact": "На самом деле она — Лоулан", "kind": "secret",
                               "chapter": "vol_4_chap_14", "until": None}]

@@ -52,7 +52,7 @@ class SpeakerResolutionPipeline:
     def __init__(self, model_manager: ModelManager):
         self.model_manager = model_manager
 
-    def run(self, book_name: str, chapter_id: str, force: bool = False) -> dict:
+    def run(self, book_name: str, chapter_id: str, force: bool = False, recheck: bool = False) -> dict:
         repo = BookRepository(book_name)
         with repo.get_session() as session:
             entries = session.exec(select(ScenarioEntry).where(ScenarioEntry.chapter_id == chapter_id)
@@ -61,8 +61,19 @@ class SpeakerResolutionPipeline:
                 select(SpeakerLink).where(SpeakerLink.chapter_id == chapter_id)).all()}
 
         speakers = unresolved_speakers(entries)
-        to_ask = [label for label in speakers
-                  if label not in existing or (force and existing[label].status not in HUMAN_STATUSES)]
+        if force:
+            to_ask = [label for label in speakers if label not in existing or existing[label].status not in HUMAN_STATUSES]
+        elif recheck:
+            to_ask = [label for label in speakers
+                      if label not in existing or (
+                          existing[label].status not in HUMAN_STATUSES and (
+                              existing[label].kind == SpeakerLinkKind.EXTRA.value or
+                              existing[label].character_id is None or
+                              existing[label].confidence != "high"
+                          )
+                      )]
+        else:
+            to_ask = [label for label in speakers if label not in existing]
         summary = {"chapter": chapter_id, "unresolved": len(speakers), "asked": len(to_ask)}
         if not to_ask:
             return summary
@@ -86,7 +97,7 @@ class SpeakerResolutionPipeline:
             for n in [c.name, *(c.aliases or [])]:
                 by_name.setdefault(n.strip().lower(), c)
 
-        links = []
+        links, upgraded = [], 0
         for item in result.speakers:
             if item.label not in to_ask:
                 logger.warning(f"Опознание {chapter_id}: лишняя подпись '{item.label}' в ответе, пропуск")
@@ -94,6 +105,9 @@ class SpeakerResolutionPipeline:
             char = by_name.get((item.character or "").strip().lower()) if item.kind == "character" else None
             if item.kind == "character" and char is None:
                 logger.warning(f"Опознание {chapter_id}: '{item.label}' -> неизвестный персонаж '{item.character}', считаю массовкой")
+            prev = existing.get(item.label)
+            if prev and prev.kind == SpeakerLinkKind.EXTRA.value and char:
+                upgraded += 1
             links.append(SpeakerLink(
                 chapter_id=chapter_id, speaker_label=item.label,
                 kind=SpeakerLinkKind.CHARACTER.value if char else SpeakerLinkKind.EXTRA.value,
@@ -117,7 +131,8 @@ class SpeakerResolutionPipeline:
             session.commit()
 
         summary.update(characters=sum(l.kind == "character" for l in links),
-                       extras=sum(l.kind == "extra" for l in links), missing=missing)
+                       extras=sum(l.kind == "extra" for l in links),
+                       upgraded=upgraded, missing=missing)
         logger.info(f"Опознание {chapter_id}: {summary}")
         return summary
 
@@ -185,3 +200,20 @@ def chapter_links(repo: BookRepository, chapter_id: Optional[str] = None) -> Lis
         if chapter_id:
             q = q.where(SpeakerLink.chapter_id == chapter_id)
         return session.exec(q).all()
+
+
+def recheck_candidates(repo: BookRepository, chapter_id: Optional[str] = None) -> List[str]:
+    """Возвращает список id глав, в которых есть подписи для пересмотра (extra / unresolved / неуверенные)."""
+    with repo.get_session() as session:
+        q = select(SpeakerLink).where(
+            SpeakerLink.status.notin_(HUMAN_STATUSES),
+            ((SpeakerLink.kind == SpeakerLinkKind.EXTRA.value) |
+             (SpeakerLink.character_id == None) |
+             (SpeakerLink.confidence != "high"))  # noqa: E711
+        )
+        if chapter_id:
+            q = q.where(SpeakerLink.chapter_id == chapter_id)
+        links = session.exec(q).all()
+        order = chapter_order(repo.get_all_chapters())
+        chaps = list(dict.fromkeys(l.chapter_id for l in links))
+        return sorted(chaps, key=lambda c: order.get(c, 1 << 30))
