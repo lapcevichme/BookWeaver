@@ -137,6 +137,7 @@ class Chapter(SQLModel, table=True):
     # Прогресс анализа персонажей: None — не обработана, "done", "skipped" (пропущена вручную).
     # Отдельно от status: сценарий можно сгенерировать и без анализа персонажей.
     characters_state: Optional[str] = Field(default=None)
+    is_service: bool = Field(default=False, description="Флаг служебной главы (дисклеймеры, глоссарии, пустые страницы)")
     order_index: int = Field(default=0)
     raw_text: Optional[str] = Field(default=None, sa_column=Column(Text))
     

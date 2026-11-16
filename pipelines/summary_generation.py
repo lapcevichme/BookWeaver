@@ -33,9 +33,13 @@ class SummaryGenerationPipeline:
             repo = BookRepository(book_name)
             llm_service = self.model_manager.get_llm_service('summary_generator')
 
+            from core.service_chapters import detect_and_mark_service_chapters
+            detect_and_mark_service_chapters(repo)
+
             # Загружаем текущие саммари из БД
             summary_archive = repo.get_summary_archive()
-            db_chapters = repo.get_all_chapters()
+            all_chaps = repo.get_all_chapters()
+            db_chapters = [c for c in all_chaps if not getattr(c, "is_service", False)]
             if max_chapters and max_chapters > 0:
                 db_chapters = db_chapters[:max_chapters]
 

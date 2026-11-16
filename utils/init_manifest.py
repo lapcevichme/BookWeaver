@@ -95,6 +95,16 @@ def init_manifest(
 
         session.commit()
 
+        # Автоматическая разметка служебных глав при создании проекта
+        try:
+            from core.book_repository import BookRepository
+            from core.service_chapters import detect_and_mark_service_chapters
+            marked = detect_and_mark_service_chapters(BookRepository(book_name))
+            if marked:
+                logger.info(f"Размечено служебных глав при инициализации: {len(marked)}")
+        except Exception as e:
+            logger.warning(f"Не удалось разметить служебные главы: {e}")
+
     logger.info(f"ПРОЕКТ ИНИЦИАЛИЗИРОВАН В БД: {book_name} ({len(chapter_paths)} глав)")
 
 

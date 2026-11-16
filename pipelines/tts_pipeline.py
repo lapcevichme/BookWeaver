@@ -67,6 +67,12 @@ class TTSPipeline:
                     logger.warning("⚠️ Не удается достучаться до CosyVoice API. Проверьте Docker-контейнер!")
 
             update_progress(0.04, stage, "Загрузка данных из БД...")
+
+            chap = repo.get_chapter(chapter_id)
+            if chap and chap.is_service:
+                logger.info(f"Глава {chapter_id} является служебной. Озвучка пропускается.")
+                update_progress(1.0, "Завершено", "Служебная глава пропущена.")
+                return
             
             with repo.get_session() as session:
                 from sqlmodel import select

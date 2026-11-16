@@ -69,7 +69,11 @@ class CharacterAnalysisPipeline:
 
         try:
             repo = BookRepository(book_name)
-            db_chapters = repo.get_all_chapters()
+            from core.service_chapters import detect_and_mark_service_chapters
+            detect_and_mark_service_chapters(repo)
+
+            all_chaps = repo.get_all_chapters()
+            db_chapters = [c for c in all_chaps if not getattr(c, "is_service", False)]
             if max_chapters and max_chapters > 0:
                 db_chapters = db_chapters[:max_chapters]
 

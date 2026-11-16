@@ -212,6 +212,10 @@ def init_book_db(book_path: Path, force: bool = False) -> Engine:
             # 3. Миграция тяжелых кэшей из chapter в chaptercache
             res_chap = conn.execute(text("PRAGMA table_info(chapter)"))
             chap_columns = [row[1] for row in res_chap]
+            if chap_columns and "is_service" not in chap_columns:
+                logger.info(f"Migration: Adding is_service column to chapter in {resolved_path.name}")
+                conn.execute(text("ALTER TABLE chapter ADD COLUMN is_service BOOLEAN DEFAULT 0"))
+                conn.commit()
             old_cache_cols = [c for c in ["cache_raw_scenario", "cache_ambient", "cache_emotion"] if c in chap_columns]
             if old_cache_cols:
                 logger.info(f"Migration: Moving chapter caches to chaptercache table in {resolved_path.name}")

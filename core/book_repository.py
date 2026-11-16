@@ -38,6 +38,29 @@ class BookRepository:
                 .order_by(Chapter.order_index)
             ).all()
 
+    def get_story_chapters(self) -> List[Chapter]:
+        """Возвращает только сюжетные главы (is_service == False), отсортированные по порядку."""
+        from sqlalchemy.orm import defer
+        with self.get_session() as session:
+            return session.exec(
+                select(Chapter)
+                .where(Chapter.book_id == self.book_id, Chapter.is_service == False)
+                .options(defer(Chapter.raw_text))
+                .order_by(Chapter.order_index)
+            ).all()
+
+    def mark_chapter_service(self, chapter_id: str, is_service: bool = True):
+        """Отмечает главу как служебную (или возвращает в сюжет). Для служебных сразу ставит skipped/completed."""
+        with self.get_session() as session:
+            chap = session.get(Chapter, chapter_id)
+            if chap:
+                chap.is_service = is_service
+                if is_service:
+                    chap.characters_state = "skipped"
+                    chap.status = ChapterStatus.COMPLETED
+                session.add(chap)
+                session.commit()
+
     def update_chapter_status(self, chapter_id: str, status: Union[ChapterStatus, str]):
         with self.get_session() as session:
             db_chap = session.get(Chapter, chapter_id)
