@@ -19,6 +19,7 @@ import config  # noqa: E402
 from core.book_repository import BookRepository  # noqa: E402
 from core.data_models import Scenario  # noqa: E402
 from core import path_manager  # noqa: E402
+from core.audio_profiles import get_tts_profile  # noqa: E402
 from utils.audio_merger import merge_chapter_audio  # noqa: E402
 
 logger = logging.getLogger("assemble_chapter")
@@ -40,13 +41,14 @@ def ambient_runs(sync_map):
     return [tuple(r) for r in runs if r[0] != "none"]
 
 
-def normalize_lines(src_dir: Path, dst_dir: Path, lufs: float) -> int:
+def normalize_lines(src_dir: Path, dst_dir: Path, lufs: float, sample_rate: int | None = None) -> int:
     """Копии реплик с одинаковой громкостью: рассказчик Qwen на ~6 дБ тише персонажей (гл. 4)."""
     import subprocess
+    rate = sample_rate or get_tts_profile().native_sample_rate
     count = 0
     for wav in sorted(src_dir.glob("*.wav")):
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav), "-af", f"loudnorm=I={lufs}:TP=-2:LRA=11",
-                        "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(dst_dir / wav.name)], check=True)
+                        "-ar", str(rate), "-ac", "1", "-c:a", "pcm_s16le", str(dst_dir / wav.name)], check=True)
         count += 1
     return count
 

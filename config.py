@@ -53,6 +53,8 @@ _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFO
 # sound_design с reasoning: без него хуже подбор SFX.
 _OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get("OPENROUTER_REASONING_BY_STAGE", '{"emotion_analysis": "none"}')
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
+# TTS Settings Defaults
+_TTS_ENGINE_DEFAULT = os.environ.get("TTS_ENGINE", "qwen")
 # Проверка озвучки Whisper base: на хорошем аудио CER до ~0.25, на именах до 0.43; дефекты (утечка
 # образца, повторы, мусор) — 0.3–2.6. Калибровка 2026-11-12 на 149 репликах (docs/experiments/2026-11-12_from-zero-cli.md).
 _TTS_CER_THRESHOLD_DEFAULT = 0.35   # выше — попытка бракуется и повторяется
@@ -215,6 +217,8 @@ def __getattr__(name: str):
         return value if isinstance(value, dict) else {}
     elif name == "TTS_REQUEST_TIMEOUT":
         return float(_get_db_setting("tts_request_timeout", _TTS_REQUEST_TIMEOUT_DEFAULT))
+    elif name == "TTS_ENGINE":
+        return str(_get_db_setting("tts_engine", _TTS_ENGINE_DEFAULT))
     elif name == "LLM_REQUEST_TIMEOUT":
         return float(_get_db_setting("llm_request_timeout", _LLM_REQUEST_TIMEOUT_DEFAULT))
     elif name == "LLM_MAX_NETWORK_RETRIES":

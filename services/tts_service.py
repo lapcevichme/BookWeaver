@@ -1,7 +1,9 @@
 import logging
 from pathlib import Path
 from threading import Lock
+from typing import Optional, List, Dict, Any
 import config
+from core.audio_profiles import as_whisper_wav, get_tts_profile, TTSEngineProfile
 from services.qwen_tts_client import QwenTTSClient
 
 logger = logging.getLogger(__name__)
@@ -13,7 +15,8 @@ class TTSService:
     Не требует PyTorch в основном бэкенд-процессе.
     """
 
-    def __init__(self):
+    def __init__(self, profile: Optional[TTSEngineProfile] = None):
+        self.profile = profile or get_tts_profile()
         tts_url = getattr(config, "TTS_API_URL", getattr(config, "COSYVOICE_API_URL", "http://localhost:9233"))
         self.tts_client = QwenTTSClient(base_url=tts_url, timeout=getattr(config, "TTS_REQUEST_TIMEOUT", 600))
         # Обратная совместимость
@@ -23,7 +26,7 @@ class TTSService:
         self._whisper_load_lock = Lock()
         self._reference_transcription_cache = {}
 
-        logger.info(f"Сервис TTSService инициализирован. Qwen3-TTS URL: {tts_url}")
+        logger.info(f"Сервис TTSService инициализирован. Профиль: {self.profile.name} ({self.profile.native_sample_rate}Hz). Qwen3-TTS URL: {tts_url}")
 
     @property
     def whisper_model(self):
@@ -95,30 +98,19 @@ class TTSService:
         """
         Распознает аудио без кэша и без записи файлов. Для проверки озвучки: повторная
         попытка пишет в тот же файл, и кэш по пути вернул бы текст прошлой попытки.
+        Автоматически адаптирует аудио к 16kHz mono для Whisper через as_whisper_wav.
         """
         model = self.whisper_model
-        if not model:
+        if not model or not wav_path.exists():
             return ""
-        import subprocess
-        import tempfile
-        tmp_wav_path = None
+
         try:
-            # Whisper требует 16kHz mono WAV
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
-                tmp_wav_path = Path(tmp_wav.name)
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", str(wav_path), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(tmp_wav_path)],
-                check=True,
-                capture_output=True
-            )
-            segments = model.transcribe(str(tmp_wav_path), language="ru")
-            return " ".join([s.text for s in segments]).strip()
+            with as_whisper_wav(wav_path) as whisper_wav:
+                segments = model.transcribe(str(whisper_wav), language="ru")
+                return " ".join([s.text for s in segments]).strip()
         except Exception as e:
             logger.error(f"Ошибка транскрипции pywhispercpp ({wav_path.name}): {e}")
             return ""
-        finally:
-            if tmp_wav_path and tmp_wav_path.exists():
-                tmp_wav_path.unlink()
 
     def synthesize(self, text: str, speaker_wav_path: Path, emotion: str = None) -> bytes | None:
         """Синтез речи через API Qwen3-TTS."""
@@ -144,29 +136,32 @@ class TTSService:
             mode="zero_shot"
         )
 
-    def generate_word_timings(self, text: str, audio_path: Path, language: str = "ru") -> list | None:
-        """Генерирует таймкоды (субтитры) через C++ Whisper."""
+    def generate_word_timings(self, text: str, audio_path: Path, language: str = "ru") -> Optional[List[Dict[str, Any]]]:
+        """Генерирует таймкоды (субтитры) через C++ Whisper.
+        Автоматически адаптирует аудио любой герцовки к 16kHz mono для Whisper через as_whisper_wav.
+        """
         model = self.whisper_model
         if not model or not audio_path.exists():
             return None
 
         try:
-            segments = model.transcribe(
-                str(audio_path),
-                language=language,
-                token_timestamps=True,
-                max_len=1
-            )
-            timings = []
-            for s in segments:
-                word_text = s.text.strip()
-                if word_text:
-                    timings.append({
-                        'word': word_text,
-                        'start': round(s.t0 / 100.0, 2),
-                        'end': round(s.t1 / 100.0, 2)
-                    })
-            return timings
+            with as_whisper_wav(audio_path) as whisper_wav:
+                segments = model.transcribe(
+                    str(whisper_wav),
+                    language=language,
+                    token_timestamps=True,
+                    max_len=1
+                )
+                timings = []
+                for s in segments:
+                    word_text = s.text.strip()
+                    if word_text:
+                        timings.append({
+                            'word': word_text,
+                            'start': round(s.t0 / 100.0, 2),
+                            'end': round(s.t1 / 100.0, 2)
+                        })
+                return timings
         except Exception as e:
             logger.error(f"Ошибка генерирования таймкодов pywhispercpp: {e}", exc_info=True)
             return None
