@@ -82,6 +82,11 @@ _LLM_TIMEOUT_BY_STAGE_DEFAULT = {"character_recon": 240, "character_patch": 600,
                                  "character_card_compact": 120}
 _SCENARIO_CHUNK_SIZE_DEFAULT = 45_000  # страховка для гигантских глав; см. docs/experiments/2026-11-06_chunking.md
 
+# Identity Links Defaults
+_IDENTITY_AUTO_CONFIRM_DEFAULT = True
+_IDENTITY_AUTO_CONFIRM_THRESHOLD_DEFAULT = 0.95
+_IDENTITY_DEFAULT_VOICE_POLICY_DEFAULT = "switch_after_reveal"
+
 # Temp Defaults
 _ANALYZER_LLM_TEMPERATURE_DEFAULT = 0.5
 _GENERATOR_LLM_TEMPERATURE_DEFAULT = 0.5
@@ -224,6 +229,13 @@ def __getattr__(name: str):
         return float(_get_db_setting("llm_retry_jitter", _LLM_RETRY_JITTER_DEFAULT))
     elif name == "SCENARIO_CHUNK_SIZE":
         return int(_get_db_setting("chunk_size", _SCENARIO_CHUNK_SIZE_DEFAULT))
+    elif name == "IDENTITY_AUTO_CONFIRM":
+        val = _get_db_setting("identity_auto_confirm", _IDENTITY_AUTO_CONFIRM_DEFAULT)
+        return val if isinstance(val, bool) else str(val).lower() in ("true", "1", "yes")
+    elif name == "IDENTITY_AUTO_CONFIRM_THRESHOLD":
+        return float(_get_db_setting("identity_auto_confirm_threshold", _IDENTITY_AUTO_CONFIRM_THRESHOLD_DEFAULT))
+    elif name == "IDENTITY_DEFAULT_VOICE_POLICY":
+        return str(_get_db_setting("identity_default_voice_policy", _IDENTITY_DEFAULT_VOICE_POLICY_DEFAULT))
     elif name == "ANALYZER_LLM_TEMPERATURE":
         return float(_get_db_setting("analyzer_temp", _ANALYZER_LLM_TEMPERATURE_DEFAULT))
     elif name == "GENERATOR_LLM_TEMPERATURE":

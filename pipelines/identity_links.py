@@ -434,7 +434,13 @@ class IdentitySuggestPipeline:
     def __init__(self, model_manager):
         self.model_manager = model_manager
 
-    def run(self, book_name: str, scan: bool = True, dedup: bool = True, rescore: bool = False) -> dict:
+    def run(self, book_name: str, scan: bool = True, dedup: bool = True, rescore: bool = False,
+            volume_num: Optional[int] = None, auto_confirm: Optional[bool] = None) -> dict:
+        import config
+        if auto_confirm is None:
+            auto_confirm = getattr(config, "IDENTITY_AUTO_CONFIRM", True)
+        auto_confirm_threshold = getattr(config, "IDENTITY_AUTO_CONFIRM_THRESHOLD", 0.95)
+
         repo = BookRepository(book_name)
         chars = repo.get_characters()
         by_id = {c.id: c for c in chars}
@@ -465,7 +471,8 @@ class IdentitySuggestPipeline:
         with ThreadPoolExecutor(max_workers=6) as ex:
             results = list(ex.map(work, todo))
 
-        counts = {"scanned": scanned, "dedup_found": dedup_found, "scored": 0, "suggested": 0, "dismissed": 0, "judged": 0}
+        counts = {"scanned": scanned, "dedup_found": dedup_found, "scored": 0, "suggested": 0,
+                  "auto_confirmed": 0, "dismissed": 0, "judged": 0}
         with repo.get_session() as session:
             for link, r in results:
                 link = session.get(IdentityLink, link.id)
@@ -487,13 +494,23 @@ class IdentitySuggestPipeline:
                     if link.confidence is not None and link.confidence < CONFIDENCE_SUGGEST_MIN:
                         link.status = "dismissed"
                         counts["dismissed"] += 1
+                    elif auto_confirm and link.confidence is not None and link.confidence >= auto_confirm_threshold:
+                        link.status = "confirmed"
+                        link.decided_at = datetime.now(timezone.utc)
+                        link.source = f"{link.source}+auto_confirmed" if "+auto_confirmed" not in link.source else link.source
+                        if link.relation == "duplicate":
+                            link.voice_policy = "shared"
+                        elif link.revealed_in and link.voice_policy == "separate":
+                            link.voice_policy = getattr(config, "IDENTITY_DEFAULT_VOICE_POLICY", "switch_after_reveal")
+                        counts["auto_confirmed"] += 1
                     else:
                         link.status = "suggested"
                         counts["suggested"] += 1
                 session.add(link)
             session.commit()
         counts["scoped"] = len(update_scopes(repo, llm))
-        logger.info(f"Связи личностей {book_name}: {counts}")
+        vol_str = f" (том {volume_num})" if volume_num is not None else ""
+        logger.info(f"Связи личностей {book_name}{vol_str}: {counts}")
         return counts
 
 
@@ -514,7 +531,7 @@ def identity_voices(repo: BookRepository):
     return IdentityVoices(links, chapter_order(repo.get_all_chapters()))
 
 
-def list_links(repo: BookRepository, include_all: bool = False) -> List[dict]:
+def list_links(repo: BookRepository, include_all: bool = False, blind: bool = True) -> List[dict]:
     chars = {c.id: c for c in repo.get_characters()}
     names = {c_id: c.name for c_id, c in chars.items()}
     order = chapter_order(repo.get_all_chapters())
@@ -532,18 +549,71 @@ def list_links(repo: BookRepository, include_all: bool = False) -> List[dict]:
         sim_str = ""
         if sim_val is not None:
             sim_str = f"{sim_val:.3f}" + ("" if passed else " ⚠️")
+
+        persona_name = names.get(l.persona_id, "?")
+        true_name = names.get(l.true_id, "?")
+        evidence_text = " | ".join(x for x in (l.evidence or "").splitlines() if x)
+
+        if blind:
+            true_display = "[🔒 Скрыто спойлер-щитом]"
+            evidence_display = f"[🔒 Скрыто: cli.py identity reveal --id {str(l.id)[:8]} или --spoilers]"
+        else:
+            true_display = true_name
+            evidence_display = evidence_text
+
         rows.append({
-            "id": str(l.id)[:8], "persona": names.get(l.persona_id, "?"),
-            "true": names.get(l.true_id, "?"),
-            "relation": l.relation, "revealed_in": l.revealed_in or "", "confidence":
-                f"{l.confidence:.3f}" if l.confidence is not None else "", "status": l.status,
-            "source": l.source, "voice_policy": l.voice_policy,
+            "id": str(l.id)[:8],
+            "persona": persona_name,
+            "true": true_display,
+            "true_actual": true_name,
+            "relation": l.relation,
+            "revealed_in": l.revealed_in or "",
+            "confidence": f"{l.confidence:.3f}" if l.confidence is not None else "",
+            "status": l.status,
+            "source": l.source,
+            "voice_policy": l.voice_policy,
             "shift": f"{l.voice_shift:+g}" if l.voice_shift is not None else "",
             "sim": sim_str,
             "chapters": _ranges(l.active_chapters, order),
-            "evidence": " | ".join(x for x in (l.evidence or "").splitlines() if x)
+            "evidence": evidence_display,
+            "evidence_actual": evidence_text,
+            "is_blind": blind,
         })
     return rows
+
+
+def reveal_link(repo: BookRepository, prefix: str) -> dict:
+    """Возвращает информацию о связи со снятым спойлер-щитом (открытые имена и доказательства)."""
+    chars = {c.id: c for c in repo.get_characters()}
+    names = {c_id: c.name for c_id, c in chars.items()}
+    order = chapter_order(repo.get_all_chapters())
+    with repo.get_session() as session:
+        link = _get_by_prefix(session, repo.book_id, prefix)
+    p_char = chars.get(link.persona_id)
+    vc = (p_char.voice_casting or {}) if p_char else {}
+    sim_val = vc.get("identity_similarity")
+    passed = vc.get("guardrail_passed", True)
+    sim_str = ""
+    if sim_val is not None:
+        sim_str = f"{sim_val:.3f}" + ("" if passed else " ⚠️")
+
+    return {
+        "id": str(link.id)[:8],
+        "persona": names.get(link.persona_id, "?"),
+        "true": names.get(link.true_id, "?"),
+        "relation": link.relation,
+        "revealed_in": link.revealed_in or "",
+        "confidence": f"{link.confidence:.3f}" if link.confidence is not None else "",
+        "status": link.status,
+        "source": link.source,
+        "voice_policy": link.voice_policy,
+        "shift": f"{link.voice_shift:+g}" if link.voice_shift is not None else "",
+        "sim": sim_str,
+        "chapters": _ranges(link.active_chapters, order),
+        "evidence": " | ".join(x for x in (link.evidence or "").splitlines() if x),
+        "is_blind": False,
+        "spoiler_warning": True,
+    }
 
 
 def _ranges(chapters: List[str], order: Dict[str, int]) -> str:

@@ -428,12 +428,26 @@ def cmd_link(args) -> dict:
 def cmd_identity(args) -> dict:
     from pipelines import identity_links as il
     repo = _repo(args.book)
+    spoilers = getattr(args, "spoilers", False)
+    blind = not spoilers
+
     if args.action == "suggest":
-        counts = il.IdentitySuggestPipeline(_app().model_manager).run(args.book, scan=not args.no_scan,
-                                                                      dedup=not args.no_dedup, rescore=args.rescore)
-        return {"book": args.book, "action": "suggest", **counts, "links": il.list_links(repo, args.all)}
+        auto_confirm = not getattr(args, "no_auto_confirm", False)
+        counts = il.IdentitySuggestPipeline(_app().model_manager).run(
+            args.book, scan=not args.no_scan, dedup=not args.no_dedup,
+            rescore=args.rescore, auto_confirm=auto_confirm
+        )
+        return {"book": args.book, "action": "suggest", **counts, "links": il.list_links(repo, args.all, blind=blind)}
     if args.action == "list":
-        return {"book": args.book, "action": "list", "links": il.list_links(repo, args.all)}
+        return {"book": args.book, "action": "list", "links": il.list_links(repo, args.all, blind=blind)}
+    if args.action == "reveal":
+        if not args.id:
+            raise CliError("reveal: нужен --id (из identity list)")
+        try:
+            link_info = il.reveal_link(repo, args.id)
+            return {"book": args.book, "action": "reveal", "link": link_info}
+        except KeyError as e:
+            raise CliError(str(e.args[0]), EXIT_NOT_FOUND)
     if args.action == "check":
         tts = _app().model_manager.get_tts_service()
         return {"action": "check", **il.check_identity_guardrails(args.book, tts_client=getattr(tts, "tts_client", None))}
@@ -441,7 +455,7 @@ def cmd_identity(args) -> dict:
         done = il.update_scopes(repo, _app().model_manager.get_llm_service('character_analyzer'),
                                 prefix=args.id, force=bool(args.id))
         ids = {d["id"] for d in done}
-        return {"book": args.book, "action": "scope", "links": [r for r in il.list_links(repo, True) if r["id"] in ids]}
+        return {"book": args.book, "action": "scope", "links": [r for r in il.list_links(repo, True, blind=blind) if r["id"] in ids]}
     try:
         if args.action == "add":
             if not (args.persona and args.true and args.relation):
@@ -460,7 +474,7 @@ def cmd_identity(args) -> dict:
             link = il.set_status(args.book, args.id, "confirmed" if args.action == "confirm" else "rejected")
     except KeyError as e:
         raise CliError(str(e.args[0]), EXIT_NOT_FOUND)
-    return {"book": args.book, "action": args.action, "links": [r for r in il.list_links(repo, include_all=True)
+    return {"book": args.book, "action": args.action, "links": [r for r in il.list_links(repo, include_all=True, blind=blind)
                                                                  if r["id"] == str(link.id)[:8]]}
 
 
@@ -730,6 +744,24 @@ def _human(command: str, result: dict) -> str:
         rows = [{**r, "hidden": "да" if r["hidden"] else ""} for r in result["links"]]
         return _table(rows, ["chapter", "label", "kind", "target", "person_key", "confidence", "hidden", "status", "evidence"])
     if command == "identity":
+        if result.get("action") == "reveal":
+            r = result["link"]
+            out = [
+                "⚠️ [СПОЙЛЕР РАСКРЫТ] Связь личностей:",
+                f"ID: {r['id']}",
+                f"Маска (персона): {r['persona']}",
+                f"Истинная личность: {r['true']}",
+                f"Тип связи: {r['relation']}",
+                f"Глава раскрытия: {r['revealed_in'] or 'не указана'}",
+                f"Уверенность: {r['confidence']}",
+                f"Статус: {r['status']}",
+                f"Политика голоса: {r['voice_policy']}{' (' + r['shift'] + ')' if r['shift'] else ''}",
+            ]
+            if r.get("evidence"):
+                out.append("\nДоказательства из текста:")
+                out += [f"  - {e}" for e in r["evidence"].split(" | ")]
+            return "\n".join(out)
+
         if "checks" in result:
             from pipelines import identity_links as il
             out = [f"Проверка guardrail схожести масок (коридор [{il.IDENTITY_SIMILARITY_MIN}, {il.IDENTITY_SIMILARITY_MAX}]):",
@@ -737,8 +769,10 @@ def _human(command: str, result: dict) -> str:
             return "\n".join(out)
         head = ""
         if result.get("action") == "suggest":
+            auto_conf = result.get('auto_confirmed', 0)
+            auto_str = f", авто-подтверждено: {auto_conf}" if auto_conf else ""
             head = (f"Найдено по secret-фактам: {result['scanned']}, оценено пар: {result['scored']} "
-                    f"(перепроверено судьей: {result['judged']}), предложено: {result['suggested']}, "
+                    f"(перепроверено судьей: {result['judged']}){auto_str}, предложено: {result['suggested']}, "
                     f"отсеяно: {result['dismissed']}\n")
         # Доводы длинные и многострочные — в таблице их обрезало бы до 60 символов, поэтому отдельно и целиком
         out = [head + _table(result["links"], ["id", "persona", "true", "relation", "revealed_in", "chapters",
@@ -747,6 +781,10 @@ def _human(command: str, result: dict) -> str:
             if r["evidence"]:
                 out.append(f"\n[{r['id']}] {r['persona']} → {r['true']}")
                 out += [f"  - {e}" for e in r["evidence"].split(" | ")]
+
+        if any(r.get("is_blind") for r in result.get("links", [])):
+            out.append("\n💡 Включен слепой режим (спойлер-щит). Чтобы увидеть детали: cli.py identity reveal <книга> --id <id> или используйте флаг --spoilers")
+
         return "\n".join(out)
     if command == "characters":
         return _table(result["characters"], ["name", "gender", "role", "chapters", "replicas", "voice", "voice_source", "wanted", "voice_profile"])
@@ -815,11 +853,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--recheck", action="store_true", help="resolve: перепроверить только подписи extra/неуверенные с учетом новых персонажей")
     p.set_defaults(func=cmd_link)
 
-    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, confirm, reject, policy, voice, scope, add, check")
-    p.add_argument("action", choices=["suggest", "list", "confirm", "reject", "policy", "voice", "scope", "add", "check"])
+    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, reveal, confirm, reject, policy, voice, scope, add, check")
+    p.add_argument("action", choices=["suggest", "list", "reveal", "confirm", "reject", "policy", "voice", "scope", "add", "check"])
     p.add_argument("book")
     p.add_argument("--id", help="начало id связи из identity list")
     p.add_argument("--all", action="store_true", help="list/suggest: показать и отсеянные/отклоненные")
+    p.add_argument("--spoilers", action="store_true", help="list/suggest/confirm: показать истинные имена и сюжетные спойлеры (по умолчанию включен слепой режим)")
+    p.add_argument("--no-auto-confirm", action="store_true", help="suggest: отключить автоматическое подтверждение при уверенности >= 0.95")
     p.add_argument("--no-scan", action="store_true", help="suggest: без поиска по secret-фактам, только оценить кандидатов")
     p.add_argument("--no-dedup", action="store_true", help="suggest: без поиска дубликатов базы по паттернам и фактам")
     p.add_argument("--rescore", action="store_true", help="suggest: переоценить уже оцененные (кроме решений человека)")

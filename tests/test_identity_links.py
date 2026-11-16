@@ -152,6 +152,7 @@ class TestIdentityPipeline(unittest.TestCase):
     def _run(self, llm, **kw):
         mm = MagicMock()
         mm.get_llm_service.return_value = llm
+        kw.setdefault("auto_confirm", False)
         with patch("pipelines.identity_links.metrics_collector"):
             return il.IdentitySuggestPipeline(mm).run("b", **kw)
 
@@ -286,6 +287,51 @@ class TestIdentityPipeline(unittest.TestCase):
             il.set_voice("b", prefix, shift=15.0)  # вне диапазона [-12, 12]
         with self.assertRaises(ValueError):
             il.set_voice("b", prefix, policy="invalid")
+
+    def test_auto_confirm_at_high_confidence(self):
+        il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")
+        llm = _llm({"A": 0.99}, il.LlmIdentityJudgement(answer="A", evidence="4.14: Шисуй — это Лоулан"))
+        counts = self._run(llm, scan=False, auto_confirm=True)
+        self.assertEqual(counts["auto_confirmed"], 1)
+        self.assertEqual(counts["suggested"], 0)
+        link = self._links()[0]
+        self.assertEqual(link.status, "confirmed")
+        self.assertIsNotNone(link.decided_at)
+        self.assertIn("auto_confirmed", link.source)
+        # Так как revealed_in указан, назначается политика по умолчанию
+        self.assertEqual(link.voice_policy, "switch_after_reveal")
+
+    def test_auto_confirm_disabled_keeps_suggested(self):
+        il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")
+        llm = _llm({"A": 0.99}, il.LlmIdentityJudgement(answer="A", evidence="4.14: Шисуй — это Лоулан"))
+        counts = self._run(llm, scan=False, auto_confirm=False)
+        self.assertEqual(counts["auto_confirmed"], 0)
+        self.assertEqual(counts["suggested"], 1)
+        link = self._links()[0]
+        self.assertEqual(link.status, "suggested")
+
+    def test_blind_mode_hides_spoilers_and_reveal_shows_them(self):
+        link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "Секретный факт")
+        prefix = str(link.id)[:8]
+
+        # Слепой режим по умолчанию
+        blind_rows = il.list_links(self.repo, include_all=True, blind=True)
+        self.assertEqual(len(blind_rows), 1)
+        self.assertIn("Скрыто спойлер-щитом", blind_rows[0]["true"])
+        self.assertIn("Скрыто: cli.py identity reveal", blind_rows[0]["evidence"])
+        self.assertEqual(blind_rows[0]["true_actual"], "Лоулан")
+
+        # Открытый режим (--spoilers)
+        open_rows = il.list_links(self.repo, include_all=True, blind=False)
+        self.assertEqual(open_rows[0]["true"], "Лоулан")
+        self.assertIn("Секретный факт", open_rows[0]["evidence"])
+
+        # Команда reveal
+        revealed = il.reveal_link(self.repo, prefix)
+        self.assertEqual(revealed["persona"], "Шисуй")
+        self.assertEqual(revealed["true"], "Лоулан")
+        self.assertTrue(revealed["spoiler_warning"])
+        self.assertFalse(revealed["is_blind"])
 
     @patch("subprocess.run")
     def test_apply_voice_shift_creates_reference_and_sets_voice_base(self, mock_subp):
@@ -456,6 +502,89 @@ class TestIdentityVoices(unittest.TestCase):
         self.assertEqual(self._voice(self.shisui, "vol_3_chap_3", *chain).voice_id, "aduo_v")
         cycle = [self._link(self.shisui, self.loulan, policy="shared"), self._link(self.loulan, self.shisui, policy="shared")]
         self.assertEqual(self._voice(self.shisui, "vol_3_chap_3", *cycle).voice_id, "loulan_v")
+
+
+class TestVolumeIdentityTriggers(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.book_dir = self.temp_dir / "b_vol"
+        self.book_dir.mkdir()
+        init_book_db(self.book_dir)
+        dummy_story_text = "Это длинный сюжетный текст главы с диалогами и действиями персонажей во дворце. " * 3
+        with get_book_session(self.book_dir) as s:
+            s.add(Book(id="b_vol", title="Book", author="Author"))
+            s.add(Chapter(id="vol_1_chap_1", book_id="b_vol", volume_num=1, chapter_num=1, order_index=1,
+                          title="Vol 1 Chap 1", raw_text=dummy_story_text, characters_state=None))
+            s.add(Chapter(id="vol_1_chap_2", book_id="b_vol", volume_num=1, chapter_num=2, order_index=2,
+                          title="Vol 1 Chap 2", raw_text=dummy_story_text, characters_state=None))
+            s.add(Chapter(id="vol_2_chap_1", book_id="b_vol", volume_num=2, chapter_num=1, order_index=3,
+                          title="Vol 2 Chap 1", raw_text=dummy_story_text, characters_state=None))
+            s.commit()
+        self.repo = BookRepository(book_id="b_vol")
+        self.repo.book_output_dir = self.book_dir
+
+    def tearDown(self):
+        dispose_engine(self.book_dir)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_on_volume_completed_waits_for_all_chapters(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        mm = MagicMock()
+        pipeline = CharacterAnalysisPipeline(mm)
+        all_chaps = self.repo.get_all_chapters()
+
+        # Только 1 глава из 2 завершена в томе 1
+        self.repo.set_characters_state(["vol_1_chap_1"], "done")
+        res = pipeline._on_volume_completed(self.repo, "b_vol", 1, all_chaps)
+        self.assertIsNone(res, "Не должно запускаться, пока не все главы тома завершены")
+
+        # Завершаем вторую главу
+        self.repo.set_characters_state(["vol_1_chap_2"], "done")
+        with patch.object(pipeline, "trigger_volume_identity_scan", return_value={"suggested": 2}) as mock_scan:
+            res = pipeline._on_volume_completed(self.repo, "b_vol", 1, all_chaps)
+            self.assertEqual(res, {"suggested": 2})
+            mock_scan.assert_called_once_with(self.repo, "b_vol", 1)
+
+    def test_scanned_volumes_prevents_duplicate_runs(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        mm = MagicMock()
+        pipeline = CharacterAnalysisPipeline(mm)
+        all_chaps = self.repo.get_all_chapters()
+        self.repo.set_characters_state(["vol_1_chap_1", "vol_1_chap_2"], "done")
+
+        scanned = {1}
+        with patch.object(pipeline, "trigger_volume_identity_scan") as mock_scan:
+            res = pipeline._on_volume_completed(self.repo, "b_vol", 1, all_chaps, scanned_volumes=scanned)
+            self.assertIsNone(res)
+            mock_scan.assert_not_called()
+
+    def test_pipeline_run_triggers_volume_scans(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        mm = MagicMock()
+        pipeline = CharacterAnalysisPipeline(mm)
+
+        # Мокаем обработку главы, чтобы она просто возвращала успех
+        pipeline._process_chapter = MagicMock()
+
+        scanned = []
+        with patch.object(pipeline, "trigger_volume_identity_scan", side_effect=lambda r, b, v: scanned.append(v) or {"suggested": 0}) as mock_scan, \
+             patch("pipelines.character_analysis.BookRepository", return_value=self.repo):
+            pipeline.run("b_vol", auto_identity_scan=True)
+
+        # Должны были быть вызваны сканы для Тома 1 (при переходе на Том 2) и Тома 2 (в конце пайплайна)
+        self.assertEqual(scanned, [1, 2])
+
+    def test_pipeline_run_auto_identity_scan_disabled(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        mm = MagicMock()
+        pipeline = CharacterAnalysisPipeline(mm)
+        pipeline._process_chapter = MagicMock()
+
+        with patch.object(pipeline, "trigger_volume_identity_scan") as mock_scan, \
+             patch("pipelines.character_analysis.BookRepository", return_value=self.repo):
+            pipeline.run("b_vol", auto_identity_scan=False)
+
+        mock_scan.assert_not_called()
 
 
 if __name__ == "__main__":

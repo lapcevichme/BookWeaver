@@ -5,13 +5,13 @@ import json
 import logging
 import re
 from collections import Counter
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 from uuid import UUID, uuid4
 
 import config
 from core.book_repository import BookRepository
 from core.data_models import (
-    Character, CharacterArchive, CharacterType, ChapterStatus,
+    Chapter, Character, CharacterArchive, CharacterType, ChapterStatus,
     CharacterVoiceState, CharacterVisualState, LlmReconResult, LlmCharacterPatchList, LlmCharacterPatch, LlmReconCardResult,
     LlmCardCompact, FACT_KINDS_STATE, ALIAS_KINDS_PERSONAL, alias_texts,
 )
@@ -56,7 +56,9 @@ class CharacterAnalysisPipeline:
             logger.error(f"❌ Ошибка загрузки черного списка из БД: {e}")
             self.GENERIC_ROLES_BLACKLIST = set()
 
-    def run(self, book_name: str, max_chapters: Optional[int] = None, progress_callback: Optional[Callable[[float, str, str], None]] = None):
+    def run(self, book_name: str, max_chapters: Optional[int] = None,
+            progress_callback: Optional[Callable[[float, str, str], None]] = None,
+            auto_identity_scan: bool = True):
         def update_progress(progress: float, stage: str, message: str):
             logger.info(f"[Progress {progress:.0%}] [{stage}] {message}")
             if progress_callback:
@@ -99,10 +101,22 @@ class CharacterAnalysisPipeline:
                     logger.warning(f"⚠️ {pending[0].id} обрабатывается после уже обработанных {later_done[:3]}"
                                    f"{'…' if len(later_done) > 3 else ''}: описания могут знать будущие главы.")
 
+            current_volume = None
+            scanned_volumes: Set[int] = set()
+
             for chap in pending:
+                vol_num = getattr(chap, "volume_num", 1)
                 idx = db_chapters.index(chap)
                 progress = 0.1 + (idx / total_chapters) * 0.9
                 chapter_id = chap.id
+
+                # При переходе между томами проверяем завершение предыдущего тома и запускаем identity scan
+                if current_volume is not None and vol_num != current_volume:
+                    if auto_identity_scan:
+                        self._on_volume_completed(repo, book_name, current_volume, db_chapters,
+                                                  update_progress, progress, scanned_volumes)
+                current_volume = vol_num
+
                 metrics_collector.start_chapter(f"{book_name}:{chapter_id}")
 
                 def chapter_progress(message: str):
@@ -125,10 +139,16 @@ class CharacterAnalysisPipeline:
                 repo.save_characters(master_archive.characters)
                 self._flush_alias_collisions(repo, master_archive, chapter_id)
                 repo.set_characters_state([chapter_id], "done")
+                chap.characters_state = "done"
                 self._mark_chapter_processed(master_archive, chapter_id)
                 if chap.status in (ChapterStatus.DRAFT, ChapterStatus.PROCESSING, None):
                     repo.update_chapter_status(chapter_id, ChapterStatus.PROCESSED)
                 metrics_collector.save_to_file(config.LOGS_DIR / "metrics.json")
+
+            # Проверяем последний том после выхода из цикла
+            if current_volume is not None and auto_identity_scan:
+                self._on_volume_completed(repo, book_name, current_volume, db_chapters,
+                                          update_progress, 1.0, scanned_volumes)
 
             logger.info(f"📊 Статистика патча: {dict(self.stats)}")
             update_progress(1.0, "Завершено", f"Анализ завершен. Персонажей: {len(master_archive.characters)}.")
@@ -138,6 +158,62 @@ class CharacterAnalysisPipeline:
         except Exception as e:
             logger.error(f"❌ Ошибка пайплайна: {e}", exc_info=True)
             raise
+
+    def _on_volume_completed(
+        self,
+        repo: BookRepository,
+        book_name: str,
+        volume_num: int,
+        all_story_chapters: List[Chapter],
+        update_progress: Optional[Callable[[float, str, str], None]] = None,
+        progress: float = 1.0,
+        scanned_volumes: Optional[Set[int]] = None,
+    ) -> Optional[dict]:
+        """Проверяет завершение всех сюжетных глав тома и запускает identity scan при необходимости."""
+        if scanned_volumes is not None and volume_num in scanned_volumes:
+            return None
+
+        vol_chaps = [c for c in all_story_chapters if getattr(c, "volume_num", 1) == volume_num]
+        if not vol_chaps:
+            return None
+
+        vol_ids = [c.id for c in vol_chaps]
+        done_count = 0
+        for c in vol_chaps:
+            state = getattr(c, "characters_state", None)
+            if state in ("done", "skipped"):
+                done_count += 1
+            elif hasattr(repo, "get_chapter"):
+                db_c = repo.get_chapter(c.id)
+                if db_c and getattr(db_c, "characters_state", None) in ("done", "skipped"):
+                    done_count += 1
+
+        if done_count < len(vol_ids):
+            logger.debug(f"Том {volume_num}: обработано {done_count}/{len(vol_ids)} сюжетных глав, автоскан личностей отложен.")
+            return None
+
+        if scanned_volumes is not None:
+            scanned_volumes.add(volume_num)
+
+        logger.info(f"📚 Завершен анализ персонажей тома {volume_num} ({done_count}/{len(vol_ids)} глав). Запуск автосканирования личностей...")
+        if update_progress:
+            update_progress(progress, "Связи личностей", f"Анализ связей личностей по итогам тома {volume_num}...")
+
+        return self.trigger_volume_identity_scan(repo, book_name, volume_num)
+
+    def trigger_volume_identity_scan(self, repo: BookRepository, book_name: str, volume_num: int) -> Optional[dict]:
+        """Вызывает IdentitySuggestPipeline для книги по итогам завершения тома."""
+        from pipelines.identity_links import IdentitySuggestPipeline
+        try:
+            il_pipeline = IdentitySuggestPipeline(self.model_manager)
+            counts = il_pipeline.run(book_name, scan=True, dedup=True, volume_num=volume_num)
+            suggested = counts.get("suggested", 0)
+            if suggested > 0:
+                logger.info(f"🎭 По итогам тома {volume_num} найдено предложений связей личностей: {suggested} (всего оценено: {counts.get('scored', 0)})")
+            return counts
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка автосканирования связей личностей для тома {volume_num}: {e}", exc_info=True)
+            return None
 
     def _call_with_retries(self, fn, what: str):
         """Повторяет вызов LLM, вернувший None (битый JSON, невалидный ответ). Сетевые повторы — в llm_service."""
