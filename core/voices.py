@@ -2,12 +2,16 @@
 Выбор голоса для реплики. Одна функция и для озвучки, и для `cli.py inspect voices`,
 чтобы проверка показывала ровно то, что сделает TTS.
 """
+import logging
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 from core import path_manager
+
+logger = logging.getLogger(__name__)
 
 NARRATOR = "Рассказчик"
 
@@ -17,6 +21,9 @@ SOURCE_VOICE_BASE = "voice_base"  # назначен персонажу в БД 
 SOURCE_CONFIG = "config"          # назначен в config.character_voices книги
 SOURCE_GENERIC = "generic"        # общий голос по полу/возрасту (безымянная роль или персонаж без голоса)
 SOURCE_FALLBACK = "fallback"      # подходящего голоса нет — звучит голос рассказчика
+
+# Сдвиги высоты тона (в полутонах) при переполнении пула голосов одной категории в сцене
+PITCH_SHIFT_CYCLE = [0.0, +0.75, -0.75, +1.25, -1.25, +1.75, -1.75]
 
 # Общие голоса: id папки в библиотеке голосов (storage/voices/<id>), создаются кастингом.
 GENERIC_VOICES = {
@@ -182,6 +189,44 @@ class IdentityVoices:
         return current, "; ".join(notes)
 
 
+def get_or_create_shifted_voice(base_voice_id: str, shift: float) -> str:
+    """
+    Создает (если еще нет) сдвинутую копию образца голоса в storage/voices/<id>_p{shift}/
+    через ffmpeg rubberband (formant=preserved) для защиты от коллизий в одной сцене.
+    """
+    if abs(shift) < 0.01:
+        return base_voice_id
+    tag = f"p{shift:+g}".replace(".", "_")
+    shifted_id = f"{base_voice_id}_{tag}"
+    shifted_path = path_manager.get_voice_path(shifted_id)
+    if shifted_path.exists():
+        return shifted_id
+
+    source_path = path_manager.get_voice_path(base_voice_id)
+    if not source_path.exists():
+        return base_voice_id
+
+    shifted_dir = shifted_path.parent
+    shifted_dir.mkdir(parents=True, exist_ok=True)
+
+    pitch_ratio = 2 ** (shift / 12)
+    rb_filter = f"rubberband=pitch={pitch_ratio:.4f}:formant=preserved"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(source_path), "-af", rb_filter, str(shifted_path)]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        txt_src = source_path.with_suffix(".txt")
+        if txt_src.exists():
+            shifted_path.with_suffix(".txt").write_text(txt_src.read_text(encoding="utf-8"), encoding="utf-8")
+        logger.info(f"Сгенерирован сдвинутый голос массовки: '{shifted_id}' ({shift:+g} st) из '{base_voice_id}'")
+        return shifted_id
+    except Exception as e:
+        logger.warning(f"Не удалось сдвинуть голос '{base_voice_id}' через rubberband: {e}")
+        if source_path.exists() and not shifted_path.exists():
+            shifted_path.write_bytes(source_path.read_bytes())
+            return shifted_id
+        return base_voice_id
+
+
 def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config, speaker_id=None,
                   link=None, extra_index: int = 0, identity: Optional[IdentityVoices] = None,
                   chapter_id: Optional[str] = None) -> VoiceChoice:
@@ -232,9 +277,23 @@ def resolve_voice(speaker_name: Optional[str], characters: Iterable, book_config
     if category:
         pool = generic_pool(category) if not char else []
         if pool:
-            return choice(pool[extra_index % len(pool)], SOURCE_GENERIC)
+            base_voice = pool[extra_index % len(pool)]
+            cycle = extra_index // len(pool)
+            if cycle > 0:
+                shift_idx = min(cycle, len(PITCH_SHIFT_CYCLE) - 1)
+                shift = PITCH_SHIFT_CYCLE[shift_idx]
+                shifted_voice = get_or_create_shifted_voice(base_voice, shift)
+                via = f"сдвиг {shift:+g} st из {base_voice} (коллизия #{cycle} в пуле)"
+                return choice(shifted_voice, SOURCE_GENERIC)
+            return choice(base_voice, SOURCE_GENERIC)
         generic = GENERIC_VOICES[category]
         if path_manager.get_voice_path(generic).exists():
+            if extra_index > 0:
+                shift_idx = min(extra_index, len(PITCH_SHIFT_CYCLE) - 1)
+                shift = PITCH_SHIFT_CYCLE[shift_idx]
+                shifted_voice = get_or_create_shifted_voice(generic, shift)
+                via = f"сдвиг {shift:+g} st из {generic} (коллизия #{extra_index})"
+                return choice(shifted_voice, SOURCE_GENERIC)
             return choice(generic, SOURCE_GENERIC)
         return choice(narrator, SOURCE_FALLBACK, wanted=generic)
 

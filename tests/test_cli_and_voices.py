@@ -112,6 +112,37 @@ class TestSpeakerLinks(unittest.TestCase):
         v = voices.resolve_voice("Голос из толпы", [], self.config, link=link)
         self.assertEqual((v.source, v.wanted), (voices.SOURCE_FALLBACK, "generic_old_female"))
 
+    def test_pool_overflow_applies_pitch_shift_to_avoid_collision(self):
+        # В self.lib созданы только generic_female и generic_female_2 (размер пула = 2)
+        link = self._link("Служанка", gender="female", age_group="adult")
+
+        # extra_index = 0 и 1 -> обычные голоса без сдвига
+        v0 = voices.resolve_voice("Служанка 1", [], self.config, link=link, extra_index=0)
+        self.assertEqual(v0.voice_id, "generic_female")
+        self.assertEqual(v0.via, "")
+
+        v1 = voices.resolve_voice("Служанка 2", [], self.config, link=link, extra_index=1)
+        self.assertEqual(v1.voice_id, "generic_female_2")
+        self.assertEqual(v1.via, "")
+
+        # extra_index = 2 -> коллизия #1: сдвиг +0.75 st из generic_female
+        v2 = voices.resolve_voice("Служанка 3", [], self.config, link=link, extra_index=2)
+        self.assertEqual(v2.voice_id, "generic_female_p+0_75")
+        self.assertIn("сдвиг +0.75 st", v2.via)
+        self.assertTrue(v2.exists)
+
+        # extra_index = 3 -> коллизия #1: сдвиг +0.75 st из generic_female_2
+        v3 = voices.resolve_voice("Служанка 4", [], self.config, link=link, extra_index=3)
+        self.assertEqual(v3.voice_id, "generic_female_2_p+0_75")
+        self.assertIn("сдвиг +0.75 st", v3.via)
+        self.assertTrue(v3.exists)
+
+        # extra_index = 4 -> коллизия #2: сдвиг -0.75 st из generic_female
+        v4 = voices.resolve_voice("Служанка 5", [], self.config, link=link, extra_index=4)
+        self.assertEqual(v4.voice_id, "generic_female_p-0_75")
+        self.assertIn("сдвиг -0.75 st", v4.via)
+        self.assertTrue(v4.exists)
+
 
 class TestUnresolvedSpeakers(unittest.TestCase):
     def test_only_lines_without_speaker_id(self):
