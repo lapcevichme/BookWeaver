@@ -23,7 +23,7 @@ SERVICE_TEXT_PATTERN = re.compile(
 )
 
 SUSPECT_KEYWORDS_PATTERN = re.compile(
-    r'(?:послесловие|примечани[ея]|заметк[иа]|от автора|конец тома|afterword)',
+    r'(?:послесловие|примечани[ея]|заметк[иа]|от автора|конец тома|afterword|иллюстраци[ия]|п\.?п\.?)',
     re.IGNORECASE
 )
 

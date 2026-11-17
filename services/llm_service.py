@@ -110,8 +110,16 @@ def run_with_deadline(fn: Callable[[], Any], deadline: float) -> Any:
 # Разведка персонажей: low урезает reasoning в 2.5-3 раза без потери полноты; none — модель по умолчанию
 # отвечает «не изменилось» (14 отметок из 122 против 45), docs/experiments/2026-11-13_character-cards.md
 # Судья связей личностей: low хватает (11/11 на парах Кусурии), docs/experiments/2026-11-13_identity-signals.md
-STAGE_REASONING_DEFAULTS = {"ambient_design": "none", "character_recon": "low", "character_patch": "low",
-                            "identity_scan": "low", "identity_judge": "low", "identity_scope": "low"}
+STAGE_REASONING_DEFAULTS = {
+    "ambient_design": "none",
+    "character_recon": "low",
+    "character_patch": "low",
+    "identity_scan": "low",
+    "identity_judge": "low",
+    "identity_scope": "low",
+    "chapter_summary": "low",
+    "volume_summary": "low",
+}
 
 PRICING_REGISTRY = {
     "xiaomi/mimo-v2-flash:free": {"input": 0.0, "output": 0.0}

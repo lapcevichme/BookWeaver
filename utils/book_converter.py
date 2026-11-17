@@ -14,15 +14,17 @@ from utils.init_manifest import init_manifest
 from utils.text_utils import cleanup_filename
 from utils.setup_logging import setup_logging
 
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 class BookConverter:
-    def __init__(self, input_file: Path):
+    def __init__(self, input_file: Path, book_name: Optional[str] = None):
         if not input_file.exists():
             raise FileNotFoundError(f"Файл не найден: {input_file}")
 
         self.input_file = input_file
-        self.book_name = cleanup_filename(input_file.stem)
+        self.book_name = book_name or cleanup_filename(input_file.stem)
         self.project_input_dir = path_manager.get_book_dir(self.book_name)
         self.project_output_dir = path_manager.get_book_output_dir(self.book_name)
 
