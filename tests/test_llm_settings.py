@@ -29,6 +29,14 @@ class TestTimeoutByStage(unittest.TestCase):
         self.assertEqual(per_call.max_retries, 0)
         self.assertEqual(per_call.timeout, 240)
 
+    def test_allow_fallbacks_defaults_and_override(self):
+        self.assertTrue(config.OPENROUTER_ALLOW_FALLBACKS)
+        with patch.object(config, "OPENROUTER_ALLOW_FALLBACKS", False, create=True):
+            self.assertFalse(config.OPENROUTER_ALLOW_FALLBACKS)
+
+    def test_default_request_timeout_is_300(self):
+        self.assertEqual(config._LLM_REQUEST_TIMEOUT_DEFAULT, 300)
+
 
 if __name__ == "__main__":
     unittest.main()

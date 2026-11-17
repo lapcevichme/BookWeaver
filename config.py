@@ -48,6 +48,7 @@ _LLM_PROVIDER_DEFAULT = os.environ.get("LLM_PROVIDER", "openrouter")  # openrout
 _FAST_MODEL_NAME_DEFAULT = os.environ.get("FAST_MODEL_NAME", "deepseek/deepseek-v4.1-flash-1017")
 _POWERFUL_MODEL_NAME_DEFAULT = os.environ.get("POWERFUL_MODEL_NAME", "deepseek/deepseek-v4.1-flash-1017")
 _OPENROUTER_PROVIDER_ORDER_DEFAULT = os.environ.get("OPENROUTER_PROVIDER_ORDER", "deepinfra/fp8")  # flex в 2-3 раза медленнее
+_OPENROUTER_ALLOW_FALLBACKS_DEFAULT = os.environ.get("OPENROUTER_ALLOW_FALLBACKS", "true").lower() in ("true", "1", "yes")
 _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFORT", "")
 # emotion_analysis без reasoning: -42% стоимости без потери качества (2026-11-06_reasoning-by-stage.md);
 # sound_design с reasoning: без него хуже подбор SFX.
@@ -72,18 +73,29 @@ _CHARACTER_PATCH_BATCH_DEFAULT = 8
 # facts: card + короткий портрет (бюджет) и факты отдельным списком (docs/experiments/2026-11-13_character-cards.md)
 _CHARACTER_DESCRIPTION_MODE_DEFAULT = os.environ.get("CHARACTER_DESCRIPTION_MODE", "facts")
 _CHARACTER_CALL_ATTEMPTS_DEFAULT = 3  # попыток на разведку и на каждую пачку патча
-_LLM_REQUEST_TIMEOUT_DEFAULT = 1200  # сек; глава на 43k символов генерируется ~5 минут
+_LLM_REQUEST_TIMEOUT_DEFAULT = 300  # сек (5 минут); главы обычно генерируются от 15 до 90 с
 _LLM_MAX_NETWORK_RETRIES_DEFAULT = 6  # попыток при сетевых/транзиентных ошибках (окно ожидания ~3-4 мин)
 _LLM_RETRY_INITIAL_DELAY_DEFAULT = 2.0
 _LLM_RETRY_MAX_DELAY_DEFAULT = 60.0
 _LLM_RETRY_BACKOFF_FACTOR_DEFAULT = 2.0
 _LLM_RETRY_JITTER_DEFAULT = 0.2
 # Таймаут по этапам ≈ 2x максимума реальных вызовов в прогонах ноября 2026 (DeepSeek, DeepInfra):
-# recon макс. 108 с, patch 334 с, summary 65 с, sound_design (с reasoning) 159 с. Зависший провайдер
-# иначе съедает весь таймаут: 2026-11-12 sound_design молчал 600 с, повтор ответил за 2 минуты.
-_LLM_TIMEOUT_BY_STAGE_DEFAULT = {"character_recon": 240, "character_patch": 600, "chapter_summary": 180,
-                                 "emotion_analysis": 180, "sound_design": 360, "speaker_resolution": 300, "casting": 300, "ambient_design": 120,
-                                 "character_card_compact": 120}
+# recon макс. 108 с, patch (с reasoning: low) 20-60 с, summary 65 с, sound_design (с reasoning) 159 с.
+_LLM_TIMEOUT_BY_STAGE_DEFAULT = {
+    "character_recon": 240,
+    "character_patch": 360,
+    "chapter_summary": 180,
+    "volume_summary": 180,
+    "emotion_analysis": 180,
+    "sound_design": 360,
+    "speaker_resolution": 300,
+    "casting": 300,
+    "ambient_design": 120,
+    "character_card_compact": 120,
+    "identity_scan": 120,
+    "identity_judge": 120,
+    "identity_scope": 120,
+}
 _SCENARIO_CHUNK_SIZE_DEFAULT = 45_000  # страховка для гигантских глав; см. docs/experiments/2026-11-06_chunking.md
 
 # Identity Links Defaults
@@ -185,6 +197,9 @@ def __getattr__(name: str):
         return _get_db_setting("powerful_model", _POWERFUL_MODEL_NAME_DEFAULT)
     elif name == "OPENROUTER_PROVIDER_ORDER":
         return _get_db_setting("openrouter_provider_order", _OPENROUTER_PROVIDER_ORDER_DEFAULT)
+    elif name == "OPENROUTER_ALLOW_FALLBACKS":
+        val = _get_db_setting("openrouter_allow_fallbacks", _OPENROUTER_ALLOW_FALLBACKS_DEFAULT)
+        return val if isinstance(val, bool) else str(val).lower() in ("true", "1", "yes")
     elif name == "OPENROUTER_REASONING_EFFORT":
         return _get_db_setting("openrouter_reasoning_effort", _OPENROUTER_REASONING_EFFORT_DEFAULT)
     elif name == "OPENROUTER_REASONING_BY_STAGE":

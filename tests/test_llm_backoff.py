@@ -233,6 +233,67 @@ class TestLLMServiceRetryExecution(unittest.TestCase):
         self.assertEqual(mock_create.call_count, 2)
         self.assertEqual(self.sleeps, [1.0])
 
+    def test_deadline_timeout_triggers_retry_and_recovers(self):
+        import time
+
+        calls = []
+
+        def fake_create(*args, **kwargs):
+            calls.append(len(calls) + 1)
+            if len(calls) == 1:
+                time.sleep(2.0)
+                return _make_dummy_completion('{"message": "late"}')
+            return _make_dummy_completion('{"message": "recovered after timeout"}')
+
+        mock_create = MagicMock(side_effect=fake_create)
+        self.mock_client.with_options.return_value.chat.completions.create = mock_create
+
+        with patch.object(config, "LLM_RETRY_INITIAL_DELAY", 1.0, create=True), \
+             patch.object(config, "LLM_RETRY_JITTER", 0.0, create=True):
+
+            # Дедлайн 0.1 с, первый вызов висит 2.0 с -> сработает дедлайн и уйдет в retry
+            result = self.service._execute_with_retry(
+                mock_create,
+                prompt_type="test_deadline",
+                timeout=0.1,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.choices[0].message.content, '{"message": "recovered after timeout"}')
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.sleeps, [1.0])
+
+
+class TestRunDeadlineAndOpenRouterRouting(unittest.TestCase):
+    def test_run_with_deadline_success(self):
+        from services.llm_service import run_with_deadline
+        res = run_with_deadline(lambda: "quick_result", deadline=1.0)
+        self.assertEqual(res, "quick_result")
+
+    def test_run_with_deadline_timeout(self):
+        import time
+        from services.llm_service import run_with_deadline
+        with self.assertRaises(TimeoutError) as ctx:
+            run_with_deadline(lambda: time.sleep(1.0), deadline=0.05)
+        self.assertIn("Сквозной дедлайн", str(ctx.exception))
+
+    def test_run_with_deadline_exception_propagates(self):
+        from services.llm_service import run_with_deadline
+        with self.assertRaises(ValueError):
+            run_with_deadline(lambda: int("not_a_number"), deadline=1.0)
+
+    def test_openrouter_routing_defaults(self):
+        with patch.object(config, "OPENROUTER_PROVIDER_ORDER", "deepinfra/fp8", create=True), \
+             patch.object(config, "OPENROUTER_ALLOW_FALLBACKS", True, create=True):
+            routing = LLMService._openrouter_routing()
+            self.assertEqual(routing, {"order": ["deepinfra/fp8"], "allow_fallbacks": True})
+
+    def test_openrouter_routing_fallback_can_be_disabled(self):
+        with patch.object(config, "OPENROUTER_PROVIDER_ORDER", "deepinfra/fp8,together", create=True), \
+             patch.object(config, "OPENROUTER_ALLOW_FALLBACKS", False, create=True):
+            routing = LLMService._openrouter_routing()
+            self.assertEqual(routing, {"order": ["deepinfra/fp8", "together"], "allow_fallbacks": False})
+
 
 if __name__ == "__main__":
     unittest.main()

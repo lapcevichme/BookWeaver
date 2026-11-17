@@ -1,4 +1,5 @@
 import threading
+import queue
 import time
 import re
 import json
@@ -72,6 +73,37 @@ def calculate_backoff_delay(
     else:
         jittered = raw_delay
     return max(0.5, min(max_delay, jittered))
+
+
+def run_with_deadline(fn: Callable[[], Any], deadline: float) -> Any:
+    """
+    Выполняет функцию fn() в потоке-демоне с жестким сквозным дедлайном.
+    В отличие от сокетного таймаута httpx (который сбрасывается keepalive-пакетами Cloudflare),
+    дедлайн измеряется по реальным настенным часам (wall-clock) и гарантированно прерывает
+    зависший вызов по истечении deadline секунд.
+    """
+    if deadline <= 0:
+        return fn()
+
+    res_q: queue.Queue = queue.Queue(maxsize=1)
+
+    def worker():
+        try:
+            res_q.put(("ok", fn()))
+        except BaseException as e:
+            res_q.put(("err", e))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+    try:
+        status, val = res_q.get(timeout=deadline)
+    except queue.Empty:
+        raise TimeoutError(f"Сквозной дедлайн LLM API превышен ({deadline:.1f} с)")
+
+    if status == "err":
+        raise val
+    return val
 
 # Этапы, которым reasoning не нужен, если в настройке openrouter_reasoning_by_stage не сказано иное:
 # эмбиент без reasoning выбирается так же (2026-11-06), а SFX теперь правила (utils/sfx_rules.py).
@@ -197,7 +229,8 @@ class LLMService:
         start_time, usage, status, error_msg = time.time(), (0, 0), "success", None
         self._call_info.data = {"attempts": 1}
         try:
-            client = self.client.with_options(timeout=self._timeout_for(prompt_type))
+            stage_timeout = self._timeout_for(prompt_type)
+            client = self.client.with_options(timeout=stage_timeout)
             completion = self._execute_with_retry(
                 lambda: client.chat.completions.create(
                     model=self.model_name, messages=[{"role": "user", "content": prompt}], temperature=0,
@@ -205,6 +238,7 @@ class LLMService:
                     extra_body={"provider": {"require_parameters": True}, "reasoning": {"enabled": False}},
                 ),
                 prompt_type=prompt_type,
+                timeout=stage_timeout,
             )
             if completion.usage:
                 usage = (completion.usage.prompt_tokens, completion.usage.completion_tokens)
@@ -298,7 +332,8 @@ class LLMService:
         """
         Закрепление провайдера на OpenRouter. Порядок берется из настройки
         openrouter_provider_order (через запятую). Фолбэки на другие провайдеры
-        отключены, чтобы запрос случайно не ушел к дорогому эндпоинту.
+        разрешены по умолчанию (openrouter_allow_fallbacks), чтобы при заминке
+        основного провайдера запрос не зависал и переключался на резервный.
         """
         import config
         order = getattr(config, "OPENROUTER_PROVIDER_ORDER", "") or ""
@@ -306,16 +341,19 @@ class LLMService:
             order = [x.strip() for x in order.split(",") if x.strip()]
         if not order:
             return None
-        return {"order": order, "allow_fallbacks": False}
+        allow_fallbacks = getattr(config, "OPENROUTER_ALLOW_FALLBACKS", True)
+        return {"order": order, "allow_fallbacks": bool(allow_fallbacks)}
 
     def _execute_with_retry(
         self,
         call_fn: Callable[[], Any],
         prompt_type: str = "unknown",
         sleep_fn: Optional[Callable[[float], None]] = None,
+        timeout: Optional[float] = None,
     ) -> Any:
         """
         Выполняет API-вызов с экспоненциальным backoff и jitter при транзиентных сетевых/серверных сбоях.
+        Вызов защищен сквозным дедлайном run_with_deadline.
         Фатальные ошибки (400, 401, 403, 404, 422) выбрасываются сразу без повторов.
         """
         import config
@@ -326,6 +364,7 @@ class LLMService:
         max_delay = getattr(config, "LLM_RETRY_MAX_DELAY", 60.0)
         factor = getattr(config, "LLM_RETRY_BACKOFF_FACTOR", 2.0)
         jitter = getattr(config, "LLM_RETRY_JITTER", 0.2)
+        effective_timeout = timeout if timeout is not None else self._timeout_for(prompt_type)
 
         last_error: Optional[Exception] = None
         for attempt in range(max_retries):
@@ -336,7 +375,7 @@ class LLMService:
                 metrics_collector.increment("api_retries")
 
             try:
-                return call_fn()
+                return run_with_deadline(call_fn, deadline=effective_timeout)
             except Exception as e:
                 last_error = e
                 if is_fatal_error(e):
@@ -404,11 +443,13 @@ class LLMService:
             if extra:
                 kwargs["extra_body"] = extra
 
-        client = self.client.with_options(timeout=self._timeout_for(prompt_type))
+        stage_timeout = self._timeout_for(prompt_type)
+        client = self.client.with_options(timeout=stage_timeout)
         try:
             completion = self._execute_with_retry(
                 lambda: client.chat.completions.create(**kwargs),
                 prompt_type=prompt_type,
+                timeout=stage_timeout,
             )
         except Exception as e:
             logger.error(f"LLM API Call failed permanently for {prompt_type}: {e}")
