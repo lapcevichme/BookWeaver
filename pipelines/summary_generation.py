@@ -92,11 +92,13 @@ class SummaryGenerationPipeline:
                     
                     chapter_text = repo.get_chapter_text(chapter_id)
 
+                    existing_characters = repo.get_characters()
                     prompt = prompts.format_summary_generation_prompt(
                         chapter_text,
                         chapter_id,
                         previous_summaries,
-                        prev_volume_summary=prev_volume_summary_text
+                        prev_volume_summary=prev_volume_summary_text,
+                        known_characters=existing_characters
                     )
 
                     raw_summary_result = llm_service.call_for_pydantic(RawChapterSummary, prompt, prompt_type="chapter_summary")
@@ -170,8 +172,10 @@ class SummaryGenerationPipeline:
         prev_vol = repo.get_volume_summary(volume_num - 1) if volume_num > 1 else None
         prev_vol_text = prev_vol.summary if prev_vol else None
 
+        existing_characters = repo.get_characters()
         prompt = prompts.format_volume_summary_prompt(
-            volume_num, chapter_summaries, prev_volume_summary=prev_vol_text
+            volume_num, chapter_summaries, prev_volume_summary=prev_vol_text,
+            known_characters=existing_characters
         )
         llm_service = self.model_manager.get_llm_service('summary_generator')
 

@@ -196,6 +196,20 @@ def _tokenize_for_dedup(text: str) -> Set[str]:
             if len(w) > 2 and w not in DEDUP_STOP_WORDS}
 
 
+def _character_chapters(c: Character) -> Set[str]:
+    """Все главы активности персонажа: упоминания, версии описания, факты, первая глава."""
+    res = set((c.chapter_mentions or {}).keys())
+    res.update((c.description_timeline or {}).keys())
+    first_seen = getattr(c, "first_seen_chapter_id", None)
+    if first_seen:
+        res.add(first_seen)
+    for f in (c.facts or []):
+        ch = f.get("chapter")
+        if ch:
+            res.add(ch)
+    return res
+
+
 def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
                               max_candidates: int = 15) -> List[dict]:
     """
@@ -231,7 +245,7 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
 
     char_chaps: Dict[UUID, List[str]] = {}
     for c in chars:
-        ch_list = [ch for ch in (c.chapter_mentions or {}).keys() if ch in order]
+        ch_list = [ch for ch in _character_chapters(c) if ch in order]
         char_chaps[c.id] = sorted(ch_list, key=order.__getitem__)
 
     candidates = []
@@ -313,15 +327,19 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
 
 def scope_prompt(persona: Character, impostor: Character, order: Dict[str, int]) -> str:
     """Действия обоих по главам (где появляется хоть один) + их secret-факты."""
-    chapters = sorted(set(persona.chapter_mentions or {}) | set(impostor.chapter_mentions or {}),
+    p_chaps = _character_chapters(persona)
+    i_chaps = _character_chapters(impostor)
+    chapters = sorted((p_chaps | i_chaps) & set(order.keys()),
                       key=lambda k: order.get(k, 1 << 30))
     rows = []
     for k in chapters:
         rows.append(f"{k}:")
-        if k in (persona.chapter_mentions or {}):
-            rows.append(f"  «{persona.name}»: {persona.chapter_mentions[k]}")
-        if k in (impostor.chapter_mentions or {}):
-            rows.append(f"  «{impostor.name}»: {impostor.chapter_mentions[k]}")
+        p_act = (persona.chapter_mentions or {}).get(k) or (persona.description_timeline or {}).get(k)
+        if p_act:
+            rows.append(f"  «{persona.name}»: {p_act}")
+        i_act = (impostor.chapter_mentions or {}).get(k) or (impostor.description_timeline or {}).get(k)
+        if i_act:
+            rows.append(f"  «{impostor.name}»: {i_act}")
     secrets = [f"  - {c.name}, {f.get('chapter')}: {f['fact']}" for c in (persona, impostor)
                for f in (c.facts or []) if f.get("kind") == "secret"]
     return f"""В книге «{impostor.name}» выдает себя за «{persona.name}» (двойник, подмена). Читатель видит «{persona.name}»,
@@ -344,7 +362,7 @@ def scope_impersonation(llm, persona: Character, impostor: Character, order: Dic
                                    prompt_type="identity_scope")
     if result is None:
         return None
-    known = set(persona.chapter_mentions or {}) | set(impostor.chapter_mentions or {})
+    known = _character_chapters(persona) | _character_chapters(impostor)
     dropped = [c for c in result.chapters if c not in order]
     if dropped:
         logger.warning(f"Период подмены {impostor.name} -> {persona.name}: неизвестные главы {dropped}")
@@ -488,7 +506,7 @@ class IdentitySuggestPipeline:
                     counts["dismissed"] += 1
                 else:
                     if relation == "duplicate":  # основная запись — та, что чаще встречается
-                        persona = "x" if len(x.chapter_mentions or {}) <= len(y.chapter_mentions or {}) else "y"
+                        persona = "x" if len(_character_chapters(x)) <= len(_character_chapters(y)) else "y"
                     link.relation = relation
                     link.persona_id, link.true_id = (x.id, y.id) if persona == "x" else (y.id, x.id)
                     if link.confidence is not None and link.confidence < CONFIDENCE_SUGGEST_MIN:

@@ -270,6 +270,45 @@ class TestIdentityPipeline(unittest.TestCase):
         self.assertEqual(l.revealed_in, "vol_1_chap_28")
         self.assertIn("dedup_scan", l.source)
 
+    def test_dedup_scan_finds_duplicate_with_empty_chapter_mentions(self):
+        """Проверяет, что дубликат находится, даже если у карточки chapter_mentions пуст, но есть facts или timeline."""
+        with get_book_session(self.book_dir) as s:
+            for i, cid in enumerate(["vol_1_chap_15", "vol_1_chap_27", "vol_1_chap_28", "vol_1_chap_29"]):
+                s.add(Chapter(id=cid, book_id="b", volume_num=1, chapter_num=i, order_index=i, title=cid, raw_text="x"))
+            s.commit()
+        aduo = Character(
+            book_id="b", name="А-Дуо", aliases=["Целомудренная супруга"],
+            gender=CharacterGender.FEMALE,
+            description="А-Дуо, Целомудренная супруга. Молочная сестра императора.",
+            spoiler_free_description="d",
+            chapter_mentions={"vol_1_chap_15": "x", "vol_1_chap_27": "x", "vol_1_chap_29": "x"},
+            facts=[{"fact": "Является молочной сестрой императора.", "kind": "relation", "chapter": "vol_1_chap_29"}]
+        )
+        pure = Character(
+            book_id="b", name="Чистая супруга",
+            gender=CharacterGender.FEMALE,
+            description="Чистая супруга. Молочная сестра императора.",
+            spoiler_free_description="d",
+            chapter_mentions={},
+            description_timeline={"vol_1_chap_28": "Чистая супруга. Молочная сестра императора."},
+            facts=[{"fact": "Была молочной сестрой императора.", "kind": "relation", "chapter": "vol_1_chap_28"}]
+        )
+        self.repo.save_characters([self.shisui, self.loulan, self.rempu, aduo, pure])
+
+        llm = MagicMock()
+        llm.choice_probabilities.return_value = {"G": 0.99}
+        llm.call_for_pydantic.return_value = il.LlmIdentityJudgement(
+            answer="G",
+            evidence="Чистая супруга и Целомудренная супруга — разные переводы одного титула А-Дуо"
+        )
+
+        counts = self._run(llm, scan=False, dedup=True)
+        self.assertGreaterEqual(counts["dedup_found"], 1)
+        self.assertEqual(counts["suggested"], 1)
+        dup_links = [l for l in self._links() if l.relation == "duplicate"]
+        self.assertEqual(len(dup_links), 1)
+        self.assertEqual((dup_links[0].persona_id, dup_links[0].true_id), (pure.id, aduo.id))
+
     def test_set_voice_shift_and_policy(self):
         link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "human", "")
         prefix = str(link.id)[:8]

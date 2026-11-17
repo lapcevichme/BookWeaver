@@ -3,7 +3,7 @@
 Использует XML-структурирование для четкого разделения контекста и текста.
 """
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Iterable, Any
 
 from core.data_models import (
     CharacterArchive,
@@ -16,10 +16,34 @@ from core.data_models import (
 from utils.prompt_utils import generate_human_schema
 
 
+def format_characters_for_summary(characters: Optional[Iterable[Any]]) -> str:
+    """Формирует компактный блок канонических имен персонажей для промптов пересказа."""
+    if not characters:
+        return ""
+    items = []
+    for c in characters:
+        name = getattr(c, "name", str(c)).strip()
+        if not name:
+            continue
+        aliases = [a for a in (getattr(c, "aliases", []) or []) if a and a != name]
+        if aliases:
+            items.append(f"{name} ({', '.join(aliases[:2])})")
+        else:
+            items.append(name)
+    if not items:
+        return ""
+    return (
+        "\nКАНОНИЧЕСКИЕ ИМЕНА И ТИТУЛЫ ПЕРСОНАЖЕЙ (используй строго их для консистентности пересказа, избегай разночтений перевода):\n"
+        + ", ".join(items)
+        + "\n"
+    )
+
+
 def format_volume_summary_prompt(
     volume_num: int,
     chapter_summaries: List[str],
-    prev_volume_summary: Optional[str] = None
+    prev_volume_summary: Optional[str] = None,
+    known_characters: Optional[Iterable[Any]] = None
 ) -> str:
     """
     Промпт для создания 'Рекапа' целого тома на основе пересказов его глав.
@@ -35,6 +59,8 @@ def format_volume_summary_prompt(
 {prev_volume_summary}
 """
 
+    chars_block = format_characters_for_summary(known_characters)
+
     return f"""ТЫ — ГЛАВНЫЙ РЕДАКТОР КНИЖНОЙ СЕРИИ.
 Мы закончили обработку сюжетных глав ТОМА {volume_num}.
 
@@ -42,6 +68,7 @@ def format_volume_summary_prompt(
 Напиши глобальное саммари (Recap) для всего этого тома.
 Этот текст будет использоваться как сквозной сюжетный контекст для последующих томов книги, чтобы не потерять ключевые события, раскрытые тайны и глобальные изменения в судьбах персонажей.
 {prev_block}
+{chars_block}
 ИНСТРУКЦИЯ:
 1. Прочитай краткие содержания сюжетных глав ниже.
 2. Выдели основные сюжетные арки, ключевые поворотные моменты, раскрытые тайны и итог тома.
@@ -61,7 +88,8 @@ def format_summary_generation_prompt(
         chapter_text: str,
         chapter_id: str,
         previous_summaries: list[ChapterSummary],
-        prev_volume_summary: Optional[str] = None
+        prev_volume_summary: Optional[str] = None,
+        known_characters: Optional[Iterable[Any]] = None
 ) -> str:
     """Формирует промпт для генерации пересказа главы."""
     schema_description = generate_human_schema(RawChapterSummary)
@@ -81,6 +109,8 @@ def format_summary_generation_prompt(
             context_lines.append(f"Глава {summary.chapter_id}:\n{summary.synopsis}\n")
         previous_context_str = "\n".join(context_lines)
 
+    chars_block = format_characters_for_summary(known_characters)
+
     return f"""
 ТЫ — ОПЫТНЫЙ ЛИТЕРАТУРНЫЙ РЕДАКТОР.
 
@@ -91,6 +121,8 @@ def format_summary_generation_prompt(
 {global_context_block}
 
 {previous_context_str}
+
+{chars_block}
 
 **!!! ВАЖНЫЕ ПРАВИЛА БЕЗОПАСНОСТИ !!!**
 **- Избегай прямого упоминания и детального описания сцен насилия или сексуального контента.**
@@ -172,8 +204,8 @@ def format_character_recon_card_prompt(chapter_text: str, known_characters_json:
     schema_description = generate_human_schema(LlmReconCardResult)
     summary_block = f"""
 <synopsis>
-Краткое содержание главы — опора для споров об именах: если в тексте «служанка», а здесь сказано,
-что это Маомао, это Маомао.
+Краткое содержание главы — опора для разрешения неоднозначностей: если в тексте персонаж назван общей ролью, а в синопсисе названо конкретное лицо, опирайся на синопсис.
+Если персонаж в кратком содержании или тексте назван синонимом, вариантом перевода, титулом или должностью, которая соответствует описанию или алиасам уже известного персонажа из списка — сопоставляй его с соответствующим ref из списка known_characters и НЕ создавай новое имя в newly_discovered_names.
 {chapter_summary}
 </synopsis>
 """ if chapter_summary else ""
@@ -199,7 +231,7 @@ def format_character_recon_card_prompt(chapter_text: str, known_characters_json:
 - `card_changed: false` — персонаж ведет себя как в карточке, просто участвует в событиях. Это обычный случай
   для главных героев: события главы карточку не меняют.
 - `newly_discovered_names`: персонажи, которых нет в списке. Общие понятия («девушка», «солдаты») — только если
-  это важное действующее лицо по краткому содержанию.
+  это важное действующее лицо по краткому содержанию. Если персонаж назван синонимом, титулом, должностью или альтернативной транскрипцией уже известного лица, сопоставляй с существующим `ref` и не добавляй в `newly_discovered_names`.
 - Должности, титулы и статусы («супруга», «наложница», «капитан», «министр», «евнух») могут переходить к новым людям.
   Если в главе действует новый носитель должности или титула (или прежний носитель сменился/ушел),
   не сопоставляй его с прежним владельцем: пиши его в `newly_discovered_names`.

@@ -771,7 +771,7 @@ class CharacterAnalysisPipeline:
             description_timeline={chapter_id: description} if patch.description_update else {},
             role_tier=patch.role_tier or "minor", gender=patch.gender,
             visual_base=patch.visual_base or "", voice_profile=patch.voice_profile or "",
-            chapter_mentions={chapter_id: patch.current_chapter_action} if patch.current_chapter_action else {},
+            chapter_mentions={chapter_id: (patch.current_chapter_action or "").strip() or "Появление персонажа."},
         )
         self._add_aliases(char, self._free_aliases(patch.aliases, name, taken, char=char, chapter_id=chapter_id), chapter_id)
         self._apply_timelines(char, patch, chapter_id)
