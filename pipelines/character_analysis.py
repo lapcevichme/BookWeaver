@@ -238,7 +238,6 @@ class CharacterAnalysisPipeline:
             logger.info(f"В главе {chapter_id} персонажи не обнаружены.")
             return
 
-        chapter_key = f"vol_{vol_num}_chap_{chap_num}"
         refs = self._assign_refs(master_archive.characters)
         bad_refs = [r for r in mentioned_refs if r not in refs]
         if card_mode:
@@ -280,7 +279,7 @@ class CharacterAnalysisPipeline:
             patched = set()
             if patch_list.patches:
                 patched = self._apply_patch(master_archive, patch_list, refs, to_update, batch_candidates,
-                                            chapter_key, book_name)
+                                            chapter_id, book_name)
             missing = [c.id for c in to_update if c.id not in patched]
             if missing:
                 self._add_empty_mentions(master_archive, missing, chapter_id)
