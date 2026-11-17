@@ -108,10 +108,10 @@ class TestFactsMode(unittest.TestCase):
         self.assertNotIn("Лишу", char.aliases)
         self.assertTrue(any(f["fact"] == "Добродетельная супруга" and f["kind"] == "status" for f in char.facts))
 
-    def test_personal_name_does_not_rename_a_name(self):
+    def test_patch_name_does_not_rename_a_name(self):
         pipeline = self._pipeline()
         char = Character(book_id="b", name="Маомао", description="d", spoiler_free_description="d")
-        pipeline._update_character(char, self._patch(personal_name="Сяомао"), "c1", {})
+        pipeline._update_character(char, self._patch(name="Отец Маомао"), "c1", {})
         self.assertEqual(char.name, "Маомао")
 
     def test_long_card_is_compacted(self):
@@ -139,7 +139,6 @@ class TestTitleSuccession(unittest.TestCase):
         self.addCleanup(patcher.stop)
         cfg.CHARACTER_DESCRIPTION_MODE = "facts"
         self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
-        self.pipeline.GENERIC_ROLES_BLACKLIST = {"супруга", "евнух"}
         self.aduo = Character(book_id="b", name="А-Дуо", aliases=["Целомудренная супруга"],
                               description="Бывшая супруга.", spoiler_free_description="Бывшая супруга.")
         self.jinshi = Character(book_id="b", name="Джинши", description="Евнух.", spoiler_free_description="Евнух.")
@@ -151,12 +150,15 @@ class TestTitleSuccession(unittest.TestCase):
         return LlmCharacterPatch.model_validate({"description_update": "Новая супруга.", **kw})
 
     def test_new_title_holder_is_not_resolved_by_title_alias(self):
-        p = self._patch(ref=None, name="Лоулан", aliases=["Целомудренная супруга"])
+        p = self._patch(ref=None, name="Лоулан", aliases=[{"alias": "Целомудренная супруга", "kind": "description"}])
         self.assertIsNone(self.pipeline._resolve_patch(p, self.refs, self.archive))
 
     def test_new_title_holder_is_created_without_taken_alias(self):
         from core.data_models import LlmCharacterPatchList
-        p = self._patch(ref=None, name="Лоулан", aliases=["Целомудренная супруга", "Госпожа Лоулан"])
+        p = self._patch(ref=None, name="Лоулан", aliases=[
+            {"alias": "Целомудренная супруга", "kind": "description"},
+            {"alias": "Госпожа Лоулан", "kind": "name"}
+        ])
         self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
         with patch.object(self.pipeline, "_vector_match", return_value=None):
             self.pipeline._apply_patch(self.archive, LlmCharacterPatchList(patches=[p]), self.refs, [], ["Лоулан"],
@@ -173,18 +175,6 @@ class TestTitleSuccession(unittest.TestCase):
     def test_explicit_ref_still_uses_aliases(self):
         p = self._patch(ref="unknown", name="Лоулан", aliases=["Целомудренная супруга"])
         self.assertIs(self.pipeline._resolve_patch(p, self.refs, self.archive), self.aduo)
-
-    def test_is_role_name_detects_compound_titles(self):
-        self.assertTrue(self.pipeline._is_role_name("Целомудренная супруга"))
-        self.assertTrue(self.pipeline._is_role_name("Добродетельная супруга"))
-        self.assertTrue(self.pipeline._is_role_name("Благородная супруга"))
-        self.assertTrue(self.pipeline._is_role_name("Красивый евнух"))
-        self.assertTrue(self.pipeline._is_role_name("Младший брат императора"))
-        self.assertTrue(self.pipeline._is_role_name("Старший советник"))
-        self.assertFalse(self.pipeline._is_role_name("Супруга Гёкуё"))
-        self.assertFalse(self.pipeline._is_role_name("Генерал Лакан"))
-        self.assertFalse(self.pipeline._is_role_name("Отец Маомао"))
-        self.assertFalse(self.pipeline._is_role_name("Генерал Вяземский"))
 
     def test_role_to_personal_name_upgrade_does_not_pollute_aliases(self):
         char = Character(book_id="b", name="Целомудренная супруга", description="Супруга императора.",
@@ -206,7 +196,7 @@ class TestTitleSuccession(unittest.TestCase):
         )
         archive = CharacterArchive(characters=[aduo])
         refs = self.pipeline._assign_refs(archive.characters)
-        p = self._patch(ref=None, name="Лоулан", aliases=["Целомудренная супруга"])
+        p = self._patch(ref=None, name="Лоулан", aliases=[{"alias": "Целомудренная супруга", "kind": "description"}])
         self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
         with patch.object(self.pipeline, "_vector_match", return_value=None):
             self.pipeline._apply_patch(archive, LlmCharacterPatchList(patches=[p]), refs, [], ["Лоулан"],
@@ -233,7 +223,6 @@ class TestAliasKinds(unittest.TestCase):
         self.addCleanup(patcher.stop)
         cfg.CHARACTER_DESCRIPTION_MODE = "facts"
         self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
-        self.pipeline.GENERIC_ROLES_BLACKLIST = {"супруга", "евнух"}
 
     def _patch(self, **kw):
         from core.data_models import LlmCharacterPatch
@@ -277,7 +266,7 @@ class TestAliasKinds(unittest.TestCase):
     def test_personal_name_proper_name_kept_in_aliases(self):
         char = Character(book_id="b", name="Смит", description="d", spoiler_free_description="d",
                          chapter_mentions={"vol_1_chap_15": "x"})
-        self.pipeline._update_character(char, self._patch(ref="x", name="Уинстон Смит"), "vol_1_chap_17", {})
+        self.pipeline._update_character(char, self._patch(ref="x", rename_to="Уинстон Смит"), "vol_1_chap_17", {})
         self.assertEqual(char.name, "Уинстон Смит")
         self.assertIn("Смит", char.aliases)
         self.assertEqual(char.alias_meta["Смит"], {"kind": "previous_name", "since": "vol_1_chap_15"})

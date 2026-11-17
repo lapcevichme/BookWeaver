@@ -531,6 +531,7 @@ class LlmCharacterPatch(PydanticBaseModel):
     timeline_voice_update: Optional[LlmVoiceState] = None
     # Режим facts
     personal_name: Optional[str] = Field(None, description="Личное имя, если глава ВПЕРВЫЕ его назвала, а персонаж записан ролью")
+    rename_to: Optional[str] = Field(None, description="Новое каноническое имя (раскрыто настоящее имя или полное имя)")
     new_facts: Optional[List[LlmFact]] = Field(None, description="Новые факты этой главы")
     retired_facts: Optional[List[str]] = Field(None, description="id фактов из state_facts, которые перестали быть верными")
 
