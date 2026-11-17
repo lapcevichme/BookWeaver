@@ -51,7 +51,7 @@ _OPENROUTER_PROVIDER_ORDER_DEFAULT = os.environ.get("OPENROUTER_PROVIDER_ORDER",
 _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFORT", "")
 # emotion_analysis без reasoning: -42% стоимости без потери качества (2026-11-06_reasoning-by-stage.md);
 # sound_design с reasoning: без него хуже подбор SFX.
-_OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get("OPENROUTER_REASONING_BY_STAGE", '{"emotion_analysis": "none"}')
+_OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get("OPENROUTER_REASONING_BY_STAGE", '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low"}')
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
 # TTS Settings Defaults
 _TTS_ENGINE_DEFAULT = os.environ.get("TTS_ENGINE", "qwen")
