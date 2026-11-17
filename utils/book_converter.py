@@ -9,7 +9,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from core import path_manager
-from utils.book_parsers import EpubParser, TxtParser, ZipParser
+from utils.book_parsers import EpubParser, TxtParser, ZipParser, FolderParser
 from utils.init_manifest import init_manifest
 from utils.text_utils import cleanup_filename
 from utils.setup_logging import setup_logging
@@ -38,7 +38,10 @@ class BookConverter:
         suffix = self.input_file.suffix.lower()
         parser = None
 
-        if suffix == '.epub':
+        if self.input_file.is_dir():
+            print("   -> Формат: Папка (RanobeLib / Директория с томами)")
+            parser = FolderParser()
+        elif suffix == '.epub':
             print("   -> Формат: EPUB")
             parser = EpubParser()
         elif suffix == '.txt':

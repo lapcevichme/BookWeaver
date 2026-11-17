@@ -107,7 +107,7 @@ class EpubParser(BookParser):
                 links.extend(self._get_flat_toc_links(item.children))
         return links
 
-    def _parse_content(self, book) -> Dict[int, Dict[int, str]]:
+    def _parse_content(self, book) -> Dict[int, Dict[Any, str]]:
         if not book.toc:
             return self._parse_content_linear(book)
 
@@ -124,11 +124,12 @@ class EpubParser(BookParser):
             vol_match = re.search(r'(?:том|volume)\s*(\d+)', title, re.IGNORECASE)
             if vol_match: current_vol = int(vol_match.group(1))
 
-            chap_match = re.search(r'(?:глава|chapter)\s*(\d+)', title, re.IGNORECASE)
+            chap_match = re.search(r'(?:глава|chapter)\s*(\d+(?:\.\d+)?)', title, re.IGNORECASE)
             if chap_match:
-                current_chap = int(chap_match.group(1))
+                c_str = chap_match.group(1)
+                current_chap = str(int(c_str)) if '.' not in c_str else c_str
             else:
-                current_chap = chapter_counter
+                current_chap = str(chapter_counter)
                 chapter_counter += 1
 
             if href in content_map:
@@ -148,6 +149,9 @@ class EpubParser(BookParser):
                 text = clean_raw_text(text)
 
                 if not text: continue
+
+                if title and not text.lstrip().startswith('#'):
+                    text = f"# {title}\n\n{text}"
 
                 if current_vol not in volumes: volumes[current_vol] = {}
                 if current_chap in volumes[current_vol]:
@@ -183,7 +187,7 @@ class EpubParser(BookParser):
 
 class TxtParser(BookParser):
     def parse(self, file_path: Path) -> Tuple[
-        Dict[int, Dict[int, str]], Dict[str, Any], Optional[bytes], Dict[str, bytes]]:
+        Dict[int, Dict[Any, str]], Dict[str, Any], Optional[bytes], Dict[str, bytes]]:
         full_text = file_path.read_text(encoding='utf-8')
 
         meta = {
@@ -194,14 +198,14 @@ class TxtParser(BookParser):
         }
 
         pattern = re.compile(
-            r'^\s*(?=.*(?:том|volume|глава|chapter))(?:(том|volume)\s*(\d+))?\s*(?:(глава|chapter)\s*(\d+))?\s*$',
+            r'^\s*(?=.*(?:том|volume|глава|chapter))(?:(том|volume)\s*(\d+))?\s*(?:(глава|chapter)\s*(\d+(?:\.\d+)?))?\s*$',
             re.IGNORECASE | re.MULTILINE
         )
         headers = list(pattern.finditer(full_text))
         volumes = {}
 
         if not headers:
-            return {1: {1: full_text}}, meta, None, {}
+            return {1: {"1": full_text}}, meta, None, {}
 
         content_splits = [full_text[h.end():(headers[i + 1].start() if i + 1 < len(headers) else None)]
                           for i, h in enumerate(headers)]
@@ -214,7 +218,11 @@ class TxtParser(BookParser):
         for i, match in enumerate(headers):
             _, vol_num, _, chap_num = match.groups()
             if vol_num: current_vol = int(vol_num)
-            c_num = int(chap_num) if chap_num else (i + 1)
+            if chap_num:
+                c_str = chap_num
+                c_num = str(int(c_str)) if '.' not in c_str else c_str
+            else:
+                c_num = str(i + 1)
 
             text = content_splits[i].strip()
             if text:
@@ -226,7 +234,7 @@ class TxtParser(BookParser):
 
 class ZipParser(BookParser):
     def parse(self, file_path: Path) -> Tuple[
-        Dict[int, Dict[int, str]], Dict[str, Any], Optional[bytes], Dict[str, bytes]]:
+        Dict[int, Dict[Any, str]], Dict[str, Any], Optional[bytes], Dict[str, bytes]]:
         volumes = {}
         meta = {"source": "zip_import", "tags": [], "language": "ru"}
         cover_bytes = None
@@ -253,24 +261,78 @@ class ZipParser(BookParser):
                     images_dict[flat_name] = zf.read(name)
 
             for name in file_names:
-                if not name.endswith('.txt') or 'info.txt' in name:
+                if not name.endswith(('.txt', '.md')) or 'info.txt' in name:
                     continue
 
                 path_obj = Path(name)
                 vol_part = next((p for p in path_obj.parts if 'vol_' in p), None)
-                chap_part = next((p for p in path_obj.parts if 'chapter_' in p), None)
+                chap_part = path_obj.name
 
                 if vol_part and chap_part:
                     v_match = re.search(r'vol_(\d+)', vol_part)
-                    c_match = re.search(r'chapter_(\d+)', chap_part)
+                    c_match = re.search(r'chapter_(\d+(?:\.\d+)?)', chap_part)
+                    if not c_match:
+                        c_match = re.search(r'(\d+(?:\.\d+)?)', chap_part)
 
                     if v_match and c_match:
                         vol = int(v_match.group(1))
-                        chap = int(c_match.group(1))
+                        chap_str = c_match.group(1)
+                        chap = str(int(chap_str)) if '.' not in chap_str else chap_str
 
-                        text = zf.read(name).decode('utf-8')
+                        text = zf.read(name).decode('utf-8', errors='replace')
 
                         if vol not in volumes: volumes[vol] = {}
                         volumes[vol][chap] = text
+
+        return volumes, meta, cover_bytes, images_dict
+
+
+class FolderParser(BookParser):
+    """Парсер для каталогов со структурой vol_*/chapter_*.txt или .md (например выгрузка RanobeLib)."""
+    def parse(self, folder_path: Path) -> Tuple[
+        Dict[int, Dict[Any, str]], Dict[str, Any], Optional[bytes], Dict[str, bytes]]:
+        volumes = {}
+        meta = {"source": "folder_import", "tags": [], "language": "ru"}
+        cover_bytes = None
+        images_dict = {}
+
+        meta_file = folder_path / "metadata.json"
+        if meta_file.exists():
+            try:
+                data = json.loads(meta_file.read_text(encoding='utf-8'))
+                meta.update(data)
+            except Exception as e:
+                print(f"Ошибка чтения metadata.json: {e}")
+
+        for p in folder_path.rglob("*"):
+            if not p.is_file():
+                continue
+            if 'cover' in p.name.lower() and p.suffix.lower() in ('.jpg', '.png', '.jpeg'):
+                cover_bytes = p.read_bytes()
+            elif p.suffix.lower() in ('.jpg', '.png', '.jpeg', '.webp', '.gif'):
+                images_dict[p.name] = p.read_bytes()
+
+        for p in folder_path.rglob("*"):
+            if not p.is_file() or p.name == "info.txt" or p.suffix.lower() not in ('.txt', '.md'):
+                continue
+
+            vol_part = next((part for part in p.parts if 'vol_' in part), None)
+            if not vol_part:
+                continue
+
+            v_match = re.search(r'vol_(\d+)', vol_part)
+            c_match = re.search(r'chapter_(\d+(?:\.\d+)?)', p.name)
+            if not c_match:
+                c_match = re.search(r'(\d+(?:\.\d+)?)', p.name)
+
+            if v_match and c_match:
+                vol = int(v_match.group(1))
+                chap_str = c_match.group(1)
+                chap = str(int(chap_str)) if '.' not in chap_str else chap_str
+
+                text = p.read_text(encoding='utf-8', errors='replace')
+                if vol not in volumes:
+                    volumes[vol] = {}
+                volumes[vol][chap] = text
 
         return volumes, meta, cover_bytes, images_dict

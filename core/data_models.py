@@ -131,7 +131,7 @@ class Chapter(SQLModel, table=True):
     )
     
     volume_num: int = Field(default=1)
-    chapter_num: int
+    chapter_num: float = Field(default=0.0, description="Номер главы (может быть дробным, например 0.5, 0.1)")
     title: Optional[str] = None
     status: ChapterStatus = Field(default=ChapterStatus.DRAFT, sa_column=Column(String, default=ChapterStatus.DRAFT))
     # Прогресс анализа персонажей: None — не обработана, "done", "skipped" (пропущена вручную).

@@ -160,7 +160,8 @@ class SummaryGenerationPipeline:
         for chap in vol_chaps:
             s = summary_archive.summaries.get(chap.id)
             if s and s.synopsis:
-                chapter_summaries.append(f"Глава {chap.chapter_num}: {s.synopsis}")
+                c_disp = int(chap.chapter_num) if (isinstance(chap.chapter_num, float) and chap.chapter_num.is_integer() and str(chap.chapter_num) != "0.0") else chap.chapter_num
+                chapter_summaries.append(f"Глава {c_disp}: {s.synopsis}")
 
         if not chapter_summaries:
             logger.warning(f"Том {volume_num}: ни у одной главы нет синопсиса.")

@@ -1,0 +1,42 @@
+{
+  "experiment_date": "2026-11-17",
+  "branch": "feat/import-fractional-chapters",
+  "task": "docs/backlog.md item 5: fractional chapter import and multi-volume continuity",
+  "epub_source": "was_in_root/cleanup_20260531/LNLN.epub",
+  "folder_source": "parsers/kusuriya-no-hitorigoto-ln-novel [165329]",
+  "comparison": {
+    "epub_before_fix": {
+      "total_chapters": 57,
+      "vol_1": 34,
+      "vol_2": 23,
+      "issue": "Integer regex matched only \\d+, causing 0.0, 0, 0.1, 0.5 to merge into chapter 0. Prologue 0.5 was squashed into disclaimer and discarded."
+    },
+    "epub_after_fix": {
+      "total_chapters": 62,
+      "vol_1": 36,
+      "vol_2": 26,
+      "status": "All sections separated. Prologue 0.5 preserved as narrative chapter, disclaimers 0.0/0/0.1 marked service."
+    },
+    "ranobelib_4_volumes": {
+      "total_chapters": 117,
+      "vol_1": 36,
+      "vol_2": 26,
+      "vol_3": 25,
+      "vol_4": 30,
+      "fractional_keys_found": ["0.0", "0.1", "0.5"],
+      "parser": "FolderParser / ZipParser"
+    }
+  },
+  "service_classification": {
+    "vol_1_chap_0.0": { "is_service": true, "reason": "empty_or_too_short/title_keyword" },
+    "vol_1_chap_0": { "is_service": true, "reason": "empty_or_too_short/illustrations" },
+    "vol_1_chap_0.1": { "is_service": true, "reason": "empty_or_too_short/annotation" },
+    "vol_2_chap_0.5": { "is_service": false, "reason": "story (Jinshi & Emperor dialogue, >1500 chars)" }
+  },
+  "tests": {
+    "test_fractional_chapters_import": "6 passed",
+    "total_suite": "224 passed",
+    "failures": 0,
+    "errors": 0
+  }
+}

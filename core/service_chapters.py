@@ -4,7 +4,7 @@
 """
 import re
 import logging
-from typing import Optional, Tuple, List, Any
+from typing import Optional, Tuple, List, Any, Union
 
 from core.data_models import Chapter, ChapterStatus
 from core.book_repository import BookRepository
@@ -31,7 +31,7 @@ SUSPECT_KEYWORDS_PATTERN = re.compile(
 def is_heuristic_service_chapter(
     title: Optional[str],
     text: Optional[str],
-    chapter_num: Optional[int] = None
+    chapter_num: Optional[Union[int, float]] = None
 ) -> Tuple[bool, float, str]:
     """
     Быстрая эвристическая проверка без обращения к LLM.

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any, Union
 from enum import Enum
 from uuid import UUID
 
@@ -43,7 +43,7 @@ class DashboardSummaryResponse(BaseModel):
 
 class ChapterStatusDto(BaseModel):
     volume_num: int
-    chapter_num: int
+    chapter_num: Union[int, float]
     id: str
     title: Optional[str] = None
     status: ChapterStatus
@@ -89,7 +89,7 @@ class ProjectMetricsResponse(BaseModel):
 class ChapterTaskRequest(BaseModel):
     book_name: str
     volume_num: int
-    chapter_num: int
+    chapter_num: Union[int, float]
 
 class BookTaskRequest(BaseModel):
     book_name: str

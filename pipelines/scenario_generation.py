@@ -4,7 +4,7 @@
 import json
 import re
 import logging
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Union
 
 import config
 from core.data_models import (
@@ -66,12 +66,13 @@ class ScenarioGenerationPipeline:
             self.ambient_library = []
             self.sfx_library = {}
 
-    def run(self, book_name: str, volume_num: int, chapter_num: int,
+    def run(self, book_name: str, volume_num: int, chapter_num: Union[int, float],
             progress_callback: Optional[Callable[[float, str, str], None]] = None):
         """
         Запускает полный процесс генерации сценария: текст -> звуки -> эмоции + просодия.
         """
-        chapter_id = f"vol_{volume_num}_chap_{chapter_num}"
+        chap_str = str(int(chapter_num)) if isinstance(chapter_num, float) and chapter_num.is_integer() and str(chapter_num) != "0.0" else str(chapter_num)
+        chapter_id = f"vol_{volume_num}_chap_{chap_str}"
 
         def update_progress(progress: float, stage: str, message: str):
             if progress_callback:

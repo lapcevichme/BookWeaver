@@ -15,16 +15,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _format_chap_param(chapter_num: float) -> str:
+    if chapter_num.is_integer() and str(chapter_num) != "0.0":
+        return str(int(chapter_num))
+    return str(chapter_num)
+
+
 @router.get("/{book_name}/chapters/{volume_num}/{chapter_num}/entries", response_model=List[ScenarioEntry])
 async def get_chapter_entries(
     book_name: str,
     volume_num: int,
-    chapter_num: int,
+    chapter_num: float,
     offset: int = 0,
     limit: int = 100
 ):
     """Возвращает записи сценария для главы с поддержкой пагинации."""
-    chapter_id = f"vol_{volume_num}_chap_{chapter_num}"
+    chapter_id = f"vol_{volume_num}_chap_{_format_chap_param(chapter_num)}"
     repo = BookRepository(book_id=book_name)
     with repo.get_session() as session:
         statement = select(ScenarioEntry).where(
@@ -59,10 +65,9 @@ async def update_scenario_entry(
 
 
 @router.get("/{book_name}/chapters/{volume_num}/{chapter_num}/preview", response_model=ChapterPreviewResponse)
-async def get_chapter_preview(book_name: str, volume_num: int, chapter_num: int):
+async def get_chapter_preview(book_name: str, volume_num: int, chapter_num: float):
     """Возвращает текстовый превью главы (первые 1000 символов)."""
-    vol_dir = path_manager.get_book_dir(book_name) / f"vol_{volume_num}"
-    file_path = vol_dir / f"chapter_{chapter_num}.md"
+    file_path = path_manager.get_chapter_text_path(book_name, volume_num, chapter_num)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Файл главы не найден.")
     try:
@@ -84,9 +89,9 @@ async def get_audio_file(
     request: Request,
     book_name: str,
     volume_num: int,
-    chapter_num: int,
+    chapter_num: float,
     audio_file_name: str
 ):
-    chapter_id = f"vol_{volume_num}_chap_{chapter_num}"
+    chapter_id = f"vol_{volume_num}_chap_{_format_chap_param(chapter_num)}"
     path = path_manager.get_chapter_audio_dir(book_name, chapter_id) / audio_file_name
     return ranged_file_response(request, path)

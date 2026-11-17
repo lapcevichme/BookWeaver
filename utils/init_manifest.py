@@ -72,19 +72,30 @@ def init_manifest(
         for idx, path in enumerate(chapter_paths, 1):
             try:
                 vol, chap_num = file_utils.parse_vol_chap_from_path(path)
-                local_id = f"vol_{vol}_chap_{chap_num}"
+                import re
+                chap_match = re.search(r"chapter_(\d+(?:\.\d+)?)", path.name)
+                chap_suffix = chap_match.group(1) if chap_match else str(chap_num)
+                local_id = f"vol_{vol}_chap_{chap_suffix}"
                 
                 existing_chap = session.get(Chapter, local_id)
                 if not existing_chap:
                     # Читаем текст главы для базы
                     raw_text = path.read_text("utf-8")
                     
+                    # Пытаемся извлечь заголовок из первой строки, если там Markdown-заголовок
+                    chapter_title = None
+                    first_line = raw_text.strip().split("\n")[0] if raw_text.strip() else ""
+                    if first_line.startswith("#"):
+                        chapter_title = first_line.lstrip("#").strip()
+                    if not chapter_title:
+                        chapter_title = f"Глава {chap_suffix}" + (f" (Том {vol})" if vol > 1 else "")
+                    
                     new_chap = Chapter(
                         id=local_id,
                         book_id=book_name,
                         volume_num=vol,
                         chapter_num=chap_num,
-                        title=f"Глава {chap_num}" + (f" (Том {vol})" if vol > 1 else ""),
+                        title=chapter_title,
                         status="draft",
                         order_index=idx,
                         raw_text=raw_text
@@ -97,9 +108,8 @@ def init_manifest(
 
         # Автоматическая разметка служебных глав при создании проекта
         try:
-            from core.book_repository import BookRepository
             from core.service_chapters import detect_and_mark_service_chapters
-            marked = detect_and_mark_service_chapters(BookRepository(book_name))
+            marked = detect_and_mark_service_chapters(repo)
             if marked:
                 logger.info(f"Размечено служебных глав при инициализации: {len(marked)}")
         except Exception as e:

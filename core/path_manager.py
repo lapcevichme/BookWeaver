@@ -35,12 +35,32 @@ def get_voice_path(voice_id: str) -> Path:
     # Возвращаем путь по умолчанию (даже если не существует, для логики pipelines)
     return config.SELECTED_VOICES_DIR / f"{voice_id}.wav"
 
-def get_chapter_text_path(book_name: str, volume_num: int, chapter_num: int) -> Path:
+from typing import Union
+
+def get_chapter_text_path(book_name: str, volume_num: int, chapter_num: Union[int, float, str]) -> Path:
     book_dir = get_book_dir(book_name)
-    md_path = book_dir / f"vol_{volume_num}" / f"chapter_{chapter_num}.md"
+    vol_dir = book_dir / f"vol_{volume_num}"
+
+    candidates = [str(chapter_num)]
+    if isinstance(chapter_num, float) and chapter_num.is_integer() and str(chapter_num) != "0.0":
+        candidates.append(str(int(chapter_num)))
+    elif isinstance(chapter_num, str) and chapter_num.endswith(".0") and chapter_num != "0.0":
+        try:
+            candidates.append(str(int(float(chapter_num))))
+        except ValueError:
+            pass
+
+    for cand in candidates:
+        for ext in [".md", ".txt"]:
+            candidate_path = vol_dir / f"chapter_{cand}{ext}"
+            if candidate_path.exists():
+                return candidate_path
+
+    cand_str = str(int(chapter_num)) if (isinstance(chapter_num, float) and chapter_num.is_integer() and str(chapter_num) != "0.0") else str(chapter_num)
+    md_path = vol_dir / f"chapter_{cand_str}.md"
     if md_path.exists():
         return md_path
-    return book_dir / f"vol_{volume_num}" / f"chapter_{chapter_num}.txt"
+    return vol_dir / f"chapter_{cand_str}.txt"
 
 def ensure_book_dirs(book_name: str):
     get_book_output_dir(book_name).mkdir(parents=True, exist_ok=True)
@@ -54,7 +74,7 @@ def get_all_chapter_files(book_name: str) -> List[Path]:
     from utils import file_utils
     return file_utils.get_all_chapters(get_book_dir(book_name))
 
-def get_ordered_chapter_ids(book_name: str) -> List[Tuple[int, int]]:
+def get_ordered_chapter_ids(book_name: str) -> List[Tuple[int, Union[int, float]]]:
     from utils import file_utils
     chapter_paths = get_all_chapter_files(book_name)
     return [file_utils.parse_vol_chap_from_path(p) for p in chapter_paths]

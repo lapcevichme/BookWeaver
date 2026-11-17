@@ -1,7 +1,7 @@
 import shutil
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Union, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlmodel import select
@@ -23,7 +23,7 @@ router = APIRouter()
 class ChapterStructureItem(BaseModel):
     id: str
     volume_num: int
-    chapter_num: int
+    chapter_num: Union[int, float]
     title: str
 
 
