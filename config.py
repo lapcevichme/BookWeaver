@@ -52,7 +52,10 @@ _OPENROUTER_ALLOW_FALLBACKS_DEFAULT = os.environ.get("OPENROUTER_ALLOW_FALLBACKS
 _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFORT", "")
 # emotion_analysis без reasoning: -42% стоимости без потери качества (2026-11-06_reasoning-by-stage.md);
 # sound_design с reasoning: без него хуже подбор SFX.
-_OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get("OPENROUTER_REASONING_BY_STAGE", '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low"}')
+_OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get(
+    "OPENROUTER_REASONING_BY_STAGE",
+    '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low", "identity_scan": "low", "identity_judge": "low", "identity_scope": "low"}'
+)
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
 # TTS Settings Defaults
 _TTS_ENGINE_DEFAULT = os.environ.get("TTS_ENGINE", "qwen")
@@ -92,9 +95,9 @@ _LLM_TIMEOUT_BY_STAGE_DEFAULT = {
     "casting": 300,
     "ambient_design": 120,
     "character_card_compact": 120,
-    "identity_scan": 120,
-    "identity_judge": 120,
-    "identity_scope": 120,
+    "identity_scan": 360,
+    "identity_judge": 300,
+    "identity_scope": 240,
 }
 _SCENARIO_CHUNK_SIZE_DEFAULT = 45_000  # страховка для гигантских глав; см. docs/experiments/2026-11-06_chunking.md
 
