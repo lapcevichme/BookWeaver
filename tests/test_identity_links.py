@@ -49,6 +49,15 @@ class TestScorePair(unittest.TestCase):
         r = il.score_pair(_llm(None, il.LlmIdentityJudgement(answer="g")), self.x, self.y)
         self.assertEqual((r["letter"], r["confidence"]), ("G", None))
 
+    def test_low_logprob_overridden_by_judge_is_not_dismissed(self):
+        # Быстрая модель сомневалась (A=0.007, G=0.99), но судья с reasoning доказал связь A (same_person).
+        # Уверенность судьи не должна зануляться старым логпробом нерассуждающей модели.
+        llm = _llm({"G": 0.99, "A": 0.007}, il.LlmIdentityJudgement(answer="A", evidence="Это один человек"))
+        r = il.score_pair(llm, self.x, self.y)
+        self.assertEqual(r["letter"], "A")
+        self.assertTrue(r["judged"])
+        self.assertGreaterEqual(r["confidence"], 0.90)
+
 
 class TestDuplicateCandidates(unittest.TestCase):
     def setUp(self):

@@ -116,7 +116,15 @@ def score_pair(llm, x: Character, y: Character) -> dict:
             prompt_type="identity_judge")
         if verdict and verdict.answer.strip().upper()[:1] in OPTIONS:
             letter, evidence, judged = verdict.answer.strip().upper()[:1], verdict.evidence, True
-    return {"letter": letter, "scores": scores, "confidence": scores.get(letter) if letter else None,
+    confidence = scores.get(letter) if (scores and letter in scores) else None
+    if letter in ("A", "B", "G") and scores:
+        # same_person (A/B) и duplicate (G) означают одного и того же человека.
+        # Если нерассуждающая модель сочла пару дубликатом (G), а судья уточнил ее как маску (A/B)
+        # (или наоборот), уверенность в тождестве личности складывается из обеих вероятностей.
+        same_person_pool = scores.get("A", 0.0) + scores.get("B", 0.0) + scores.get("G", 0.0)
+        confidence = max(confidence or 0.0, same_person_pool)
+
+    return {"letter": letter, "scores": scores, "confidence": confidence,
             "judged": judged, "evidence": evidence}
 
 
