@@ -324,5 +324,59 @@ class TestNameTimeline(unittest.TestCase):
         self.assertEqual(name_as_of(char, self.order, 15), "Маомао")
 
 
+class TestReconContextCompaction(unittest.TestCase):
+    def setUp(self):
+        from pipelines.character_analysis import CharacterAnalysisPipeline
+        self.pipeline = CharacterAnalysisPipeline(MagicMock())
+        patcher = patch("pipelines.character_analysis.config")
+        cfg = patcher.start()
+        self.addCleanup(patcher.stop)
+        cfg.CHARACTER_DESCRIPTION_MODE = "facts"
+
+    def test_compacts_only_sleeping_minor_characters(self):
+        long_desc = "Первое предложение описания персонажа. Второе длинное предложение с кучей деталей биографии и внешности."
+        processed = [f"vol_1_chap_{i}" for i in range(1, 31)]
+
+        protag = Character(
+            book_id="b", name="Маомао", role_tier="protagonist", description=long_desc,
+            chapter_mentions={"vol_1_chap_1": "x"},
+            facts=[{"id": "f1", "fact": "Аптекарь", "kind": "status", "chapter": "vol_1_chap_1", "until": None}],
+        )
+        recent_minor = Character(
+            book_id="b", name="Сяолан", role_tier="minor", description=long_desc,
+            chapter_mentions={"vol_1_chap_28": "x"},
+        )
+        returning_minor = Character(
+            book_id="b", name="Рихаку", aliases=["Офицер Рихаку"], role_tier="minor", description=long_desc,
+            chapter_mentions={"vol_1_chap_2": "x"},
+        )
+        sleeping_minor = Character(
+            book_id="b", name="Кухарка", role_tier="minor", description=long_desc,
+            chapter_mentions={"vol_1_chap_3": "x"},
+            facts=[{"id": "f1", "fact": "Работала на кухне", "kind": "status", "chapter": "vol_1_chap_3", "until": None}],
+        )
+
+        archive = CharacterArchive(
+            characters=[protag, recent_minor, returning_minor, sleeping_minor],
+            processed_chapters=processed,
+        )
+        refs = self.pipeline._assign_refs(archive.characters)
+        entries = self.pipeline._build_recon_known_entries(
+            archive, refs, chapter_text="В этой главе внезапно приходит Рихаку с собакой.", chapter_summary=None, recent_window=5
+        )
+        by_name = {e["name"]: e for e in entries}
+
+        # Протагонист, недавний и упомянутый в тексте получают полную карточку
+        self.assertIn("card", by_name["Маомао"])
+        self.assertIn("current_status", by_name["Маомао"])
+        self.assertIn("card", by_name["Сяолан"])
+        self.assertIn("card", by_name["Рихаку"])
+
+        # Спящий второстепенный получает только короткое summary без current_status
+        self.assertNotIn("card", by_name["Кухарка"])
+        self.assertNotIn("current_status", by_name["Кухарка"])
+        self.assertEqual(by_name["Кухарка"]["summary"], "Первое предложение описания персонажа.")
+
+
 if __name__ == "__main__":
     unittest.main()

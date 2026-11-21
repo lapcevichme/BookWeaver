@@ -142,6 +142,43 @@ def apply_placeholder_renames(
     return changed
 
 
+RECON_RECENT_CHAPTERS = 20
+RECON_SLEEPING_SUMMARY_CHARS = 120
+
+
+def _chapter_sort_key(chapter_id: str):
+    m = re.match(r"vol_(\d+)_chap_([\d.]+)", chapter_id or "")
+    if m:
+        return (int(m.group(1)), float(m.group(2)), chapter_id)
+    return (1 << 30, 0.0, chapter_id or "")
+
+
+def _short_summary(text: str, max_chars: int = RECON_SLEEPING_SUMMARY_CHARS) -> str:
+    clean = " ".join((text or "").split())
+    if not clean:
+        return ""
+    m = re.search(r"[.!?…](?:\s|$)", clean)
+    first = clean[:m.end()].strip() if m else clean
+    if len(first) <= max_chars:
+        return first
+    cut = first[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return (cut or first[:max_chars]) + "…"
+
+
+def _is_mentioned_in_text(char: Character, text_lower: str) -> bool:
+    if not text_lower:
+        return False
+    for raw in [char.name, *(char.aliases or [])]:
+        token = (raw or "").strip().lower()
+        if len(token) < 3:
+            continue
+        if token in text_lower:
+            return True
+        if " " not in token and len(token) >= 5 and token[:-1] in text_lower:
+            return True
+    return False
+
+
 class _ChapterFailed(Exception):
     """Глава не обработана после всех попыток; этап останавливается на ней."""
 
@@ -522,18 +559,63 @@ class CharacterAnalysisPipeline:
             logger.warning(f"Сжатие карточки '{name}' не удалось: {e}")
         return card
 
+    def _build_recon_known_entries(
+        self,
+        archive: CharacterArchive,
+        refs: Dict[str, Character],
+        chapter_text: str,
+        chapter_summary: Optional[str] = None,
+        recent_window: int = RECON_RECENT_CHAPTERS,
+    ) -> List[dict]:
+        """
+        Формирует справочник персонажей для разведки:
+        - полная карточка + статусы для protagonist/major, активных за последние recent_window глав
+          и любых персонажей, чьё имя/алиас встречается в тексте главы или синопсисе;
+        - компактная 1-строчная справка (summary) для остальных давно не появлявшихся второстепенных.
+        """
+        processed = list(getattr(archive, "processed_chapters", None) or [])
+        if processed:
+            recent_chapters = set(processed[-recent_window:])
+        else:
+            all_chaps = {
+                ch for c in archive.characters
+                for ch in (c.chapter_mentions or {}).keys()
+            }
+            recent_chapters = set(sorted(all_chaps, key=_chapter_sort_key)[-recent_window:])
+
+        text_lower = f"{chapter_text or ''}\n{chapter_summary or ''}".lower()
+        facts_mode = self._facts_mode()
+        known: List[dict] = []
+
+        for ref, c in refs.items():
+            tier = c.role_tier.value if hasattr(c.role_tier, "value") else str(c.role_tier or "")
+            char_chaps = set((c.chapter_mentions or {}).keys())
+            is_full = (
+                tier in ("protagonist", "major")
+                or bool(char_chaps & recent_chapters)
+                or _is_mentioned_in_text(c, text_lower)
+            )
+            if is_full:
+                entry = {"ref": ref, "name": c.name, "aliases": c.aliases, "card": c.description or ""}
+                if facts_mode:
+                    statuses = [f["fact"] for f in (c.facts or []) if f.get("kind") == "status" and not f.get("until")]
+                    if statuses:
+                        entry["current_status"] = statuses
+            else:
+                entry = {
+                    "ref": ref,
+                    "name": c.name,
+                    "aliases": c.aliases,
+                    "summary": _short_summary(c.description or ""),
+                }
+            known.append(entry)
+        return known
+
     def _perform_recon_card(self, archive: CharacterArchive, chapter_text: str,
                             chapter_summary: Optional[str] = None) -> Optional[LlmReconCardResult]:
         fast_llm = self.model_manager.get_llm_service('character_analyzer')
         refs = self._assign_refs(archive.characters)
-        known = []
-        for ref, c in refs.items():
-            entry = {"ref": ref, "name": c.name, "aliases": c.aliases, "card": c.description or ""}
-            if self._facts_mode():
-                statuses = [f["fact"] for f in (c.facts or []) if f.get("kind") == "status" and not f.get("until")]
-                if statuses:
-                    entry["current_status"] = statuses
-            known.append(entry)
+        known = self._build_recon_known_entries(archive, refs, chapter_text, chapter_summary)
         known_json = json.dumps(known, ensure_ascii=False) if known else "[]"
         prompt = prompts.format_character_recon_card_prompt(chapter_text, known_json, chapter_summary)
         return fast_llm.call_for_pydantic(LlmReconCardResult, prompt, prompt_type="character_recon")
