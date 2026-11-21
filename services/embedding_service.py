@@ -54,15 +54,16 @@ class EmbeddingService:
             return results[0]
         return None
 
-    def get_embeddings(self, texts: List[str]) -> List[Optional[List[float]]]:
-        """Пакетное получение эмбеддингов для списка текстов."""
+    DEFAULT_BATCH_SIZE = 128
+
+    def get_embeddings(self, texts: List[str], batch_size: int = DEFAULT_BATCH_SIZE) -> List[Optional[List[float]]]:
+        """Пакетное получение эмбеддингов для списка текстов с дедупликацией и нарезкой на батчи."""
         if not texts:
             return []
 
         clean_texts = [t.strip() for t in texts]
         results: List[Optional[List[float]]] = [None] * len(clean_texts)
-        uncached_indices = []
-        uncached_texts = []
+        uncached_map: Dict[str, List[int]] = {}
 
         for idx, text in enumerate(clean_texts):
             if not text:
@@ -70,22 +71,26 @@ class EmbeddingService:
             if text in self._cache:
                 results[idx] = self._cache[text]
             else:
-                uncached_indices.append(idx)
-                uncached_texts.append(text)
+                uncached_map.setdefault(text, []).append(idx)
 
-        if uncached_texts:
-            try:
-                response = self.client.embeddings.create(
-                    model=self.model_name,
-                    input=uncached_texts
-                )
-                for i, item in enumerate(response.data):
-                    vec = item.embedding
-                    orig_idx = uncached_indices[i]
-                    results[orig_idx] = vec
-                    self._cache[uncached_texts[i]] = vec
-            except Exception as e:
-                logger.error(f"Ошибка получения эмбеддингов через {self.model_name}: {e}", exc_info=True)
+        if uncached_map:
+            unique_texts = list(uncached_map.keys())
+            step = max(1, batch_size)
+            for start in range(0, len(unique_texts), step):
+                batch = unique_texts[start:start + step]
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.model_name,
+                        input=batch
+                    )
+                    for i, item in enumerate(response.data):
+                        vec = item.embedding
+                        text_key = batch[i]
+                        self._cache[text_key] = vec
+                        for orig_idx in uncached_map[text_key]:
+                            results[orig_idx] = vec
+                except Exception as e:
+                    logger.error(f"Ошибка получения эмбеддингов через {self.model_name}: {e}", exc_info=True)
 
         return results
 

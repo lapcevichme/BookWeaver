@@ -58,6 +58,26 @@ class TestScorePair(unittest.TestCase):
         self.assertTrue(r["judged"])
         self.assertGreaterEqual(r["confidence"], 0.90)
 
+    def test_pair_prompt_includes_semantic_fact_kinds(self):
+        self.x.facts = [
+            {"fact": "Носит одежду северного покроя.", "kind": "appearance", "chapter": "vol_4_chap_23"},
+            {"fact": "Обменяла шпильку на цикаду.", "kind": "past", "chapter": "vol_4_chap_23"},
+        ]
+        self.y.facts = [
+            {"fact": "У него есть обученная охотничья собака.", "kind": "skill", "chapter": "vol_3_chap_19"},
+            {"fact": "У неё красная опухшая рука.", "kind": "health", "chapter": "vol_3_chap_5"},
+        ]
+        self.y.chapter_mentions = {
+            "vol_1_chap_1": "Раннее упоминание.",
+            "vol_4_chap_23": "Тело после падения с крыши так и не найдено.",
+        }
+        prompt = il.pair_prompt(self.x, self.y)
+        self.assertIn("северного покроя", prompt)
+        self.assertIn("цикаду", prompt)
+        self.assertIn("охотничья собака", prompt)
+        self.assertIn("опухшая рука", prompt)
+        self.assertIn("Тело после падения с крыши так и не найдено.", prompt)
+
 
 class TestDuplicateCandidates(unittest.TestCase):
     def setUp(self):
@@ -126,6 +146,123 @@ class TestDuplicateCandidates(unittest.TestCase):
         self.assertEqual(len(cands), 0)
 
 
+class TestSemanticCandidates(unittest.TestCase):
+    def setUp(self):
+        self.order = {
+            "vol_1_chap_10": 0,
+            "vol_4_chap_12": 1,
+            "vol_4_chap_15": 2,
+            "vol_4_chap_22": 3,
+            "vol_4_chap_23": 4,
+        }
+        self.loulan = Character(
+            book_id="b",
+            name="Лоулан",
+            gender=CharacterGender.FEMALE,
+            description="Императорская супруга.",
+            spoiler_free_description="Супруга.",
+            chapter_mentions={"vol_1_chap_10": "x", "vol_4_chap_12": "x", "vol_4_chap_15": "x", "vol_4_chap_22": "x"},
+            facts=[
+                {"fact": "Одевается в южном стиле, но лицом похожа на северянку.", "kind": "appearance", "chapter": "vol_1_chap_10"},
+                {"fact": "Живет во внутреннем дворце.", "kind": "status", "chapter": "vol_1_chap_10"},
+            ],
+        )
+        self.tamamo = Character(
+            book_id="b",
+            name="Тамамо",
+            gender=CharacterGender.FEMALE,
+            description="Девушка в порту.",
+            spoiler_free_description="Девушка в порту.",
+            chapter_mentions={"vol_4_chap_23": "обмен шпильки"},
+            facts=[
+                {"fact": "Носит добротную одежду северного покроя.", "kind": "appearance", "chapter": "vol_4_chap_23"},
+                {"fact": "Её имя означает морские водоросли.", "kind": "secret", "chapter": "vol_4_chap_23"},
+            ],
+        )
+
+    @staticmethod
+    def _mock_emb(mapping):
+        svc = MagicMock()
+        svc.get_embeddings.side_effect = lambda texts: [mapping.get(t) for t in texts]
+        return svc
+
+    def test_finds_hidden_persona_by_fact_similarity(self):
+        emb = self._mock_emb({
+            "Одевается в южном стиле, но лицом похожа на северянку.": [1.0, 0.0],
+            "Носит добротную одежду северного покроя.": [0.8, 0.6],  # cos = 0.8
+            "Её имя означает морские водоросли.": [0.0, 1.0],
+        })
+        cands = il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb, threshold=0.55)
+        self.assertEqual(len(cands), 1)
+        cand = cands[0]
+        self.assertEqual((cand["x"].name, cand["y"].name), ("Тамамо", "Лоулан"))
+        self.assertEqual(cand["chapter"], "vol_4_chap_23")
+        self.assertAlmostEqual(cand["score"], 0.8)
+        self.assertIn("северного покроя", cand["evidence"])
+        self.assertIn("северянку", cand["evidence"])
+
+    def test_filters_co_occurrence_gender_existing_and_status_facts(self):
+        emb = self._mock_emb({
+            "Одевается в южном стиле, но лицом похожа на северянку.": [1.0, 0.0],
+            "Носит добротную одежду северного покроя.": [1.0, 0.0],
+            "Живет во внутреннем дворце.": [0.0, 1.0],
+            "Служит во внутреннем дворце.": [0.0, 1.0],
+            "Держится холодно.": [0.0, 1.0],
+        })
+        # Уже существующая пара пропускается
+        existing = {frozenset((self.loulan.id, self.tamamo.id))}
+        self.assertEqual(il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb, existing_pairs=existing), [])
+
+        # Конфликт пола
+        self.tamamo.gender = CharacterGender.MALE
+        self.assertEqual(il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb), [])
+        self.tamamo.gender = CharacterGender.FEMALE
+
+        # Одно пересечение по главам (например, упоминание старой личности в эпилоге) допускается, если факты из разных глав
+        self.tamamo.chapter_mentions["vol_4_chap_22"] = "together"
+        self.assertEqual(len(il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb)), 1)
+
+        # Но если оба факта из одной и той же главы — пара не матчится по этому факту
+        self.tamamo.facts[0]["chapter"] = "vol_1_chap_10"
+        self.assertEqual(il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb), [])
+        self.tamamo.facts[0]["chapter"] = "vol_4_chap_23"
+
+        # Два и более пересечений по главам отклоняются
+        self.tamamo.chapter_mentions["vol_4_chap_15"] = "together2"
+        self.assertEqual(il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb), [])
+        del self.tamamo.chapter_mentions["vol_4_chap_22"]
+        del self.tamamo.chapter_mentions["vol_4_chap_15"]
+
+        # Факты категорий status и trait по умолчанию не участвуют в отборе
+        self.tamamo.facts = [
+            {"fact": "Служит во внутреннем дворце.", "kind": "status", "chapter": "vol_4_chap_23"},
+            {"fact": "Держится холодно.", "kind": "trait", "chapter": "vol_4_chap_23"},
+        ]
+        self.assertEqual(il.find_semantic_candidates([self.loulan, self.tamamo], self.order, emb), [])
+
+    def test_embedding_service_batches_and_deduplicates(self):
+        from services.embedding_service import EmbeddingService
+        svc = EmbeddingService()
+        mock_client = MagicMock()
+
+        def fake_create(model, input):
+            resp = MagicMock()
+            resp.data = [MagicMock(embedding=[float(len(t)), 1.0]) for t in input]
+            return resp
+
+        mock_client.embeddings.create.side_effect = fake_create
+        svc._client = mock_client
+
+        vecs = svc.get_embeddings(["факт1", "факт2", "факт1", "факт3"], batch_size=2)
+        self.assertEqual(len(vecs), 4)
+        self.assertEqual(vecs[0], vecs[2])
+        self.assertEqual(mock_client.embeddings.create.call_count, 2)
+        # Повторный вызов полностью обслуживается из кэша
+        vecs2 = svc.get_embeddings(["факт1", "факт3"], batch_size=2)
+        self.assertEqual(vecs2, [vecs[0], vecs[3]])
+        self.assertEqual(mock_client.embeddings.create.call_count, 2)
+
+
 class TestIdentityPipeline(unittest.TestCase):
     def setUp(self):
         self.temp_dir = Path(tempfile.mkdtemp())
@@ -158,9 +295,10 @@ class TestIdentityPipeline(unittest.TestCase):
             from sqlmodel import select
             return s.exec(select(IdentityLink)).all()
 
-    def _run(self, llm, **kw):
+    def _run(self, llm, embedding_service=None, **kw):
         mm = MagicMock()
         mm.get_llm_service.return_value = llm
+        mm.get_embedding_service.return_value = embedding_service
         kw.setdefault("auto_confirm", False)
         with patch("pipelines.identity_links.metrics_collector"):
             return il.IdentitySuggestPipeline(mm).run("b", **kw)
@@ -317,6 +455,37 @@ class TestIdentityPipeline(unittest.TestCase):
         dup_links = [l for l in self._links() if l.relation == "duplicate"]
         self.assertEqual(len(dup_links), 1)
         self.assertEqual((dup_links[0].persona_id, dup_links[0].true_id), (pure.id, aduo.id))
+
+    def test_semantic_scan_pipeline_integration(self):
+        with get_book_session(self.book_dir) as s:
+            s.add(Chapter(id="vol_4_chap_23", book_id="b", volume_num=4, chapter_num=23, order_index=10, title="4.23", raw_text="x"))
+            s.commit()
+        loulan = Character(
+            book_id="b", name="Лоулан", gender=CharacterGender.FEMALE,
+            description="Супруга.", spoiler_free_description="Супруга.",
+            chapter_mentions={"vol_3_chap_3": "x", "vol_4_chap_12": "x", "vol_4_chap_14": "x"},
+            facts=[{"fact": "Лицом похожа на северянку.", "kind": "appearance", "chapter": "vol_3_chap_3"}],
+        )
+        tamamo = Character(
+            book_id="b", name="Тамамо", gender=CharacterGender.FEMALE,
+            description="Девушка в порту.", spoiler_free_description="Девушка.",
+            chapter_mentions={"vol_4_chap_23": "порт"},
+            facts=[{"fact": "Одежда северного покроя.", "kind": "appearance", "chapter": "vol_4_chap_23"}],
+        )
+        self.repo.save_characters([loulan, tamamo])
+
+        emb = MagicMock()
+        emb.get_embeddings.side_effect = lambda texts: [[1.0, 0.0] if "север" in t else [0.0, 1.0] for t in texts]
+        llm = _llm({"A": 0.99}, il.LlmIdentityJudgement(answer="A", evidence="4.23: Тамамо — это Лоулан"))
+
+        counts = self._run(llm, embedding_service=emb, scan=False, dedup=False, semantic=True)
+        self.assertEqual(counts["semantic_found"], 1)
+        self.assertEqual(counts["suggested"], 1)
+        link = self._links()[0]
+        self.assertEqual((link.persona_id, link.true_id), (tamamo.id, loulan.id))
+        self.assertEqual(link.source, "semantic_scan")
+        self.assertEqual(link.revealed_in, "vol_4_chap_23")
+        self.assertIn("семантика фактов", link.evidence)
 
     def test_set_voice_shift_and_policy(self):
         link = il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "human", "")

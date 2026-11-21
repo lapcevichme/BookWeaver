@@ -36,6 +36,17 @@ CONFIDENCE_THRESHOLD = 0.95  # ниже — перепроверка судье�
 CONFIDENCE_SUGGEST_MIN = 0.85  # ниже — связь помечается dismissed и видна только с --all (отсечение шума)
 IDENTITY_SIMILARITY_MIN = 0.78  # целевой коридор ECAPA: ниже — чужой голос, нет узнаваемости
 IDENTITY_SIMILARITY_MAX = 0.88  # выше — голос не отличим от оригинала (маска не работает)
+SEMANTIC_SIMILARITY_THRESHOLD = 0.58  # минимальный Max-Sim по отдельным фактам для кандидата semantic_scan
+SEMANTIC_FACT_KINDS = frozenset({"secret", "past", "appearance", "skill", "health", "quirk"})
+PROFILE_FACT_PRIORITY: Dict[str, int] = {
+    "secret": 0,
+    "past": 1,
+    "appearance": 1,
+    "skill": 1,
+    "health": 1,
+    "quirk": 1,
+    "status": 2,
+}
 
 # Буква -> (relation, кто персона). X, Y — порядок записей в вопросе.
 OPTIONS: Dict[str, Tuple[Optional[str], Optional[str]]] = {
@@ -55,11 +66,28 @@ def _ch(chapter_id: Optional[str]) -> str:
     return (chapter_id or "").replace("vol_", "").replace("_chap_", ".")
 
 
+def _chapter_sort_key(chapter_id: str) -> Tuple[int, float, str]:
+    m = re.match(r"vol_(\d+)_chap_([\d.]+)", chapter_id or "")
+    if m:
+        return (int(m.group(1)), float(m.group(2)), chapter_id)
+    return (1 << 30, 0.0, chapter_id or "")
+
+
 def _profile(char: Character) -> str:
-    facts = [f for f in (char.facts or []) if f.get("kind") in ("secret", "status")][:30]
+    facts = [f for f in (char.facts or []) if f.get("kind") in PROFILE_FACT_PRIORITY]
+    facts.sort(key=lambda f: PROFILE_FACT_PRIORITY[f["kind"]])
+    facts = facts[:40]
     lines = "\n".join(f"  - [{f['kind']}, гл. {_ch(f.get('chapter'))}] {f['fact']}" for f in facts)
+    mentions = sorted(
+        ((ch, (txt or "").strip()) for ch, txt in (char.chapter_mentions or {}).items() if (txt or "").strip()),
+        key=lambda item: _chapter_sort_key(item[0]),
+    )[-3:]
+    mention_block = ""
+    if mentions:
+        mention_lines = "\n".join(f"  - [гл. {_ch(ch)}] {txt}" for ch, txt in mentions)
+        mention_block = f"\nПоследние упоминания:\n{mention_lines}"
     aliases = ", ".join(char.aliases or []) or "—"
-    return f"«{char.name}» (алиасы: {aliases})\nКарточка: {char.description}\nФакты:\n{lines or '  —'}"
+    return f"«{char.name}» (алиасы: {aliases})\nКарточка: {char.description}\nФакты:\n{lines or '  —'}{mention_block}"
 
 
 def pair_prompt(x: Character, y: Character) -> str:
@@ -218,6 +246,159 @@ def _character_chapters(c: Character) -> Set[str]:
     return res
 
 
+def _eligible_pair(
+    c1: Character,
+    c2: Character,
+    ch1: List[str],
+    ch2: List[str],
+    max_overlap: int = 0,
+) -> bool:
+    """Общие антипаттерны для отбора кандидатов: без пересечения глав, долгожителей и конфликта типа/пола."""
+    if not ch1 or not ch2:
+        return False
+    if len(set(ch1) & set(ch2)) > max_overlap:
+        return False
+    if len(ch1) > 3 and len(ch2) > 3:
+        return False
+    if c1.entity_type != c2.entity_type and c1.entity_type and c2.entity_type:
+        return False
+    g1 = getattr(c1.gender, 'value', c1.gender)
+    g2 = getattr(c2.gender, 'value', c2.gender)
+    if g1 and g2 and g1 != g2:
+        return False
+    return True
+
+
+def _normalize_vector(vec: Optional[List[float]]) -> Optional[List[float]]:
+    if not vec or not isinstance(vec, (list, tuple)):
+        return None
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm == 0.0:
+        return None
+    return [v / norm for v in vec]
+
+
+def find_semantic_candidates(
+    chars: List[Character],
+    order: Dict[str, int],
+    embedding_service,
+    threshold: float = SEMANTIC_SIMILARITY_THRESHOLD,
+    max_candidates: int = 20,
+    existing_pairs: Optional[Set[frozenset]] = None,
+    fact_kinds: Optional[Set[str]] = None,
+) -> List[dict]:
+    """
+    Находит кандидатов на скрытые личности и дубликаты через Max-Sim по эмбеддингам отдельных фактов.
+    Устойчив к синонимам и разным социальным доменам, где усредненный вектор всей карточки проваливается.
+    """
+    if not chars or embedding_service is None:
+        return []
+
+    kinds = fact_kinds if fact_kinds is not None else SEMANTIC_FACT_KINDS
+    existing = existing_pairs or set()
+
+    char_chaps: Dict[UUID, List[str]] = {}
+    char_facts: Dict[UUID, List[Tuple[dict, str]]] = {}
+    unique_texts: List[str] = []
+    seen_texts: Set[str] = set()
+
+    for c in chars:
+        ch_list = [ch for ch in _character_chapters(c) if ch in order]
+        char_chaps[c.id] = sorted(ch_list, key=order.__getitem__)
+        selected: List[Tuple[dict, str]] = []
+        for f in (c.facts or []):
+            if kinds and f.get("kind") not in kinds:
+                continue
+            text = (f.get("fact") or "").strip()
+            if not text:
+                continue
+            selected.append((f, text))
+            if text not in seen_texts:
+                seen_texts.add(text)
+                unique_texts.append(text)
+        char_facts[c.id] = selected
+
+    if not unique_texts:
+        return []
+
+    raw_vecs = embedding_service.get_embeddings(unique_texts)
+    if not isinstance(raw_vecs, list) or len(raw_vecs) != len(unique_texts):
+        return []
+
+    text_vecs: Dict[str, List[float]] = {}
+    for text, vec in zip(unique_texts, raw_vecs):
+        norm_vec = _normalize_vector(vec)
+        if norm_vec is not None:
+            text_vecs[text] = norm_vec
+
+    if not text_vecs:
+        return []
+
+    char_fact_vecs: Dict[UUID, List[Tuple[dict, str, List[float]]]] = {}
+    for c in chars:
+        char_fact_vecs[c.id] = [
+            (f, text, text_vecs[text])
+            for f, text in char_facts.get(c.id, [])
+            if text in text_vecs
+        ]
+
+    candidates: List[dict] = []
+    for i in range(len(chars)):
+        for j in range(i + 1, len(chars)):
+            c1, c2 = chars[i], chars[j]
+            if frozenset((c1.id, c2.id)) in existing:
+                continue
+            ch1, ch2 = char_chaps.get(c1.id, []), char_chaps.get(c2.id, [])
+            if not _eligible_pair(c1, c2, ch1, ch2, max_overlap=1):
+                continue
+
+            fv1, fv2 = char_fact_vecs.get(c1.id, []), char_fact_vecs.get(c2.id, [])
+            if not fv1 or not fv2:
+                continue
+
+            best_sim = -1.0
+            best_pair: Optional[Tuple[Tuple[dict, str], Tuple[dict, str]]] = None
+            for f1, t1, v1 in fv1:
+                ch_f1 = f1.get("chapter")
+                for f2, t2, v2 in fv2:
+                    if ch_f1 and ch_f1 == f2.get("chapter"):
+                        continue
+                    if len(v1) != len(v2):
+                        continue
+                    sim = sum(a * b for a, b in zip(v1, v2))
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_pair = ((f1, t1), (f2, t2))
+
+            if best_pair is None or best_sim < threshold:
+                continue
+
+            if len(ch1) <= len(ch2):
+                minor, major = c1, c2
+                minor_ch = ch1
+                (f_min, t_min), (f_maj, t_maj) = best_pair
+            else:
+                minor, major = c2, c1
+                minor_ch = ch2
+                (f_maj, t_maj), (f_min, t_min) = best_pair
+
+            evidence = (
+                f"семантика фактов ({best_sim:.3f}): "
+                f"«{minor.name}» [{f_min.get('kind', '?')}, гл. {_ch(f_min.get('chapter'))}] «{t_min}» ↔ "
+                f"«{major.name}» [{f_maj.get('kind', '?')}, гл. {_ch(f_maj.get('chapter'))}] «{t_maj}»"
+            )
+            candidates.append({
+                "x": minor,
+                "y": major,
+                "chapter": minor_ch[0],
+                "score": best_sim,
+                "evidence": evidence,
+            })
+
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    return candidates[:max_candidates]
+
+
 def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
                               max_candidates: int = 15) -> List[dict]:
     """
@@ -261,18 +442,7 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
         for j in range(i + 1, len(chars)):
             c1, c2 = chars[i], chars[j]
             ch1, ch2 = char_chaps.get(c1.id, []), char_chaps.get(c2.id, [])
-            if not ch1 or not ch2:
-                continue
-            if set(ch1) & set(ch2):
-                continue
-            if len(ch1) > 3 and len(ch2) > 3:
-                continue
-            if c1.entity_type != c2.entity_type and c1.entity_type and c2.entity_type:
-                continue
-
-            g1 = getattr(c1.gender, 'value', c1.gender)
-            g2 = getattr(c2.gender, 'value', c2.gender)
-            if g1 and g2 and g1 != g2:
+            if not _eligible_pair(c1, c2, ch1, ch2):
                 continue
 
             if len(ch1) <= len(ch2):
@@ -460,8 +630,8 @@ class IdentitySuggestPipeline:
     def __init__(self, model_manager):
         self.model_manager = model_manager
 
-    def run(self, book_name: str, scan: bool = True, dedup: bool = True, rescore: bool = False,
-            volume_num: Optional[int] = None, auto_confirm: Optional[bool] = None) -> dict:
+    def run(self, book_name: str, scan: bool = True, dedup: bool = True, semantic: bool = True,
+            rescore: bool = False, volume_num: Optional[int] = None, auto_confirm: Optional[bool] = None) -> dict:
         import config
         if auto_confirm is None:
             auto_confirm = getattr(config, "IDENTITY_AUTO_CONFIRM", True)
@@ -486,6 +656,18 @@ class IdentitySuggestPipeline:
                 add_candidate(repo, cand["x"], cand["y"], cand["chapter"], "dedup_scan", cand["evidence"], order)
                 dedup_found += 1
 
+        semantic_found = 0
+        if semantic:
+            with repo.get_session() as session:
+                existing_links = session.exec(
+                    select(IdentityLink).where(IdentityLink.book_id == book_name)
+                ).all()
+            existing_pairs = {frozenset((l.persona_id, l.true_id)) for l in existing_links}
+            embedding_service = self.model_manager.get_embedding_service()
+            for cand in find_semantic_candidates(chars, order, embedding_service, existing_pairs=existing_pairs):
+                add_candidate(repo, cand["x"], cand["y"], cand["chapter"], "semantic_scan", cand["evidence"], order)
+                semantic_found += 1
+
         with repo.get_session() as session:
             todo = session.exec(select(IdentityLink).where(IdentityLink.book_id == book_name)).all()
         todo = [l for l in todo if l.status == "candidate" or (rescore and l.status in ("suggested", "dismissed"))]
@@ -497,8 +679,8 @@ class IdentitySuggestPipeline:
         with ThreadPoolExecutor(max_workers=6) as ex:
             results = list(ex.map(work, todo))
 
-        counts = {"scanned": scanned, "dedup_found": dedup_found, "scored": 0, "suggested": 0,
-                  "auto_confirmed": 0, "dismissed": 0, "judged": 0}
+        counts = {"scanned": scanned, "dedup_found": dedup_found, "semantic_found": semantic_found,
+                  "scored": 0, "suggested": 0, "auto_confirmed": 0, "dismissed": 0, "judged": 0}
         with repo.get_session() as session:
             for link, r in results:
                 link = session.get(IdentityLink, link.id)

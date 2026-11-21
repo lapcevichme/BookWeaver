@@ -469,7 +469,6 @@ class CharacterAnalysisPipeline:
         update_ids = {c.id for c in to_update}
         candidate_keys = {n.strip().lower() for n in candidates}
         patched = set()
-        embedding_service = self.model_manager.get_embedding_service()
 
         for patch in patch_list.patches:
             if patch.entity_type == CharacterType.OBJECT:
@@ -495,12 +494,6 @@ class CharacterAnalysisPipeline:
                     self.stats["dropped_crowd"] += 1
                     logger.info(f"⏭ '{patch.name}' не создан: безымянная роль массовки")
                     continue
-                # Векторное сходство только логируем: в одном сеттинге описания разных людей
-                # похожи (0.70–0.76 у Гёкуё/Рифы, Хоннян/Маомао), автослияние склеивало чужих.
-                # Дубли ловят ref от модели и сопоставление по имени/алиасам выше.
-                similar = self._vector_match(patch, archive, embedding_service)
-                if similar is not None:
-                    self.stats["vector_similar_not_merged"] += 1
                 taken = frozenset(n.lower() for c in archive.characters for n in [c.name, *(c.aliases or [])])
                 char = self._create_character(patch, chapter_id, book_id, taken)
                 archive.characters.append(char)
@@ -520,27 +513,6 @@ class CharacterAnalysisPipeline:
             self._update_character(char, patch, chapter_id, role_weights,
                                    allow_rename=not (from_candidate and char.id not in update_ids), taken=taken)
         return patched
-
-    def _vector_match(self, patch: LlmCharacterPatch, archive: CharacterArchive, embedding_service) -> Optional[Character]:
-        """Ищет похожего персонажа по описанию. Только для диагностики: не сливает."""
-        if not archive.characters:
-            return None
-        cand_text = f"{patch.name}. {patch.description_update or ''} {patch.current_chapter_action or ''}".strip()
-        cand_vec = embedding_service.get_embedding(cand_text)
-        if not cand_vec:
-            return None
-        pool = []
-        for c in archive.characters:
-            if not c.embedding:
-                c.embedding = embedding_service.get_embedding(f"{c.name}. {c.description or ''}".strip())
-            if c.embedding and (not patch.entity_type or patch.entity_type == c.entity_type):
-                pool.append((c, c.embedding))
-        threshold = 0.60 if patch.entity_type == CharacterType.ANIMAL else 0.70
-        match = embedding_service.find_most_similar(cand_vec, pool, threshold=threshold)
-        if match:
-            logger.warning(f"⚠️ '{patch.name}' похож на '{match[0].name}' (сходство {match[1]:.3f}), но НЕ объединен: создан отдельно")
-            return match[0]
-        return None
 
     def _flush_alias_collisions(self, repo: BookRepository, archive: CharacterArchive, chapter_id: str):
         """
@@ -639,7 +611,6 @@ class CharacterAnalysisPipeline:
         if self._facts_mode():
             if patch.new_facts:
                 self._add_facts(char, patch, chapter_id)
-        char.embedding = self.model_manager.get_embedding_service().get_embedding(f"{char.name}. {description}")
         return char
 
     @classmethod
@@ -712,7 +683,6 @@ class CharacterAnalysisPipeline:
         if new_description and new_description != (char.description or "").strip():
             char.description_timeline[chapter_id] = new_description
             char.description = new_description
-            char.embedding = self.model_manager.get_embedding_service().get_embedding(f"{char.name}. {new_description}")
             self.stats["description_versions"] += 1
 
         if patch.current_chapter_action:

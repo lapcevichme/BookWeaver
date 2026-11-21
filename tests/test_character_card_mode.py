@@ -159,10 +159,8 @@ class TestTitleSuccession(unittest.TestCase):
             {"alias": "Целомудренная супруга", "kind": "description"},
             {"alias": "Госпожа Лоулан", "kind": "name"}
         ])
-        self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
-        with patch.object(self.pipeline, "_vector_match", return_value=None):
-            self.pipeline._apply_patch(self.archive, LlmCharacterPatchList(patches=[p]), self.refs, [], ["Лоулан"],
-                                       "vol_2_chap_3", "b")
+        self.pipeline._apply_patch(self.archive, LlmCharacterPatchList(patches=[p]), self.refs, [], ["Лоулан"],
+                                   "vol_2_chap_3", "b")
         loulan = next(c for c in self.archive.characters if c.name == "Лоулан")
         self.assertNotIn("Целомудренная супруга", loulan.aliases)
         self.assertEqual(self.aduo.description, "Бывшая супруга.")
@@ -197,10 +195,8 @@ class TestTitleSuccession(unittest.TestCase):
         archive = CharacterArchive(characters=[aduo])
         refs = self.pipeline._assign_refs(archive.characters)
         p = self._patch(ref=None, name="Лоулан", aliases=[{"alias": "Целомудренная супруга", "kind": "description"}])
-        self.pipeline.model_manager.get_embedding_service.return_value.get_embedding.return_value = None
-        with patch.object(self.pipeline, "_vector_match", return_value=None):
-            self.pipeline._apply_patch(archive, LlmCharacterPatchList(patches=[p]), refs, [], ["Лоулан"],
-                                       "vol_2_chap_3", "b")
+        self.pipeline._apply_patch(archive, LlmCharacterPatchList(patches=[p]), refs, [], ["Лоулан"],
+                                   "vol_2_chap_3", "b")
         self.assertEqual(len(archive.characters), 2)
         loulan = next(c for c in archive.characters if c.name == "Лоулан")
         self.assertIsNotNone(loulan)
