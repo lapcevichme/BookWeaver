@@ -8,6 +8,8 @@ from collections import Counter
 from typing import Callable, Dict, List, Optional, Set
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel, Field
+
 import config
 from core.book_repository import BookRepository
 from core.data_models import (
@@ -21,6 +23,123 @@ from utils.metrics import metrics_collector
 from core.errors import PipelineIncompleteError, TaskCancelledException
 
 logger = logging.getLogger(__name__)
+
+
+class LlmPlaceholderRename(BaseModel):
+    current_name: str = Field(..., description="Точное текущее имя карточки из списка")
+    rename_to: str = Field(..., description="Настоящее личное имя персонажа из aliases или описания")
+    reason: str = Field("", description="Коротко: почему current_name является описательным плейсхолдером")
+
+
+class LlmPlaceholderAudit(BaseModel):
+    renames: List[LlmPlaceholderRename] = Field(default_factory=list)
+
+
+def find_placeholder_renames(llm, chars: List[Character]) -> List[LlmPlaceholderRename]:
+    """Один вызов LLM: находит карточки с описательным плейсхолдером вместо уже известного личного имени."""
+    candidates = [
+        c for c in chars
+        if c.entity_type != CharacterType.OBJECT and (c.aliases or len((c.name or "").split()) >= 2)
+    ]
+    if not candidates:
+        return []
+
+    payload = [
+        {
+            "name": c.name,
+            "aliases": c.aliases or [],
+            "desc": (c.description or "")[:180],
+        }
+        for c in candidates
+    ]
+    prompt = f"""Ты проверяешь реестр персонажей книги. Иногда персонаж впервые появляется безымянным и получает
+временный описательный плейсхолдер (роль, должность, внешность или родство: «Высокая дама», «Отец Гамлета»,
+«Доктор», «Служанка с веером», «Старый стражник»), а позже в книге раскрывается его настоящее личное имя,
+которое попадает в aliases или описание, но поле name остаётся старым плейсхолдером.
+
+Ниже список карточек. Верни переименования ТОЛЬКО для тех карточек, где:
+1. Текущее `name` — это именно описательный плейсхолдер, роль, должность или родственное обозначение (НЕ личное имя);
+2. В `aliases` или в `desc` этой карточки уже явно указано его настоящее личное имя.
+
+СТРОГО НЕ ТРОГАЙ:
+- карточки, у которых `name` уже является личным именем или закреплённой кличкой-именем, даже если в `aliases`
+  или `desc` есть полное, официальное, родовое, тайное или церемониальное имя;
+- карточки, у которых личное имя так и не раскрыто;
+- никогда не предлагай в `rename_to` титулы, должности, роли или родство.
+
+Если переименований нет — верни пустой список `{{"renames": []}}`.
+
+Карточки:
+{json.dumps(payload, ensure_ascii=False, indent=0)}
+
+Ответ — JSON: {{"renames": [{{"current_name": "...", "rename_to": "...", "reason": "коротко"}}]}}"""
+
+    result = llm.call_for_pydantic(LlmPlaceholderAudit, prompt, prompt_type="placeholder_audit")
+    if result is None:
+        return []
+    return list(result.renames)
+
+
+def apply_placeholder_renames(
+    chars: List[Character],
+    renames: List[LlmPlaceholderRename],
+) -> List[Character]:
+    """Безопасно применяет предложенные переименования плейсхолдеров с сохранением name_timeline и проверкой коллизий."""
+    if not renames:
+        return []
+
+    by_name = {c.name: c for c in chars}
+    changed: List[Character] = []
+
+    for item in renames:
+        char = by_name.get(item.current_name)
+        new_name = (item.rename_to or "").strip()
+        if char is None or not new_name or new_name == char.name:
+            continue
+
+        taken = frozenset(
+            n.lower()
+            for c in chars
+            if c.id != char.id
+            for n in [c.name, *(c.aliases or [])]
+        )
+        if new_name.lower() in taken:
+            logger.warning(f"⚠️ Аудит плейсхолдеров: переименование '{char.name}' -> '{new_name}' отклонено (имя занято)")
+            continue
+
+        meta = dict(char.alias_meta or {})
+        since_chapter: Optional[str] = None
+        for alias_key, alias_info in meta.items():
+            if alias_key.lower() == new_name.lower() and isinstance(alias_info, dict):
+                since_chapter = alias_info.get("since")
+                break
+        if not since_chapter:
+            chapters = list((char.chapter_mentions or {}).keys()) or list((char.description_timeline or {}).keys())
+            since_chapter = chapters[-1] if chapters else None
+
+        old_name = char.name
+        first_ch = CharacterAnalysisPipeline._first_chapter(char) or since_chapter
+        aliases = [a for a in (char.aliases or []) if a.lower() != new_name.lower()]
+        if old_name not in aliases:
+            aliases.append(old_name)
+        char.aliases = sorted(set(aliases))
+
+        new_meta = {k: v for k, v in meta.items() if k.lower() != new_name.lower()}
+        if old_name not in new_meta:
+            new_meta[old_name] = {"kind": "previous_name", "since": first_ch}
+        char.alias_meta = new_meta
+
+        if since_chapter:
+            CharacterAnalysisPipeline._rename(char, new_name, since_chapter)
+        else:
+            char.name = new_name
+
+        del by_name[old_name]
+        by_name[new_name] = char
+        changed.append(char)
+        logger.info(f"🏷️ Аудит плейсхолдеров: '{old_name}' -> '{new_name}' (since={since_chapter}, reason={item.reason})")
+
+    return changed
 
 
 class _ChapterFailed(Exception):
@@ -183,8 +302,27 @@ class CharacterAnalysisPipeline:
 
         return self.trigger_volume_identity_scan(repo, book_name, volume_num)
 
+    def audit_placeholder_names(self, repo: BookRepository, book_name: str, volume_num: Optional[int] = None) -> int:
+        """Ревизия описательных плейсхолдеров в конце тома: переименовывает в уже раскрытые личные имена."""
+        chars = repo.get_characters()
+        if not chars:
+            return 0
+        llm = self.model_manager.get_llm_service('character_analyzer')
+        renames = find_placeholder_renames(llm, chars)
+        changed = apply_placeholder_renames(chars, renames)
+        if changed:
+            repo.save_characters(changed)
+            vol_str = f" (том {volume_num})" if volume_num is not None else ""
+            logger.info(f"🏷️ Аудит плейсхолдеров {book_name}{vol_str}: переименовано {len(changed)} карточек")
+        return len(changed)
+
     def trigger_volume_identity_scan(self, repo: BookRepository, book_name: str, volume_num: int) -> Optional[dict]:
-        """Вызывает IdentitySuggestPipeline для книги по итогам завершения тома."""
+        """Вызывает аудит плейсхолдеров и IdentitySuggestPipeline для книги по итогам завершения тома."""
+        try:
+            self.audit_placeholder_names(repo, book_name, volume_num)
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка аудита плейсхолдеров для тома {volume_num}: {e}", exc_info=True)
+
         from pipelines.identity_links import IdentitySuggestPipeline
         try:
             il_pipeline = IdentitySuggestPipeline(self.model_manager)
