@@ -170,3 +170,85 @@ class UpdateBookRequest(BaseModel):
     description: Optional[str] = None
     status: Optional[BookStatus] = None
     tags: Optional[List[str]] = None
+
+
+class CharacterFactItem(BaseModel):
+    id: Optional[str] = None
+    fact: str
+    kind: str
+    chapter: Optional[str] = None
+    until: Optional[str] = None
+
+
+class IdentityRevealResponse(BaseModel):
+    link_id: str
+    relation: str
+    role: str
+    other_character_id: str
+    other_character_name: str
+    revealed_in: Optional[str] = None
+    evidence: str = ""
+    active_chapters: List[str] = Field(default_factory=list)
+
+
+class CharacterAsOfResponse(BaseModel):
+    id: str
+    name: str
+    aliases: List[str] = Field(default_factory=list)
+    description: str = ""
+    description_from: Optional[str] = None
+    first_chapter: Optional[str] = None
+    role_tier: Optional[str] = None
+    entity_type: Optional[str] = None
+    gender: Optional[str] = None
+    voice_base: Optional[str] = None
+    voice_profile: str = ""
+    visual_base: str = ""
+    chapter_mentions: Dict[str, str] = Field(default_factory=dict)
+    facts: List[CharacterFactItem] = Field(default_factory=list)
+    reveals: List[IdentityRevealResponse] = Field(default_factory=list)
+
+
+class IdentityLinkResponse(BaseModel):
+    id: str
+    persona_id: str
+    persona_name: str
+    true_id: str
+    true_name: str
+    relation: Optional[str] = None
+    status: str
+    confidence: Optional[float] = None
+    revealed_in: Optional[str] = None
+    evidence: str = ""
+    source: str = ""
+    voice_policy: str = "separate"
+    voice_shift: Optional[float] = None
+    active_chapters: List[str] = Field(default_factory=list)
+
+
+class UpdateIdentityLinkRequest(BaseModel):
+    status: Optional[str] = None
+    voice_policy: Optional[str] = None
+    voice_shift: Optional[float] = None
+
+
+class ChapterSummaryItem(BaseModel):
+    chapter_id: str
+    volume_num: int
+    chapter_num: float
+    order_index: int
+    title: str
+    is_service: bool = False
+    teaser: Optional[str] = None
+    synopsis: Optional[str] = None
+
+
+class VolumeSummaryItem(BaseModel):
+    volume_num: int
+    summary: str
+
+
+class BookSummariesResponse(BaseModel):
+    as_of: Optional[str] = None
+    chapters: List[ChapterSummaryItem] = Field(default_factory=list)
+    volumes: List[VolumeSummaryItem] = Field(default_factory=list)
