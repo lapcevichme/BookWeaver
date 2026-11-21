@@ -6,6 +6,7 @@ venv/
 # Кэш Python
 __pycache__/
 *.pyc
+.cache/
 
 # Ключи, сертификаты и секреты
 *.pem
