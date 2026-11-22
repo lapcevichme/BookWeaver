@@ -150,7 +150,7 @@ export function RecapPage() {
               <section
                 key={group.volumeNum}
                 id={`recap-vol-${group.volumeNum}`}
-                className="scroll-mt-24 rounded-[28px] border border-outline-variant/45 bg-surface-container-low p-3 sm:p-4"
+                className="scroll-mt-24 border-b border-outline-variant/40 pb-4 last:border-b-0"
               >
                 <motion.button
                   type="button"
@@ -159,13 +159,13 @@ export function RecapPage() {
                   onClick={() =>
                     setOpenVolumes((prev) => ({ ...prev, [group.volumeNum]: !isOpen }))
                   }
-                  className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-2xl px-2 py-2 text-left"
+                  className="m3-color-transition flex w-full cursor-pointer items-center justify-between gap-2 rounded-2xl px-2 py-2.5 text-left hover:bg-surface-container-low"
                 >
-                  <span className="flex flex-wrap items-center gap-2 text-base font-extrabold text-on-surface">
+                  <span className="flex flex-wrap items-center gap-2.5 text-lg font-extrabold tracking-tight text-on-surface">
                     <span>
                       {t.bookmark.volumeFull} {group.volumeNum}
                     </span>
-                    <span className="rounded-full bg-surface-container-highest px-2.5 py-0.5 font-mono text-xs font-semibold text-on-surface-variant">
+                    <span className="rounded-full bg-surface-container-high px-2.5 py-0.5 font-mono text-xs font-semibold text-on-surface-variant">
                       {group.chapters.length}
                     </span>
                     {group.volumeSummary && (
@@ -179,7 +179,7 @@ export function RecapPage() {
                   <motion.span
                     animate={{ rotate: isOpen ? 180 : 0 }}
                     transition={M3_SPRINGS.spatial.fast}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant"
                   >
                     <ChevronDown className="h-4 w-4" />
                   </motion.span>
