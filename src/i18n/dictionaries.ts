@@ -37,6 +37,8 @@ export const dictionaries: Record<Locale, Dictionary> = {
       prevChapter: 'Предыдущая глава',
       nextChapter: 'Следующая глава',
       pickChapter: 'Оглавление',
+      searchChapterPlaceholder: 'Номер главы (напр. 2349) или название…',
+      noChaptersFound: 'Главы не найдены',
       noChapters: 'В этой книге пока нет глав',
     },
     tabs: {
@@ -84,6 +86,10 @@ export const dictionaries: Record<Locale, Dictionary> = {
       untilChapter: 'до',
       newBadgeShort: 'Новое',
       notFound: 'Персонаж к этой главе ещё не появлялся или не найден.',
+      searchFactsPlaceholder: 'Найти факт…',
+      searchChroniclePlaceholder: 'Поиск по хронологии…',
+      showMore: 'Показать ещё',
+      remaining: 'осталось',
       roles: {
         protagonist: 'Главный',
         major: 'Важный',
@@ -156,6 +162,8 @@ export const dictionaries: Record<Locale, Dictionary> = {
       prevChapter: 'Previous chapter',
       nextChapter: 'Next chapter',
       pickChapter: 'Contents',
+      searchChapterPlaceholder: 'Chapter # (e.g. 2349) or title…',
+      noChaptersFound: 'No matching chapters',
       noChapters: 'This book has no chapters yet',
     },
     tabs: {
@@ -203,6 +211,10 @@ export const dictionaries: Record<Locale, Dictionary> = {
       untilChapter: 'until',
       newBadgeShort: 'New',
       notFound: 'This character has not appeared by this chapter yet.',
+      searchFactsPlaceholder: 'Search facts…',
+      searchChroniclePlaceholder: 'Search chronicle…',
+      showMore: 'Show more',
+      remaining: 'remaining',
       roles: {
         protagonist: 'Protagonist',
         major: 'Major',

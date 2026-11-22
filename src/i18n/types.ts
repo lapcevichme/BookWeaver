@@ -36,6 +36,8 @@ export interface Dictionary {
     prevChapter: string;
     nextChapter: string;
     pickChapter: string;
+    searchChapterPlaceholder: string;
+    noChaptersFound: string;
     noChapters: string;
   };
   tabs: {
@@ -83,6 +85,10 @@ export interface Dictionary {
     untilChapter: string;
     newBadgeShort: string;
     notFound: string;
+    searchFactsPlaceholder: string;
+    searchChroniclePlaceholder: string;
+    showMore: string;
+    remaining: string;
     roles: {
       protagonist: string;
       major: string;

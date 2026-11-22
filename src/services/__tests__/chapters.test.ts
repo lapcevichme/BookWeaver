@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildChapterBuckets,
+  filterChaptersByQuery,
   formatChapterNumber,
   getAdjacentChapter,
   getReadingProgressPercent,
@@ -48,5 +50,29 @@ describe('chapters helpers', () => {
   it('formats integer and fractional chapter numbers', () => {
     expect(formatChapterNumber(1)).toBe('1');
     expect(formatChapterNumber(0.5)).toBe('0.5');
+  });
+
+  it('chunks giant single-volume books (3200 chapters) into 100-chapter buckets', () => {
+    const giantBook: ChapterInfo[] = Array.from({ length: 3200 }, (_, i) => ({
+      id: `vol_1_chap_${i + 1}`,
+      volume_num: 1,
+      chapter_num: i + 1,
+      title: `Глава ${i + 1}`,
+      status: 'processed',
+      has_audio: false,
+    }));
+
+    const buckets = buildChapterBuckets(giantBook, 100);
+    expect(buckets).toHaveLength(32);
+    expect(buckets[0].rangeLabel).toBe('1–100');
+    expect(buckets[23].rangeLabel).toBe('2301–2400');
+
+    const matches = filterChaptersByQuery(giantBook, '2349');
+    expect(matches[0].id).toBe('vol_1_chap_2349');
+  });
+
+  it('matches volume.chapter queries like "2.1"', () => {
+    const matches = filterChaptersByQuery(SAMPLE_CHAPTERS, '2.1');
+    expect(matches[0].id).toBe('vol_2_chap_1');
   });
 });

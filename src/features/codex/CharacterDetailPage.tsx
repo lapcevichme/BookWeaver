@@ -7,8 +7,10 @@ import {
   Eye,
   History,
   ListChecks,
+  Search,
   Sparkles,
   Tag,
+  X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ChapterStepper } from '../../components/ChapterStepper';
@@ -30,6 +32,10 @@ export function CharacterDetailPage() {
 
   const codex = useCodex(bookId, activeChapter?.id ?? null, prevChapter?.id ?? null);
   const [factKind, setFactKind] = useState<string>('all');
+  const [factQuery, setFactQuery] = useState('');
+  const [chronicleQuery, setChronicleQuery] = useState('');
+  const [factsLimit, setFactsLimit] = useState(30);
+  const [chronicleLimit, setChronicleLimit] = useState(30);
   const showSkeleton = useDelayedLoading(codex.loading && codex.characters.length === 0);
 
   const rawTab = searchParams.get('tab');
@@ -44,6 +50,10 @@ export function CharacterDetailPage() {
 
   useEffect(() => {
     setFactKind('all');
+    setFactQuery('');
+    setChronicleQuery('');
+    setFactsLimit(30);
+    setChronicleLimit(30);
   }, [charId]);
 
   const character = useMemo(
@@ -110,8 +120,12 @@ export function CharacterDetailPage() {
   const availableFactKinds = Array.from(
     new Set(character.facts.map((f) => f.kind).filter(Boolean)),
   );
-  const filteredFacts =
-    factKind === 'all' ? character.facts : character.facts.filter((f) => f.kind === factKind);
+  const normalizedFactQuery = factQuery.trim().toLowerCase();
+  const filteredFacts = character.facts.filter((f) => {
+    if (factKind !== 'all' && f.kind !== factKind) return false;
+    if (normalizedFactQuery && !f.fact.toLowerCase().includes(normalizedFactQuery)) return false;
+    return true;
+  });
 
   // Sort facts newest-first so newly unlocked facts appear at the very top
   const sortNewestFirst = (list: typeof filteredFacts) =>
@@ -122,13 +136,26 @@ export function CharacterDetailPage() {
     });
 
   const activeFacts = sortNewestFirst(filteredFacts.filter((f) => !f.until));
+  const shownActiveFacts = activeFacts.slice(0, factsLimit);
+  const remainingFacts = activeFacts.length - shownActiveFacts.length;
   const retiredFacts = sortNewestFirst(filteredFacts.filter((f) => Boolean(f.until)));
 
-  const sortedMentions = Object.entries(character.chapter_mentions).sort(([a], [b]) => {
-    const idxA = chapterOrder.get(a) ?? -1;
-    const idxB = chapterOrder.get(b) ?? -1;
-    return idxB - idxA;
-  });
+  const normalizedChronicleQuery = chronicleQuery.trim().toLowerCase();
+  const sortedMentions = Object.entries(character.chapter_mentions)
+    .sort(([a], [b]) => {
+      const idxA = chapterOrder.get(a) ?? -1;
+      const idxB = chapterOrder.get(b) ?? -1;
+      return idxB - idxA;
+    })
+    .filter(([chId, summary]) => {
+      if (!normalizedChronicleQuery) return true;
+      return (
+        summary.toLowerCase().includes(normalizedChronicleQuery) ||
+        fmtChapter(chId).toLowerCase().includes(normalizedChronicleQuery)
+      );
+    });
+  const shownMentions = sortedMentions.slice(0, chronicleLimit);
+  const remainingMentions = sortedMentions.length - shownMentions.length;
 
   const roleKey = (character.role_tier ?? 'background') as keyof typeof t.codex.roles;
   const roleLabel = t.codex.roles[roleKey] ?? character.role_tier ?? '';
@@ -344,47 +371,119 @@ export function CharacterDetailPage() {
           )}
 
           {activeTab === 'chronicle' && (
-            <div>
+            <div className="space-y-4">
+              {Object.keys(character.chapter_mentions).length > 15 && (
+                <div className="relative max-w-xs">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+                  <input
+                    type="text"
+                    value={chronicleQuery}
+                    onChange={(e) => {
+                      setChronicleQuery(e.target.value);
+                      setChronicleLimit(30);
+                    }}
+                    placeholder={t.codex.searchChroniclePlaceholder}
+                    className="h-10 w-full rounded-full bg-surface-container-high pl-10 pr-9 text-sm text-on-surface placeholder:text-on-surface-variant focus:bg-surface-container-low focus:outline-2 focus:outline-primary"
+                  />
+                  {chronicleQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setChronicleQuery('')}
+                      className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-highest"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
               {sortedMentions.length === 0 ? (
                 <p className="text-sm text-on-surface-variant">{t.codex.noChronicle}</p>
               ) : (
-                <ol className="ml-2 space-y-4 border-l-2 border-outline-variant/60 pl-5">
-                  {sortedMentions.map(([chapterId, summary]) => {
-                    const isCurrent = chapterId === activeChapter?.id;
-                    return (
-                      <li key={chapterId} className="relative">
-                        <span
-                          className={`absolute -left-[25px] top-1.5 h-3 w-3 rounded-full ${
-                            isCurrent
-                              ? 'bg-tertiary ring-4 ring-tertiary-container'
-                              : 'bg-primary'
-                          }`}
-                        />
-                        <Link
-                          to={`/books/${encodedBook}/read/${encodeURIComponent(chapterId)}`}
-                          className="inline-block font-mono text-xs font-bold text-primary hover:underline"
-                        >
-                          {fmtChapter(chapterId)}
-                        </Link>
-                        <p className="mt-1 max-w-[68ch] text-sm leading-relaxed text-on-surface">
-                          {summary}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ol>
+                <>
+                  <ol className="ml-2 space-y-4 border-l-2 border-outline-variant/60 pl-5">
+                    {shownMentions.map(([chapterId, summary]) => {
+                      const isCurrent = chapterId === activeChapter?.id;
+                      return (
+                        <li key={chapterId} className="relative">
+                          <span
+                            className={`absolute -left-[25px] top-1.5 h-3 w-3 rounded-full ${
+                              isCurrent
+                                ? 'bg-tertiary ring-4 ring-tertiary-container'
+                                : 'bg-primary'
+                            }`}
+                          />
+                          <Link
+                            to={`/books/${encodedBook}/read/${encodeURIComponent(chapterId)}`}
+                            className="inline-block font-mono text-xs font-bold text-primary hover:underline"
+                          >
+                            {fmtChapter(chapterId)}
+                          </Link>
+                          <p className="mt-1 max-w-[68ch] text-sm leading-relaxed text-on-surface">
+                            {summary}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ol>
+
+                  {remainingMentions > 0 && (
+                    <div className="pt-2 text-center">
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.96 }}
+                        transition={M3_SPRINGS.spatial.fast}
+                        onClick={() => setChronicleLimit((n) => n + 30)}
+                        className="m3-color-transition inline-flex h-10 cursor-pointer items-center gap-2 rounded-full bg-surface-container-high px-5 text-xs font-bold text-on-surface hover:bg-primary-container hover:text-on-primary-container"
+                      >
+                        <span>{t.codex.showMore}</span>
+                        <span className="font-mono opacity-75">
+                          ({t.codex.remaining}: {remainingMentions})
+                        </span>
+                      </motion.button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
 
           {activeTab === 'facts' && (
             <div className="space-y-5">
+              {character.facts.length > 15 && (
+                <div className="relative max-w-xs">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+                  <input
+                    type="text"
+                    value={factQuery}
+                    onChange={(e) => {
+                      setFactQuery(e.target.value);
+                      setFactsLimit(30);
+                    }}
+                    placeholder={t.codex.searchFactsPlaceholder}
+                    className="h-10 w-full rounded-full bg-surface-container-high pl-10 pr-9 text-sm text-on-surface placeholder:text-on-surface-variant focus:bg-surface-container-low focus:outline-2 focus:outline-primary"
+                  />
+                  {factQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setFactQuery('')}
+                      className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-highest"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
               {availableFactKinds.length > 1 && (
                 <div className="flex flex-wrap gap-1.5">
                   <motion.button
                     type="button"
                     whileTap={{ scale: 0.94 }}
-                    onClick={() => setFactKind('all')}
+                    onClick={() => {
+                      setFactKind('all');
+                      setFactsLimit(30);
+                    }}
                     className={`h-9 cursor-pointer rounded-full px-3.5 text-xs font-bold ${
                       factKind === 'all'
                         ? 'bg-secondary-container text-on-secondary-container'
@@ -398,7 +497,10 @@ export function CharacterDetailPage() {
                       key={kind}
                       type="button"
                       whileTap={{ scale: 0.94 }}
-                      onClick={() => setFactKind(kind)}
+                      onClick={() => {
+                        setFactKind(kind);
+                        setFactsLimit(30);
+                      }}
                       className={`h-9 cursor-pointer rounded-full px-3.5 text-xs font-bold ${
                         factKind === kind
                           ? 'bg-secondary-container text-on-secondary-container'
@@ -415,44 +517,63 @@ export function CharacterDetailPage() {
                 <p className="text-sm text-on-surface-variant">{t.codex.noFacts}</p>
               ) : (
                 <div className="space-y-5">
-                  {activeFacts.length > 0 && (
-                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                      {activeFacts.map((fact, idx) => {
-                        const isNewNow = Boolean(
-                          activeChapter && fact.chapter === activeChapter.id,
-                        );
-                        return (
-                          <div
-                            key={fact.id ?? `${fact.fact}-${idx}`}
-                            className={`rounded-2xl border p-3.5 text-sm leading-relaxed ${
-                              isNewNow
-                                ? 'border-tertiary/40 bg-tertiary-container/40 text-on-surface'
-                                : 'border-outline-variant/40 bg-surface-container-low text-on-surface'
-                            }`}
-                          >
-                            <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                              {fact.kind && (
-                                <span className="rounded-md bg-surface-container-high px-2 py-0.5 text-[11px] font-bold text-on-surface-variant">
-                                  {t.codex.factKinds[fact.kind] ?? fact.kind}
-                                </span>
-                              )}
-                              {fact.chapter && (
-                                <span className="font-mono text-[11px] text-on-surface-variant">
-                                  {fmtChapter(fact.chapter)}
-                                </span>
-                              )}
-                              {isNewNow && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-tertiary px-2 py-0.5 text-[10px] font-bold text-on-tertiary">
-                                  <Sparkles className="h-2.5 w-2.5" />
-                                  {t.codex.newBadgeShort}
-                                </span>
-                              )}
+                  {shownActiveFacts.length > 0 && (
+                    <>
+                      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                        {shownActiveFacts.map((fact, idx) => {
+                          const isNewNow = Boolean(
+                            activeChapter && fact.chapter === activeChapter.id,
+                          );
+                          return (
+                            <div
+                              key={fact.id ?? `${fact.fact}-${idx}`}
+                              className={`rounded-2xl border p-3.5 text-sm leading-relaxed ${
+                                isNewNow
+                                  ? 'border-tertiary/40 bg-tertiary-container/40 text-on-surface'
+                                  : 'border-outline-variant/40 bg-surface-container-low text-on-surface'
+                              }`}
+                            >
+                              <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                                {fact.kind && (
+                                  <span className="rounded-md bg-surface-container-high px-2 py-0.5 text-[11px] font-bold text-on-surface-variant">
+                                    {t.codex.factKinds[fact.kind] ?? fact.kind}
+                                  </span>
+                                )}
+                                {fact.chapter && (
+                                  <span className="font-mono text-[11px] text-on-surface-variant">
+                                    {fmtChapter(fact.chapter)}
+                                  </span>
+                                )}
+                                {isNewNow && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-tertiary px-2 py-0.5 text-[10px] font-bold text-on-tertiary">
+                                    <Sparkles className="h-2.5 w-2.5" />
+                                    {t.codex.newBadgeShort}
+                                  </span>
+                                )}
+                              </div>
+                              <p>{fact.fact}</p>
                             </div>
-                            <p>{fact.fact}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+
+                      {remainingFacts > 0 && (
+                        <div className="pt-1 text-center">
+                          <motion.button
+                            type="button"
+                            whileTap={{ scale: 0.96 }}
+                            transition={M3_SPRINGS.spatial.fast}
+                            onClick={() => setFactsLimit((n) => n + 30)}
+                            className="m3-color-transition inline-flex h-10 cursor-pointer items-center gap-2 rounded-full bg-surface-container-high px-5 text-xs font-bold text-on-surface hover:bg-primary-container hover:text-on-primary-container"
+                          >
+                            <span>{t.codex.showMore}</span>
+                            <span className="font-mono opacity-75">
+                              ({t.codex.remaining}: {remainingFacts})
+                            </span>
+                          </motion.button>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {retiredFacts.length > 0 && (
