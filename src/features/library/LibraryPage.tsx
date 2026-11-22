@@ -13,12 +13,24 @@ import {
 import { motion } from 'motion/react';
 import { M3ShapeBadge, pickShapeForKey, pickToneForKey } from '../../components/M3Shapes';
 import { ThemeControls } from '../../components/ThemeControls';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useI18n } from '../../i18n/I18nContext';
-import { fetchProjectsCatalog, getBookCoverUrl } from '../../services/api';
+import { fetchProjectsCatalog, getBookCoverUrl, getCachedProjectsCatalog } from '../../services/api';
 import { readSavedBookmark } from '../../services/bookmarks';
 import { formatChapterCount, formatSavedBookmarkLabel } from '../../services/formatting';
 import { M3_SPRINGS } from '../../theme/m3Tokens';
 import type { ProjectCatalogItem } from '../../types/book';
+
+function sortCatalog(list: ProjectCatalogItem[]): ProjectCatalogItem[] {
+  return [...list].sort((a, b) => {
+    if (a.id === 'kusuriya_v1_test') return -1;
+    if (b.id === 'kusuriya_v1_test') return 1;
+    const aSaved = Boolean(readSavedBookmark(a.id));
+    const bSaved = Boolean(readSavedBookmark(b.id));
+    if (aSaved !== bSaved) return aSaved ? -1 : 1;
+    return a.title.localeCompare(b.title);
+  });
+}
 
 function BookShelfCard({ book, index }: { book: ProjectCatalogItem; index: number }) {
   const { locale, t } = useI18n();
@@ -101,28 +113,27 @@ function BookShelfCard({ book, index }: { book: ProjectCatalogItem; index: numbe
 
 export function LibraryPage() {
   const { locale, t } = useI18n();
-  const [books, setBooks] = useState<ProjectCatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedCatalog = getCachedProjectsCatalog();
+  const [books, setBooks] = useState<ProjectCatalogItem[]>(() =>
+    cachedCatalog ? sortCatalog(cachedCatalog) : [],
+  );
+  const [loading, setLoading] = useState(!cachedCatalog);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
+  const showSkeleton = useDelayedLoading(loading && books.length === 0);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
+    const forceRefresh = reloadTick > 0;
+    if (!getCachedProjectsCatalog() || forceRefresh) {
+      setLoading(true);
+    }
     setError(null);
 
-    fetchProjectsCatalog(controller.signal)
+    fetchProjectsCatalog(controller.signal, forceRefresh)
       .then((list) => {
-        const sorted = [...list].sort((a, b) => {
-          if (a.id === 'kusuriya_v1_test') return -1;
-          if (b.id === 'kusuriya_v1_test') return 1;
-          const aSaved = Boolean(readSavedBookmark(a.id));
-          const bSaved = Boolean(readSavedBookmark(b.id));
-          if (aSaved !== bSaved) return aSaved ? -1 : 1;
-          return a.title.localeCompare(b.title);
-        });
-        setBooks(sorted);
+        setBooks(sortCatalog(list));
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -162,7 +173,10 @@ export function LibraryPage() {
 
   return (
     <div className="min-h-screen bg-surface text-on-surface">
-      <header className="sticky top-0 z-40 w-full bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1">
+      <motion.header
+        layoutRoot
+        className="sticky top-0 z-40 w-full bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1"
+      >
         <div className="mx-auto w-full max-w-6xl px-3 sm:px-6">
           <motion.nav
             initial={{ y: -14, opacity: 0 }}
@@ -179,7 +193,7 @@ export function LibraryPage() {
             <ThemeControls />
           </motion.nav>
         </div>
-      </header>
+      </motion.header>
 
       <main className="mx-auto max-w-6xl space-y-7 px-4 py-6 sm:px-6 sm:py-9">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -231,15 +245,17 @@ export function LibraryPage() {
               <span>{t.books.retry}</span>
             </motion.button>
           </div>
-        ) : loading ? (
+        ) : showSkeleton ? (
           <div className="space-y-6">
-            <div className="h-48 animate-pulse rounded-[36px] bg-surface-container" />
+            <div className="h-44 animate-pulse rounded-[36px] bg-surface-container" />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3, 4, 5, 6].map((n) => (
                 <div key={n} className="h-36 animate-pulse rounded-[28px] bg-surface-container" />
               ))}
             </div>
           </div>
+        ) : loading && books.length === 0 ? (
+          <div className="min-h-[40vh]" />
         ) : books.length === 0 ? (
           <div className="rounded-[28px] bg-surface-container-low p-10 text-center text-sm text-on-surface-variant">
             {t.books.empty}

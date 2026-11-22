@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { BookOpen, ChevronDown, ScrollText } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ChapterStepper } from '../../components/ChapterStepper';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useSummaries } from '../../hooks/useSummaries';
 import { useI18n } from '../../i18n/I18nContext';
 import { formatChapterNumber } from '../../services/chapters';
@@ -16,6 +17,7 @@ export function RecapPage() {
     useBookContext();
 
   const recap = useSummaries(bookId, activeChapter?.id ?? null);
+  const showSkeleton = useDelayedLoading(recap.loading && !recap.summaries);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
 
   const toggleSynopsis = (chapterId: string) => {
@@ -42,12 +44,14 @@ export function RecapPage() {
         />
       </div>
 
-      {recap.loading && !recap.summaries ? (
+      {showSkeleton ? (
         <div className="space-y-3">
           {[1, 2, 3].map((n) => (
             <div key={n} className="h-28 animate-pulse rounded-[28px] bg-surface-container" />
           ))}
         </div>
+      ) : recap.loading && !recap.summaries ? (
+        <div className="min-h-[40vh]" />
       ) : recap.error ? (
         <div className="rounded-[28px] bg-error-container p-6 text-sm font-medium text-on-error-container">
           {t.recap.error} ({recap.error})

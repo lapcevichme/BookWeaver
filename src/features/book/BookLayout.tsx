@@ -9,10 +9,11 @@ import {
   useSearchParams,
 } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, BookOpen, RefreshCw, ScrollText, Users } from 'lucide-react';
-import { motion } from 'motion/react';
+import { LayoutGroup, motion } from 'motion/react';
 import { ThemeControls } from '../../components/ThemeControls';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useI18n } from '../../i18n/I18nContext';
-import { fetchBookDetails } from '../../services/api';
+import { fetchBookDetails, getCachedBookDetails } from '../../services/api';
 import { readSavedBookmark, saveBookmark } from '../../services/bookmarks';
 import { getAdjacentChapter, resolveActiveChapter } from '../../services/chapters';
 import { M3_SPRINGS } from '../../theme/m3Tokens';
@@ -38,18 +39,29 @@ export function BookLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [bookDetails, setBookDetails] = useState<BookDetails | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedDetails = bookId ? getCachedBookDetails(bookId) : null;
+  const [bookDetails, setBookDetails] = useState<BookDetails | null>(cachedDetails);
+  const [loading, setLoading] = useState(!cachedDetails);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const showSkeleton = useDelayedLoading(loading && !bookDetails);
 
   useEffect(() => {
     if (!bookId) return;
+    const forceRefresh = reloadTick > 0;
+    const cached = getCachedBookDetails(bookId);
+    if (cached && !forceRefresh) {
+      setBookDetails(cached);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const controller = new AbortController();
     setLoading(true);
     setError(null);
 
-    fetchBookDetails(bookId, controller.signal)
+    fetchBookDetails(bookId, controller.signal, forceRefresh)
       .then((details) => setBookDetails(details))
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -117,8 +129,11 @@ export function BookLayout() {
 
   return (
     <div className="min-h-screen bg-surface text-on-surface flex flex-col">
-      {/* Floating Expressive Capsule TopBar with seamless top surface fade (no 12px bleed gap) */}
-      <header className="sticky top-0 z-40 w-full bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1">
+      {/* Floating Expressive Capsule TopBar with layoutRoot so sticky layoutId pills never jump on scroll */}
+      <motion.header
+        layoutRoot
+        className="sticky top-0 z-40 w-full bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1"
+      >
         <div className="mx-auto w-full max-w-6xl px-3 sm:px-6">
           <motion.nav
             initial={{ y: -14, opacity: 0 }}
@@ -142,39 +157,41 @@ export function BookLayout() {
               </span>
             </div>
 
-            {/* Desktop Center Nav Pills with layoutId */}
-            <div className="hidden sm:flex items-center gap-1 rounded-full bg-surface-container-high/80 p-1">
-              {navItems.map((item) => {
-                const active = section === item.id;
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.id}
-                    to={item.to}
-                    className={`relative inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-bold transition-colors ${
-                      active
-                        ? 'text-on-primary'
-                        : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                  >
-                    {active && (
-                      <motion.span
-                        layoutId="desktop-nav-pill"
-                        transition={M3_SPRINGS.spatial.fast}
-                        className="absolute inset-0 rounded-full bg-primary"
-                      />
-                    )}
-                    <Icon className="relative z-10 h-3.5 w-3.5" />
-                    <span className="relative z-10">{item.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
+            {/* Desktop Center Nav Pills with isolated LayoutGroup */}
+            <LayoutGroup id="book-desktop-nav">
+              <div className="hidden sm:flex items-center gap-1 rounded-full bg-surface-container-high/80 p-1">
+                {navItems.map((item) => {
+                  const active = section === item.id;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.id}
+                      to={item.to}
+                      className={`relative inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-bold transition-colors ${
+                        active
+                          ? 'text-on-primary'
+                          : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId="desktop-nav-pill"
+                          transition={M3_SPRINGS.spatial.fast}
+                          className="absolute inset-0 rounded-full bg-primary"
+                        />
+                      )}
+                      <Icon className="relative z-10 h-3.5 w-3.5" />
+                      <span className="relative z-10">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </LayoutGroup>
 
             <ThemeControls />
           </motion.nav>
         </div>
-      </header>
+      </motion.header>
 
       <main className="mx-auto flex-1 w-full max-w-6xl px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-12">
         {error ? (
@@ -197,11 +214,13 @@ export function BookLayout() {
               <span>{t.books.retry}</span>
             </motion.button>
           </div>
-        ) : loading || !bookDetails ? (
+        ) : showSkeleton ? (
           <div className="mx-auto max-w-3xl space-y-4">
             <div className="h-12 w-2/3 animate-pulse rounded-2xl bg-surface-container" />
             <div className="h-64 animate-pulse rounded-[28px] bg-surface-container" />
           </div>
+        ) : !bookDetails ? (
+          <div className="min-h-[50vh]" />
         ) : (
           <Outlet
             context={

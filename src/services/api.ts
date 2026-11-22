@@ -3,6 +3,13 @@ import type { BookSummaries, CharacterAsOf } from '../types/knowledge';
 
 const API_BASE = '/api/v1';
 
+// Simple in-memory caches so tab/chapter switching is instant on revisit
+let catalogCache: ProjectCatalogItem[] | null = null;
+const bookDetailsCache = new Map<string, BookDetails>();
+const chapterTextCache = new Map<string, ChapterText>();
+const charactersAsOfCache = new Map<string, CharacterAsOf[]>();
+const summariesAsOfCache = new Map<string, BookSummaries>();
+
 export class ApiError extends Error {
   status: number;
 
@@ -27,18 +34,46 @@ async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await response.json()) as T;
 }
 
+export function getCachedProjectsCatalog(): ProjectCatalogItem[] | null {
+  return catalogCache;
+}
+
+export function getCachedBookDetails(bookId: string): BookDetails | null {
+  return bookDetailsCache.get(bookId) ?? null;
+}
+
+export function getCachedChapterText(bookId: string, chapterId: string): ChapterText | null {
+  return chapterTextCache.get(`${bookId}::${chapterId}`) ?? null;
+}
+
+export function getCachedCharactersAsOf(
+  bookId: string,
+  chapterId: string,
+): CharacterAsOf[] | null {
+  return charactersAsOfCache.get(`${bookId}::${chapterId}`) ?? null;
+}
+
+export function getCachedSummariesAsOf(bookId: string, chapterId: string): BookSummaries | null {
+  return summariesAsOfCache.get(`${bookId}::${chapterId}`) ?? null;
+}
+
 export function fetchProjects(signal?: AbortSignal): Promise<string[]> {
   return requestJson<string[]>('/projects/', signal);
 }
 
-export async function fetchProjectsCatalog(signal?: AbortSignal): Promise<ProjectCatalogItem[]> {
+export async function fetchProjectsCatalog(
+  signal?: AbortSignal,
+  forceRefresh = false,
+): Promise<ProjectCatalogItem[]> {
+  if (catalogCache && !forceRefresh) return catalogCache;
   try {
-    return await requestJson<ProjectCatalogItem[]>('/projects/catalog', signal);
+    const data = await requestJson<ProjectCatalogItem[]>('/projects/catalog', signal);
+    catalogCache = data;
+    return data;
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    // Fallback if backend hasn't been restarted yet to pick up /catalog
     const ids = await fetchProjects(signal);
-    return ids.map((id) => ({
+    const fallback = ids.map((id) => ({
       id,
       title: id,
       author: null,
@@ -46,46 +81,71 @@ export async function fetchProjectsCatalog(signal?: AbortSignal): Promise<Projec
       volumes_count: 0,
       has_cover: false,
     }));
+    catalogCache = fallback;
+    return fallback;
   }
 }
 
-export function fetchBookDetails(bookId: string, signal?: AbortSignal): Promise<BookDetails> {
-  return requestJson<BookDetails>(`/projects/${encodeURIComponent(bookId)}`, signal);
+export async function fetchBookDetails(
+  bookId: string,
+  signal?: AbortSignal,
+  forceRefresh = false,
+): Promise<BookDetails> {
+  const cached = bookDetailsCache.get(bookId);
+  if (cached && !forceRefresh) return cached;
+  const data = await requestJson<BookDetails>(`/projects/${encodeURIComponent(bookId)}`, signal);
+  bookDetailsCache.set(bookId, data);
+  return data;
 }
 
-export function fetchChapterText(
+export async function fetchChapterText(
   bookId: string,
   chapterId: string,
   signal?: AbortSignal,
 ): Promise<ChapterText> {
-  return requestJson<ChapterText>(
+  const key = `${bookId}::${chapterId}`;
+  const cached = chapterTextCache.get(key);
+  if (cached) return cached;
+  const data = await requestJson<ChapterText>(
     `/projects/${encodeURIComponent(bookId)}/chapters/${encodeURIComponent(chapterId)}/text`,
     signal,
   );
+  chapterTextCache.set(key, data);
+  return data;
 }
 
-export function fetchCharactersAsOf(
+export async function fetchCharactersAsOf(
   bookId: string,
   chapterId: string,
   signal?: AbortSignal,
 ): Promise<CharacterAsOf[]> {
+  const key = `${bookId}::${chapterId}`;
+  const cached = charactersAsOfCache.get(key);
+  if (cached) return cached;
   const params = new URLSearchParams({ chapter: chapterId });
-  return requestJson<CharacterAsOf[]>(
+  const data = await requestJson<CharacterAsOf[]>(
     `/projects/${encodeURIComponent(bookId)}/characters/as-of?${params.toString()}`,
     signal,
   );
+  charactersAsOfCache.set(key, data);
+  return data;
 }
 
-export function fetchSummariesAsOf(
+export async function fetchSummariesAsOf(
   bookId: string,
   chapterId: string,
   signal?: AbortSignal,
 ): Promise<BookSummaries> {
+  const key = `${bookId}::${chapterId}`;
+  const cached = summariesAsOfCache.get(key);
+  if (cached) return cached;
   const params = new URLSearchParams({ as_of: chapterId });
-  return requestJson<BookSummaries>(
+  const data = await requestJson<BookSummaries>(
     `/projects/${encodeURIComponent(bookId)}/summaries?${params.toString()}`,
     signal,
   );
+  summariesAsOfCache.set(key, data);
+  return data;
 }
 
 export function getBookCoverUrl(bookId: string): string {

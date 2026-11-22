@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchCharactersAsOf } from '../services/api';
+import { fetchCharactersAsOf, getCachedCharactersAsOf } from '../services/api';
 import { computeChapterDelta } from '../services/codex';
 import type { CharacterAsOf, CharacterDelta } from '../types/knowledge';
 
@@ -8,15 +8,33 @@ export function useCodex(
   activeChapterId: string | null,
   prevChapterId: string | null,
 ) {
-  const [characters, setCharacters] = useState<CharacterAsOf[]>([]);
-  const [prevCharacters, setPrevCharacters] = useState<CharacterAsOf[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const initialChars =
+    bookId && activeChapterId ? (getCachedCharactersAsOf(bookId, activeChapterId) ?? []) : [];
+  const initialPrev =
+    bookId && prevChapterId ? getCachedCharactersAsOf(bookId, prevChapterId) : null;
+
+  const [characters, setCharacters] = useState<CharacterAsOf[]>(initialChars);
+  const [prevCharacters, setPrevCharacters] = useState<CharacterAsOf[] | null>(initialPrev);
+  const [loading, setLoading] = useState(
+    Boolean(bookId && activeChapterId && initialChars.length === 0),
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!bookId || !activeChapterId) {
       setCharacters([]);
       setPrevCharacters(null);
+      setLoading(false);
+      return;
+    }
+
+    const cachedCurrent = getCachedCharactersAsOf(bookId, activeChapterId);
+    const cachedPrev = prevChapterId ? getCachedCharactersAsOf(bookId, prevChapterId) : null;
+    if (cachedCurrent && (!prevChapterId || cachedPrev !== null)) {
+      setCharacters(cachedCurrent);
+      setPrevCharacters(cachedPrev);
+      setLoading(false);
+      setError(null);
       return;
     }
 

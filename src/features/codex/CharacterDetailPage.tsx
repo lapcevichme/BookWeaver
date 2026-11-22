@@ -14,6 +14,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ChapterStepper } from '../../components/ChapterStepper';
 import { M3ShapeBadge, pickShapeForKey, pickToneForKey } from '../../components/M3Shapes';
 import { useCodex } from '../../hooks/useCodex';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useI18n } from '../../i18n/I18nContext';
 import { formatChapterRef } from '../../services/codex';
 import { M3_SPRINGS } from '../../theme/m3Tokens';
@@ -29,6 +30,7 @@ export function CharacterDetailPage() {
 
   const codex = useCodex(bookId, activeChapter?.id ?? null, prevChapter?.id ?? null);
   const [factKind, setFactKind] = useState<string>('all');
+  const showSkeleton = useDelayedLoading(codex.loading && codex.characters.length === 0);
 
   const rawTab = searchParams.get('tab');
   const activeTab: CharacterDetailTab =
@@ -64,13 +66,17 @@ export function CharacterDetailPage() {
   const encodedBook = encodeURIComponent(bookId);
   const asOfQuery = activeChapter ? `?as_of=${encodeURIComponent(activeChapter.id)}` : '';
 
-  if (codex.loading && !character) {
+  if (showSkeleton) {
     return (
       <div className="mx-auto max-w-4xl space-y-4">
         <div className="h-32 animate-pulse rounded-[28px] bg-surface-container" />
         <div className="h-64 animate-pulse rounded-[28px] bg-surface-container" />
       </div>
     );
+  }
+
+  if (codex.loading && !character) {
+    return <div className="mx-auto max-w-4xl min-h-[50vh]" />;
   }
 
   if (!character) {

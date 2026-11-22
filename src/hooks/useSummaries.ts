@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react';
-import { fetchSummariesAsOf } from '../services/api';
+import { fetchSummariesAsOf, getCachedSummariesAsOf } from '../services/api';
 import type { BookSummaries } from '../types/knowledge';
 
 export function useSummaries(bookId: string | null, activeChapterId: string | null) {
-  const [summaries, setSummaries] = useState<BookSummaries | null>(null);
-  const [loading, setLoading] = useState(false);
+  const initial = bookId && activeChapterId ? getCachedSummariesAsOf(bookId, activeChapterId) : null;
+
+  const [summaries, setSummaries] = useState<BookSummaries | null>(initial);
+  const [loading, setLoading] = useState(Boolean(bookId && activeChapterId && !initial));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!bookId || !activeChapterId) {
       setSummaries(null);
+      setLoading(false);
+      return;
+    }
+
+    const cached = getCachedSummariesAsOf(bookId, activeChapterId);
+    if (cached) {
+      setSummaries(cached);
+      setLoading(false);
+      setError(null);
       return;
     }
 

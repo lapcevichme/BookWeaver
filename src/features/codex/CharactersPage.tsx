@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { ChapterStepper } from '../../components/ChapterStepper';
 import { M3ShapeBadge, pickShapeForKey, pickToneForKey } from '../../components/M3Shapes';
 import { useCodex } from '../../hooks/useCodex';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useI18n } from '../../i18n/I18nContext';
 import { filterAndSortCharacters, type RoleFilter } from '../../services/codex';
 import { formatFactCount } from '../../services/formatting';
@@ -37,9 +38,16 @@ function CharacterGridCard({
   return (
     <motion.div
       layout="position"
+      initial={{ opacity: 0, scale: 0.96, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
       whileHover={{ y: -3 }}
       whileTap={{ scale: 0.98 }}
-      transition={M3_SPRINGS.spatial.fast}
+      transition={{
+        layout: M3_SPRINGS.spatial.fast,
+        y: M3_SPRINGS.spatial.fast,
+        scale: M3_SPRINGS.spatial.fast,
+        opacity: M3_SPRINGS.effects.fast,
+      }}
       className="h-full"
     >
       <Link
@@ -125,6 +133,7 @@ export function CharactersPage() {
     useBookContext();
 
   const codex = useCodex(bookId, activeChapter?.id ?? null, prevChapter?.id ?? null);
+  const showSkeleton = useDelayedLoading(codex.loading && codex.characters.length === 0);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [onlyChanged, setOnlyChanged] = useState(false);
@@ -237,12 +246,14 @@ export function CharactersPage() {
       </div>
 
       {/* Equal-Height Full-Width Grid */}
-      {codex.loading && codex.characters.length === 0 ? (
+      {showSkeleton ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((n) => (
             <div key={n} className="h-40 animate-pulse rounded-[28px] bg-surface-container" />
           ))}
         </div>
+      ) : codex.loading && codex.characters.length === 0 ? (
+        <div className="min-h-[40vh]" />
       ) : codex.error ? (
         <div className="rounded-[28px] bg-error-container p-6 text-sm font-medium text-on-error-container">
           {t.codex.error} ({codex.error})

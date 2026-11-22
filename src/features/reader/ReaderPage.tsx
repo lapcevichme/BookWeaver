@@ -16,8 +16,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ChapterStepper } from '../../components/ChapterStepper';
 import { M3ShapeBadge } from '../../components/M3Shapes';
 import { useCodex } from '../../hooks/useCodex';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useI18n } from '../../i18n/I18nContext';
-import { fetchChapterText, getBookImageUrl } from '../../services/api';
+import { fetchChapterText, getBookImageUrl, getCachedChapterText } from '../../services/api';
 import { formatChapterNumber } from '../../services/chapters';
 import { cleanChapterTitle, parseChapterBlocks } from '../../services/formatting';
 import { M3_SPRINGS } from '../../theme/m3Tokens';
@@ -74,13 +75,17 @@ export function ReaderPage() {
   const { bookId, bookDetails, activeChapter, prevChapter, nextChapter, goToChapter } =
     useBookContext();
 
-  const [chapterText, setChapterText] = useState<ChapterText | null>(null);
-  const [loading, setLoading] = useState(false);
+  const cachedText =
+    bookId && activeChapter ? getCachedChapterText(bookId, activeChapter.id) : null;
+  const [chapterText, setChapterText] = useState<ChapterText | null>(cachedText);
+  const [loading, setLoading] = useState(Boolean(bookId && activeChapter && !cachedText));
   const [error, setError] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState<number>(readFontSize);
   const [fontMenuOpen, setFontMenuOpen] = useState(false);
   const [mobileCastOpen, setMobileCastOpen] = useState(false);
   const fontMenuRef = useRef<HTMLDivElement>(null);
+  const showSkeleton = useDelayedLoading(loading && !chapterText);
+  const showUpdatingFade = useDelayedLoading(loading && Boolean(chapterText));
 
   const codex = useCodex(bookId, activeChapter?.id ?? null, prevChapter?.id ?? null);
 
@@ -104,23 +109,32 @@ export function ReaderPage() {
   useEffect(() => {
     if (!bookId || !activeChapter) {
       setChapterText(null);
+      setLoading(false);
+      return;
+    }
+
+    setMobileCastOpen(false);
+    const cached = getCachedChapterText(bookId, activeChapter.id);
+    if (cached) {
+      setChapterText(cached);
+      setLoading(false);
+      setError(null);
+      window.scrollTo({ top: 0, behavior: 'instant' });
       return;
     }
 
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    setMobileCastOpen(false);
 
     fetchChapterText(bookId, activeChapter.id, controller.signal)
       .then((data) => {
         setChapterText(data);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'instant' });
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         setError(err instanceof Error ? err.message : 'Unknown error');
-        setChapterText(null);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -289,134 +303,138 @@ export function ReaderPage() {
         </div>
       )}
 
-      {/* Main Reading Sheet */}
-      <AnimatePresence mode="wait">
-        <motion.article
-          key={activeChapter?.id ?? 'empty'}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ y: M3_SPRINGS.spatial.default, opacity: M3_SPRINGS.effects.default }}
-          className="rounded-[32px] border border-outline-variant/40 bg-surface-container-lowest px-5 py-6 sm:px-12 sm:py-11"
-        >
-          {activeChapter && (
-            <header className="mx-auto mb-7 max-w-[68ch] space-y-1.5 border-b border-outline-variant/40 pb-5">
-              <div className="font-mono text-xs font-bold uppercase tracking-wider text-primary">
-                {t.bookmark.volumeFull} {activeChapter.volume_num} · {t.bookmark.chapterFull}{' '}
-                {formatChapterNumber(activeChapter.chapter_num)}
-              </div>
-              {cleanTitle && (
-                <h1 className="text-2xl font-extrabold tracking-tight text-on-surface sm:text-3xl">
-                  {cleanTitle}
-                </h1>
-              )}
-            </header>
-          )}
-
-          {loading ? (
-            <div className="mx-auto max-w-[68ch] space-y-4">
-              {[1, 2, 3, 4, 5, 6].map((n) => (
-                <div
-                  key={n}
-                  className="h-4 animate-pulse rounded-full bg-surface-container-high"
-                  style={{ width: `${n % 2 === 0 ? 92 : 100}%` }}
-                />
-              ))}
+      {/* Main Reading Sheet — stable container, gentle opacity fade without height collapse */}
+      <article
+        className={`rounded-[32px] border border-outline-variant/40 bg-surface-container-lowest px-5 py-6 transition-opacity duration-150 sm:px-12 sm:py-11 ${
+          showUpdatingFade ? 'opacity-65' : 'opacity-100'
+        }`}
+      >
+        {activeChapter && (
+          <header className="mx-auto mb-7 max-w-[68ch] space-y-1.5 border-b border-outline-variant/40 pb-5">
+            <div className="font-mono text-xs font-bold uppercase tracking-wider text-primary">
+              {t.bookmark.volumeFull} {activeChapter.volume_num} · {t.bookmark.chapterFull}{' '}
+              {formatChapterNumber(activeChapter.chapter_num)}
             </div>
-          ) : error ? (
-            <div className="mx-auto max-w-[68ch] space-y-1.5 rounded-2xl bg-error-container p-5 text-on-error-container">
-              <div className="flex items-center gap-2 text-sm font-bold">
-                <AlertCircle className="h-4 w-4" />
-                <span>{t.reader.chapterTextMissing}</span>
-              </div>
-              <p className="text-xs opacity-90">{t.reader.chapterTextHint}</p>
-            </div>
-          ) : (
-            <div
-              className="mx-auto max-w-[68ch] space-y-4 leading-[1.82] text-on-surface"
-              style={{ fontSize: `${fontSize}px` }}
-            >
-              {blocks.map((block, idx) => {
-                if (block.type === 'sceneBreak') {
-                  return (
-                    <div
-                      key={idx}
-                      aria-hidden="true"
-                      className="flex items-center justify-center gap-3 py-4"
-                    >
-                      <M3ShapeBadge
-                        variant="clover4"
-                        interactive={false}
-                        className="h-3.5 w-3.5 text-primary/40"
-                      />
-                      <M3ShapeBadge
-                        variant="softBurst"
-                        interactive={false}
-                        className="h-4 w-4 text-tertiary/55"
-                      />
-                      <M3ShapeBadge
-                        variant="clover4"
-                        interactive={false}
-                        className="h-3.5 w-3.5 text-primary/40"
-                      />
-                    </div>
-                  );
-                }
+            {cleanTitle && (
+              <h1 className="text-2xl font-extrabold tracking-tight text-on-surface sm:text-3xl">
+                {cleanTitle}
+              </h1>
+            )}
+          </header>
+        )}
 
-                if (block.type === 'illustration') {
-                  return (
-                    <ChapterIllustration
-                      key={idx}
-                      bookId={bookId}
-                      filename={block.filename}
-                      alt={block.alt}
+        {showSkeleton ? (
+          <div className="mx-auto max-w-[68ch] space-y-4">
+            {[1, 2, 3, 4, 5, 6].map((n) => (
+              <div
+                key={n}
+                className="h-4 animate-pulse rounded-full bg-surface-container-high"
+                style={{ width: `${n % 2 === 0 ? 92 : 100}%` }}
+              />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="mx-auto max-w-[68ch] space-y-1.5 rounded-2xl bg-error-container p-5 text-on-error-container">
+            <div className="flex items-center gap-2 text-sm font-bold">
+              <AlertCircle className="h-4 w-4" />
+              <span>{t.reader.chapterTextMissing}</span>
+            </div>
+            <p className="text-xs opacity-90">{t.reader.chapterTextHint}</p>
+          </div>
+        ) : chapterText ? (
+          <motion.div
+            key={chapterText.chapter_id}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              y: M3_SPRINGS.spatial.fast,
+              opacity: M3_SPRINGS.effects.default,
+            }}
+            className="mx-auto max-w-[68ch] space-y-4 leading-[1.82] text-on-surface"
+            style={{ fontSize: `${fontSize}px` }}
+          >
+            {blocks.map((block, idx) => {
+              if (block.type === 'sceneBreak') {
+                return (
+                  <div
+                    key={idx}
+                    aria-hidden="true"
+                    className="flex items-center justify-center gap-3 py-4"
+                  >
+                    <M3ShapeBadge
+                      variant="clover4"
+                      interactive={false}
+                      className="h-3.5 w-3.5 text-primary/40"
                     />
-                  );
-                }
+                    <M3ShapeBadge
+                      variant="softBurst"
+                      interactive={false}
+                      className="h-4 w-4 text-tertiary/55"
+                    />
+                    <M3ShapeBadge
+                      variant="clover4"
+                      interactive={false}
+                      className="h-3.5 w-3.5 text-primary/40"
+                    />
+                  </div>
+                );
+              }
 
-                if (block.type === 'heading') {
-                  return (
-                    <h2 key={idx} className="pt-4 text-xl font-extrabold tracking-tight text-on-surface">
-                      {block.text}
-                    </h2>
-                  );
-                }
+              if (block.type === 'illustration') {
+                return (
+                  <ChapterIllustration
+                    key={idx}
+                    bookId={bookId}
+                    filename={block.filename}
+                    alt={block.alt}
+                  />
+                );
+              }
 
-                return <p key={idx}>{block.text}</p>;
-              })}
-            </div>
-          )}
+              if (block.type === 'heading') {
+                return (
+                  <h2 key={idx} className="pt-4 text-xl font-extrabold tracking-tight text-on-surface">
+                    {block.text}
+                  </h2>
+                );
+              }
 
-          {/* Bottom Chapter Navigation (nowrap, balanced on 390px) */}
-          {!loading && activeChapter && (
-            <footer className="mx-auto mt-10 flex max-w-[68ch] items-center justify-between gap-2.5 border-t border-outline-variant/40 pt-6">
-              <motion.button
-                type="button"
-                disabled={!prevChapter}
-                whileTap={prevChapter ? { scale: 0.95, borderRadius: '14px' } : undefined}
-                transition={M3_SPRINGS.spatial.fast}
-                onClick={() => prevChapter && goToChapter(prevChapter.id)}
-                className="m3-color-transition inline-flex h-12 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-surface-container-high px-4 text-xs font-bold text-on-surface hover:bg-secondary-container hover:text-on-secondary-container disabled:pointer-events-none disabled:opacity-35 sm:px-5 sm:text-sm"
-              >
-                <ArrowLeft className="h-4 w-4 shrink-0" />
-                <span>{t.reader.prevChapterCta}</span>
-              </motion.button>
+              return <p key={idx}>{block.text}</p>;
+            })}
+          </motion.div>
+        ) : (
+          <div className="min-h-[45vh]" />
+        )}
 
-              <motion.button
-                type="button"
-                disabled={!nextChapter}
-                whileTap={nextChapter ? { scale: 0.95, borderRadius: '14px' } : undefined}
-                transition={M3_SPRINGS.spatial.fast}
-                onClick={() => nextChapter && goToChapter(nextChapter.id)}
-                className="m3-color-transition inline-flex h-12 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-5 text-xs font-bold text-on-primary hover:opacity-95 disabled:pointer-events-none disabled:opacity-35 sm:px-6 sm:text-sm"
-              >
-                <span>{t.reader.nextChapterCta}</span>
-                <ArrowRight className="h-4 w-4 shrink-0" />
-              </motion.button>
-            </footer>
-          )}
-        </motion.article>
-      </AnimatePresence>
+        {/* Bottom Chapter Navigation (nowrap, balanced on 390px) */}
+        {chapterText && activeChapter && (
+          <footer className="mx-auto mt-10 flex max-w-[68ch] items-center justify-between gap-2.5 border-t border-outline-variant/40 pt-6">
+            <motion.button
+              type="button"
+              disabled={!prevChapter}
+              whileTap={prevChapter ? { scale: 0.95, borderRadius: '14px' } : undefined}
+              transition={M3_SPRINGS.spatial.fast}
+              onClick={() => prevChapter && goToChapter(prevChapter.id)}
+              className="m3-color-transition inline-flex h-12 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-surface-container-high px-4 text-xs font-bold text-on-surface hover:bg-secondary-container hover:text-on-secondary-container disabled:pointer-events-none disabled:opacity-35 sm:px-5 sm:text-sm"
+            >
+              <ArrowLeft className="h-4 w-4 shrink-0" />
+              <span>{t.reader.prevChapterCta}</span>
+            </motion.button>
+
+            <motion.button
+              type="button"
+              disabled={!nextChapter}
+              whileTap={nextChapter ? { scale: 0.95, borderRadius: '14px' } : undefined}
+              transition={M3_SPRINGS.spatial.fast}
+              onClick={() => nextChapter && goToChapter(nextChapter.id)}
+              className="m3-color-transition inline-flex h-12 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-5 text-xs font-bold text-on-primary hover:opacity-95 disabled:pointer-events-none disabled:opacity-35 sm:px-6 sm:text-sm"
+            >
+              <span>{t.reader.nextChapterCta}</span>
+              <ArrowRight className="h-4 w-4 shrink-0" />
+            </motion.button>
+          </footer>
+        )}
+      </article>
     </div>
   );
 }
