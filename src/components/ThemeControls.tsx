@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Languages, Moon, Palette, Sun } from 'lucide-react';
-import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useM3Theme } from '../hooks/useTheme';
 import { useI18n } from '../i18n/I18nContext';
 import { M3_SPRINGS, THEME_SEEDS } from '../theme/m3Tokens';
@@ -30,45 +30,42 @@ export function ThemeControls() {
   return (
     <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
       {/* Desktop inline Dynamic Color seed switcher */}
-      <LayoutGroup id="theme-seeds">
-        <div
-          className="hidden md:flex items-center gap-1 rounded-full bg-surface-container-high p-1"
-          role="group"
-          aria-label={t.theme.paletteLabel}
-        >
-          <Palette className="ml-1.5 h-3.5 w-3.5 text-on-surface-variant" />
-          {THEME_SEEDS.map((seed) => {
-            const selected = seed.id === seedId;
-            return (
-              <motion.button
-                key={seed.id}
-                type="button"
-                onClick={() => setSeedId(seed.id)}
-                title={seed.name}
-                aria-label={seed.name}
-                aria-pressed={selected}
-                animate={{
-                  borderRadius: selected ? '8px' : '9999px',
-                  scale: selected ? 1.08 : 1,
-                }}
-                whileHover={{ scale: 1.15 }}
-                whileTap={{ scale: 0.9, borderRadius: '6px' }}
+      <div
+        className="hidden md:flex items-center gap-1 rounded-full bg-surface-container-high p-1"
+        role="group"
+        aria-label={t.theme.paletteLabel}
+      >
+        <Palette className="ml-1.5 h-3.5 w-3.5 text-on-surface-variant" />
+        {THEME_SEEDS.map((seed) => {
+          const selected = seed.id === seedId;
+          return (
+            <motion.button
+              key={seed.id}
+              type="button"
+              onClick={() => setSeedId(seed.id)}
+              title={seed.name}
+              aria-label={seed.name}
+              aria-pressed={selected}
+              animate={{
+                borderRadius: selected ? '8px' : '9999px',
+                scale: selected ? 1.08 : 1,
+              }}
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.9, borderRadius: '6px' }}
+              transition={M3_SPRINGS.spatial.fast}
+              className="relative flex h-5 w-5 cursor-pointer items-center justify-center"
+              style={{ backgroundColor: seed.hex }}
+            >
+              <motion.span
+                initial={false}
+                animate={{ scale: selected ? 1 : 0, opacity: selected ? 1 : 0 }}
                 transition={M3_SPRINGS.spatial.fast}
-                className="relative flex h-5 w-5 cursor-pointer items-center justify-center"
-                style={{ backgroundColor: seed.hex }}
-              >
-                {selected && (
-                  <motion.span
-                    layoutId="active-seed-dot"
-                    className="h-1.5 w-1.5 rounded-full bg-white"
-                    transition={M3_SPRINGS.spatial.fast}
-                  />
-                )}
-              </motion.button>
-            );
-          })}
-        </div>
-      </LayoutGroup>
+                className="h-1.5 w-1.5 rounded-full bg-white"
+              />
+            </motion.button>
+          );
+        })}
+      </div>
 
       {/* Mobile compact palette button */}
       <div ref={paletteRef} className="relative md:hidden">

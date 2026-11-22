@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Link,
   Outlet,
@@ -8,8 +8,8 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, BookOpen, RefreshCw, ScrollText, Users } from 'lucide-react';
-import { LayoutGroup, motion } from 'motion/react';
+import { AlertCircle, ArrowLeft, BookOpen, RefreshCw, ScrollText, Search, Users } from 'lucide-react';
+import { motion } from 'motion/react';
 import { ThemeControls } from '../../components/ThemeControls';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useI18n } from '../../i18n/I18nContext';
@@ -18,6 +18,7 @@ import { readSavedBookmark, saveBookmark } from '../../services/bookmarks';
 import { getAdjacentChapter, resolveActiveChapter } from '../../services/chapters';
 import { M3_SPRINGS } from '../../theme/m3Tokens';
 import type { BookDetails, ChapterInfo } from '../../types/book';
+import { QuickSearchModal } from './QuickSearchModal';
 
 export interface BookOutletContext {
   bookId: string;
@@ -44,7 +45,20 @@ export function BookLayout() {
   const [loading, setLoading] = useState(!cachedDetails);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const showSkeleton = useDelayedLoading(loading && !bookDetails);
+
+  // Global Ctrl+K / Cmd+K shortcut for spoiler-free quick search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setQuickSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!bookId) return;
@@ -127,13 +141,26 @@ export function BookLayout() {
     { id: 'recap' as const, label: t.tabs.recap, to: recapHref, icon: ScrollText },
   ];
 
+  // Local offsetLeft/offsetWidth pill measurement — completely immune to window.scrollY
+  const navItemRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
+  const [pillRect, setPillRect] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = navItemRefs.current[section];
+      if (el) {
+        setPillRect({ left: el.offsetLeft, width: el.offsetWidth });
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [section, t.tabs.read, t.tabs.codex, t.tabs.recap]);
+
   return (
     <div className="min-h-screen bg-surface text-on-surface flex flex-col">
-      {/* Floating Expressive Capsule TopBar with layoutRoot so sticky layoutId pills never jump on scroll */}
-      <motion.header
-        layoutRoot
-        className="sticky top-0 z-40 w-full bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1"
-      >
+      {/* Floating Expressive Capsule TopBar */}
+      <header className="fixed top-0 inset-x-0 z-40 bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1">
         <div className="mx-auto w-full max-w-6xl px-3 sm:px-6">
           <motion.nav
             initial={{ y: -14, opacity: 0 }}
@@ -157,43 +184,61 @@ export function BookLayout() {
               </span>
             </div>
 
-            {/* Desktop Center Nav Pills with isolated LayoutGroup */}
-            <LayoutGroup id="book-desktop-nav">
-              <div className="hidden sm:flex items-center gap-1 rounded-full bg-surface-container-high/80 p-1">
-                {navItems.map((item) => {
-                  const active = section === item.id;
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.id}
-                      to={item.to}
-                      className={`relative inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-bold transition-colors ${
-                        active
-                          ? 'text-on-primary'
-                          : 'text-on-surface-variant hover:text-on-surface'
-                      }`}
-                    >
-                      {active && (
-                        <motion.span
-                          layoutId="desktop-nav-pill"
-                          transition={M3_SPRINGS.spatial.fast}
-                          className="absolute inset-0 rounded-full bg-primary"
-                        />
-                      )}
-                      <Icon className="relative z-10 h-3.5 w-3.5" />
-                      <span className="relative z-10">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </LayoutGroup>
+            {/* Desktop Center Nav Pills (local x/width spring, zero scroll-jump) */}
+            <div className="relative hidden sm:flex items-center gap-1 rounded-full bg-surface-container-high/80 p-1">
+              {pillRect && (
+                <motion.span
+                  aria-hidden="true"
+                  initial={false}
+                  animate={{ x: pillRect.left - 4, width: pillRect.width }}
+                  transition={M3_SPRINGS.spatial.fast}
+                  className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-primary"
+                />
+              )}
+              {navItems.map((item) => {
+                const active = section === item.id;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.id}
+                    ref={(el) => {
+                      navItemRefs.current[item.id] = el;
+                    }}
+                    to={item.to}
+                    className={`relative z-10 inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-xs font-bold transition-colors ${
+                      active
+                        ? 'text-on-primary'
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
 
-            <ThemeControls />
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.92, borderRadius: '10px' }}
+                transition={M3_SPRINGS.spatial.fast}
+                onClick={() => setQuickSearchOpen(true)}
+                aria-label={t.quickSearch.triggerLabel}
+                title={`${t.quickSearch.triggerLabel} (Ctrl+K)`}
+                className="m3-color-transition inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full bg-surface-container-high px-2.5 text-xs font-bold text-on-surface hover:bg-primary-container hover:text-on-primary-container"
+              >
+                <Search className="h-4 w-4" />
+                <span className="hidden lg:inline font-mono text-[11px] opacity-70">Ctrl K</span>
+              </motion.button>
+              <ThemeControls />
+            </div>
           </motion.nav>
         </div>
-      </motion.header>
+      </header>
 
-      <main className="mx-auto flex-1 w-full max-w-6xl px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-12">
+      <main className="mx-auto flex-1 w-full max-w-6xl px-4 pt-20 pb-28 sm:px-6 sm:pt-22 sm:pb-12">
         {error ? (
           <div className="flex flex-col items-start justify-between gap-4 rounded-[28px] bg-error-container p-6 text-on-error-container sm:flex-row sm:items-center">
             <div className="flex items-start gap-3">
@@ -253,13 +298,12 @@ export function BookLayout() {
                 className="flex flex-col items-center justify-center gap-1"
               >
                 <span className="relative flex h-8 w-16 items-center justify-center">
-                  {active && (
-                    <motion.span
-                      layoutId="mobile-nav-pill"
-                      transition={M3_SPRINGS.spatial.fast}
-                      className="absolute inset-0 rounded-full bg-secondary-container"
-                    />
-                  )}
+                  <motion.span
+                    initial={false}
+                    animate={{ scaleX: active ? 1 : 0.4, opacity: active ? 1 : 0 }}
+                    transition={M3_SPRINGS.spatial.fast}
+                    className="absolute inset-0 rounded-full bg-secondary-container"
+                  />
                   <Icon
                     className={`relative z-10 h-5 w-5 ${
                       active ? 'text-on-secondary-container' : 'text-on-surface-variant'
@@ -278,6 +322,13 @@ export function BookLayout() {
           })}
         </div>
       </nav>
+      <QuickSearchModal
+        open={quickSearchOpen}
+        bookId={bookId}
+        activeChapterId={activeChapter?.id ?? null}
+        chapters={chapters}
+        onClose={() => setQuickSearchOpen(false)}
+      />
     </div>
   );
 }

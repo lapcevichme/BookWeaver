@@ -175,7 +175,7 @@ export function LibraryPage() {
     <div className="min-h-screen bg-surface text-on-surface">
       <motion.header
         layoutRoot
-        className="sticky top-0 z-40 w-full bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1"
+        className="fixed top-0 inset-x-0 z-40 bg-gradient-to-b from-surface via-surface/95 to-transparent pt-3 pb-1"
       >
         <div className="mx-auto w-full max-w-6xl px-3 sm:px-6">
           <motion.nav
@@ -195,7 +195,7 @@ export function LibraryPage() {
         </div>
       </motion.header>
 
-      <main className="mx-auto max-w-6xl space-y-7 px-4 py-6 sm:px-6 sm:py-9">
+      <main className="mx-auto max-w-6xl space-y-7 px-4 pt-20 pb-8 sm:px-6 sm:pt-24 sm:pb-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-1">
             <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
