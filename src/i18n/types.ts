@@ -55,6 +55,32 @@ export interface Dictionary {
     prevChapterCta: string;
     fontSmaller: string;
     fontLarger: string;
+    highlightNames: string;
+    openFullDossier: string;
+    latestFacts: string;
+    closeSheet: string;
+    settingsTitle: string;
+    fontSize: string;
+    lineHeight: string;
+    lineTight: string;
+    lineNormal: string;
+    lineRelaxed: string;
+    columnWidth: string;
+    widthNarrow: string;
+    widthStandard: string;
+    widthWide: string;
+    fontFamily: string;
+    fontSans: string;
+    fontSerif: string;
+    keyboardHint: string;
+  };
+  quickSearch: {
+    triggerLabel: string;
+    placeholder: string;
+    charactersGroup: string;
+    chaptersGroup: string;
+    empty: string;
+    hint: string;
   };
   codex: {
     searchPlaceholder: string;
