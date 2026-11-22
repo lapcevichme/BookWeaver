@@ -28,6 +28,7 @@ import { CharacterQuickSheet } from './CharacterQuickSheet';
 import {
   COLUMN_WIDTH_CLASS,
   LINE_HEIGHT_VALUE,
+  READER_WRAPPER_WIDTH_CLASS,
   ReaderSettingsPopover,
   readReaderPrefs,
   saveReaderPrefs,
@@ -308,7 +309,9 @@ export function ReaderPage() {
   const cleanTitle = cleanChapterTitle(activeChapter?.title);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 sm:space-y-5">
+    <div
+      className={`mx-auto ${READER_WRAPPER_WIDTH_CLASS[prefs.columnWidth]} space-y-4 transition-[max-width] duration-300 sm:space-y-5`}
+    >
       {/* Slim fixed reading progress bar along the very top edge */}
       <div
         aria-hidden="true"

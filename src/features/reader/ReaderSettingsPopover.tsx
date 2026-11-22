@@ -71,9 +71,15 @@ export const LINE_HEIGHT_VALUE: Record<ReaderLineHeight, string> = {
 };
 
 export const COLUMN_WIDTH_CLASS: Record<ReaderColumnWidth, string> = {
-  narrow: 'max-w-[56ch]',
+  narrow: 'max-w-[52ch]',
   standard: 'max-w-[68ch]',
-  wide: 'max-w-[82ch]',
+  wide: 'max-w-[96ch]',
+};
+
+export const READER_WRAPPER_WIDTH_CLASS: Record<ReaderColumnWidth, string> = {
+  narrow: 'max-w-2xl',
+  standard: 'max-w-4xl',
+  wide: 'max-w-6xl',
 };
 
 interface ReaderSettingsPopoverProps {
