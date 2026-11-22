@@ -48,10 +48,10 @@ export function BookLayout() {
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const showSkeleton = useDelayedLoading(loading && !bookDetails);
 
-  // Global Ctrl+K / Cmd+K shortcut for spoiler-free quick search
+  // Global Ctrl+K / Cmd+K shortcut (works in any keyboard layout, e.g. RU/EN)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
         e.preventDefault();
         setQuickSearchOpen((v) => !v);
       }
@@ -166,7 +166,7 @@ export function BookLayout() {
             initial={{ y: -14, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ y: M3_SPRINGS.spatial.default, opacity: M3_SPRINGS.effects.default }}
-            className="m3-color-transition flex items-center justify-between gap-2 rounded-full border border-outline-variant/60 bg-surface-container/95 px-2 py-2 shadow-sm backdrop-blur-md sm:px-3"
+            className="m3-color-transition flex items-center justify-between gap-2 rounded-full border border-outline-variant/60 bg-surface-container/95 px-2 py-2 shadow-sm backdrop-blur-md md:grid md:grid-cols-[1fr_auto_1fr] md:items-center sm:px-3"
           >
             <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
               <motion.div whileTap={{ scale: 0.92 }} transition={M3_SPRINGS.spatial.fast}>
@@ -179,13 +179,13 @@ export function BookLayout() {
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               </motion.div>
-              <span className="truncate text-sm font-bold tracking-tight max-w-[130px] sm:max-w-[200px]">
+              <span className="truncate text-sm font-bold tracking-tight max-w-[140px] sm:max-w-[200px]">
                 {bookDetails?.title || bookId}
               </span>
             </div>
 
-            {/* Desktop Center Nav Pills (local x/width spring, zero scroll-jump) */}
-            <div className="relative hidden sm:flex items-center gap-1 rounded-full bg-surface-container-high/80 p-1">
+            {/* Desktop Center Nav Pills (truly centered via 1fr_auto_1fr grid) */}
+            <div className="relative hidden md:flex justify-self-center items-center gap-1 rounded-full bg-surface-container-high/80 p-1">
               {pillRect && (
                 <motion.span
                   aria-hidden="true"
@@ -218,7 +218,7 @@ export function BookLayout() {
               })}
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <div className="flex shrink-0 items-center justify-end gap-1.5 sm:gap-2">
               <motion.button
                 type="button"
                 whileHover={{ scale: 1.04 }}
@@ -238,7 +238,7 @@ export function BookLayout() {
         </div>
       </header>
 
-      <main className="mx-auto flex-1 w-full max-w-6xl px-4 pt-20 pb-28 sm:px-6 sm:pt-22 sm:pb-12">
+      <main className="mx-auto flex-1 w-full max-w-6xl px-4 pt-20 pb-28 sm:px-6 md:pt-22 md:pb-12">
         {error ? (
           <div className="flex flex-col items-start justify-between gap-4 rounded-[28px] bg-error-container p-6 text-on-error-container sm:flex-row sm:items-center">
             <div className="flex items-start gap-3">
@@ -282,10 +282,10 @@ export function BookLayout() {
         )}
       </main>
 
-      {/* Mobile M3 Flexible Bottom Navigation Bar (3 destinations) */}
+      {/* Mobile & Compact Tablet M3 Flexible Bottom Navigation Bar (3 destinations) */}
       <nav
         aria-label="Mobile navigation"
-        className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-outline-variant/50 bg-surface-container/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-outline-variant/50 bg-surface-container/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
       >
         <div className="mx-auto grid h-16 max-w-md grid-cols-3">
           {navItems.map((item) => {
