@@ -319,11 +319,11 @@ class CharacterAnalysisPipeline:
         done_count = 0
         for c in vol_chaps:
             state = getattr(c, "characters_state", None)
-            if state in ("done", "skipped"):
+            if state in ("done", "skipped", "catchup"):
                 done_count += 1
             elif hasattr(repo, "get_chapter"):
                 db_c = repo.get_chapter(c.id)
-                if db_c and getattr(db_c, "characters_state", None) in ("done", "skipped"):
+                if db_c and getattr(db_c, "characters_state", None) in ("done", "skipped", "catchup"):
                     done_count += 1
 
         if done_count < len(vol_ids):

@@ -67,7 +67,7 @@ class SummaryGenerationPipeline:
                 
                 metrics_collector.start_chapter(f"{book_name}:{chapter_id}")
 
-                if chapter_id in summary_archive.summaries:
+                if chapter_id in summary_archive.summaries or getattr(chap, "characters_state", None) == "catchup":
                     continue
 
                 logger.info(f"Обработка главы [{i + 1}/{total_chapters}]: {chapter_id}")
@@ -134,7 +134,10 @@ class SummaryGenerationPipeline:
             # Проверяем генерацию рекапа для последнего обработанного тома
             if current_volume is not None and not repo.get_volume_summary(current_volume):
                 vol_chaps = [c for c in db_chapters if getattr(c, "volume_num", 1) == current_volume]
-                if all(c.id in summary_archive.summaries for c in vol_chaps):
+                if all(
+                    c.id in summary_archive.summaries or getattr(c, "characters_state", None) == "catchup"
+                    for c in vol_chaps
+                ):
                     logger.info(f"Все главы тома {current_volume} обработаны, генерирую рекап тома...")
                     self.generate_volume_summary(repo, current_volume)
 
@@ -158,7 +161,18 @@ class SummaryGenerationPipeline:
             return None
 
         summary_archive = repo.get_summary_archive()
-        chapter_summaries = []
+        chapter_summaries: List[str] = []
+
+        # Для смешанных томов (часть глав прошла через fast-catchup) сначала добавляем сохранённые батч-рекапы
+        book = repo.get_book() if hasattr(repo, "get_book") else None
+        raw_catchup_recaps = (
+            ((book.config or {}).get("catchup_recaps") or {}).get(str(volume_num), [])
+            if book else []
+        )
+        for pair in raw_catchup_recaps:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2 and str(pair[1]).strip():
+                chapter_summaries.append(f"{pair[0]}: {pair[1]}")
+
         for chap in vol_chaps:
             s = summary_archive.summaries.get(chap.id)
             if s and s.synopsis:
@@ -185,5 +199,20 @@ class SummaryGenerationPipeline:
             return None
 
         repo.save_volume_summary(volume_num, raw_result.summary)
+        if raw_catchup_recaps and hasattr(repo, "get_session"):
+            with repo.get_session() as session:
+                from core.data_models import Book
+                db_book = session.get(Book, repo.book_id)
+                if db_book and isinstance(db_book.config, dict) and "catchup_recaps" in db_book.config:
+                    cfg = dict(db_book.config)
+                    recaps = dict(cfg.get("catchup_recaps") or {})
+                    recaps.pop(str(volume_num), None)
+                    if recaps:
+                        cfg["catchup_recaps"] = recaps
+                    else:
+                        cfg.pop("catchup_recaps", None)
+                    db_book.config = cfg
+                    session.add(db_book)
+                    session.commit()
         logger.info(f"✅ Пересказ тома {volume_num} успешно сохранен ({len(raw_result.summary)} симв).")
         return raw_result

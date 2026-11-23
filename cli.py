@@ -249,6 +249,22 @@ def cmd_run(args) -> dict:
             "scenario_skipped": done.get("scenario_skipped", []), "speakers": done.get("speakers", [])}
 
 
+def cmd_catchup(args) -> dict:
+    _repo(args.book)
+    from pipelines.fast_catchup import FastCatchupPipeline
+    pipe = FastCatchupPipeline(_app().model_manager)
+    res = pipe.run(
+        book_name=args.book,
+        until_chapter=args.until_chapter,
+        until_volume=args.until_volume,
+        batch_max_words=args.batch_words,
+        batch_max_chapters=args.batch_chapters,
+        run_boundary_audit=not args.no_audit,
+        progress_callback=_progress,
+    )
+    return {"book": args.book, "result": "ok", **res}
+
+
 def cmd_tts(args) -> dict:
     _repo(args.book)
     if _on_battery():
@@ -809,6 +825,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true",
                    help="переделать сценарии готовых глав с нуля (у озвученных аудио отвяжется от реплик)")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("catchup", parents=[common], help="быстрый прогрев базы знаний до закладки K (главы 1..K)")
+    p.add_argument("book")
+    p.add_argument("--until-chapter", default=None, help="ID последней главы быстрого прогрева (напр. vol_2_chap_22)")
+    p.add_argument("--until-volume", type=int, default=None, help="номер последнего тома быстрого прогрева (включительно)")
+    p.add_argument("--batch-words", type=int, default=18_000, help="целевой размер батча в словах (по умолчанию 18000)")
+    p.add_argument("--batch-chapters", type=int, default=25, help="максимум глав в одном батче (по умолчанию 25)")
+    p.add_argument("--no-audit", action="store_true", help="пропустить аудит плейсхолдеров и связей личностей на границе K")
+    p.set_defaults(func=cmd_catchup)
 
     p = sub.add_parser("tts", parents=[common], help="озвучка глав")
     p.add_argument("book"); p.add_argument("chapters", nargs="+", help="vol_1_chap_1 ...")

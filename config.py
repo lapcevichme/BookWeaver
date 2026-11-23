@@ -54,7 +54,7 @@ _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFO
 # sound_design с reasoning: без него хуже подбор SFX.
 _OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get(
     "OPENROUTER_REASONING_BY_STAGE",
-    '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low", "placeholder_audit": "low", "identity_scan": "low", "identity_judge": "low", "identity_scope": "low"}'
+    '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low", "fast_catchup": "none", "placeholder_audit": "low", "identity_scan": "low", "identity_judge": "low", "identity_scope": "low"}'
 )
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
 # TTS Settings Defaults
@@ -87,6 +87,7 @@ _LLM_RETRY_JITTER_DEFAULT = 0.2
 _LLM_TIMEOUT_BY_STAGE_DEFAULT = {
     "character_recon": 240,
     "character_patch": 360,
+    "fast_catchup": 360,
     "chapter_summary": 180,
     "volume_summary": 180,
     "emotion_analysis": 180,
