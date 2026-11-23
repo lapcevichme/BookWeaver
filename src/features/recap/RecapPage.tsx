@@ -111,7 +111,16 @@ export function RecapPage() {
           <p className="text-sm text-on-surface-variant">{t.recap.empty}</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <motion.div
+          key={activeChapter?.id ?? 'recap'}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{
+            y: M3_SPRINGS.spatial.default,
+            opacity: M3_SPRINGS.effects.default,
+          }}
+          className="space-y-4"
+        >
           {/* Compact quick-jump strip when there are many volumes */}
           {volumeGroups.length > 3 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -349,7 +358,7 @@ export function RecapPage() {
               </section>
             );
           })}
-        </div>
+        </motion.div>
       )}
     </div>
   );
