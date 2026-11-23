@@ -65,6 +65,24 @@ class MessageResponse(BaseModel):
 class ChapterPreviewResponse(BaseModel):
     preview: str
 
+
+class ChapterTextResponse(BaseModel):
+    chapter_id: str
+    volume_num: int
+    chapter_num: float
+    title: Optional[str] = None
+    text: str
+    source: str = "db"
+
+
+class ProjectCatalogItem(BaseModel):
+    id: str
+    title: str
+    author: Optional[str] = None
+    chapters_count: int = 0
+    volumes_count: int = 0
+    has_cover: bool = False
+
 # --- Metrics DTOs ---
 
 class ChapterMetricsDto(BaseModel):

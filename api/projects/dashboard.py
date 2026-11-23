@@ -8,7 +8,8 @@ import config
 from core.book_repository import BookRepository
 from core import path_manager
 from core.data_models import ChapterStatus
-from api.models import DashboardSummaryResponse, DashboardRecentProject, DashboardSystemStatus
+from pathlib import Path
+from api.models import DashboardSummaryResponse, DashboardRecentProject, DashboardSystemStatus, ProjectCatalogItem
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +108,47 @@ async def list_projects():
         if d.is_dir() and (d / "project.db").exists():
             projects.append(d.name)
     return sorted(projects)
+
+
+@router.get("/catalog", response_model=List[ProjectCatalogItem])
+async def list_projects_catalog():
+    """Возвращает обогащённый список книг для библиотеки (название, автор, главы, наличие обложки)."""
+    books_dir = config.OUTPUT_DIR
+    if not books_dir.exists():
+        return []
+
+    catalog: List[ProjectCatalogItem] = []
+    project_dirs = sorted(
+        (d for d in books_dir.iterdir() if d.is_dir() and (d / "project.db").exists()),
+        key=lambda d: d.name,
+    )
+
+    for d in project_dirs:
+        book_id = d.name
+        try:
+            repo = BookRepository(book_id=book_id)
+            book = repo.get_book()
+            if not book:
+                continue
+            chapters = repo.get_all_chapters()
+            volumes = {c.volume_num for c in chapters} if chapters else set()
+
+            has_cover = False
+            if book.cover_image_path:
+                cover_path = Path(book.cover_image_path)
+                if not cover_path.is_absolute():
+                    cover_path = path_manager.get_book_output_dir(book_id) / cover_path
+                has_cover = cover_path.exists()
+
+            catalog.append(ProjectCatalogItem(
+                id=book_id,
+                title=book.title or book_id,
+                author=book.author,
+                chapters_count=len(chapters),
+                volumes_count=len(volumes),
+                has_cover=has_cover,
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to load catalog entry for {book_id}: {e}")
+
+    return catalog
