@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Eye, Sparkles, Tag, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useDragControls } from 'motion/react';
 import { M3ShapeBadge, pickShapeForKey, pickToneForKey } from '../../components/M3Shapes';
 import { useI18n } from '../../i18n/I18nContext';
 import { formatChapterRef } from '../../services/codex';
@@ -27,15 +27,54 @@ export function CharacterQuickSheet({
   onSelectRelated,
 }: CharacterQuickSheetProps) {
   const { t } = useI18n();
+  const dragControls = useDragControls();
+  const pushedHistoryRef = useRef(false);
+  const closedByPopstateRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
+  // Close on Escape
   useEffect(() => {
     if (!character) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [character, onClose]);
+  }, [character]);
+
+  // Support Android / browser Back button to dismiss the sheet instead of leaving the page
+  useEffect(() => {
+    if (!character) return;
+    closedByPopstateRef.current = false;
+
+    if (!pushedHistoryRef.current) {
+      window.history.pushState({ bwQuickSheet: true }, '');
+      pushedHistoryRef.current = true;
+    }
+
+    const handlePopState = () => {
+      if (pushedHistoryRef.current) {
+        pushedHistoryRef.current = false;
+        closedByPopstateRef.current = true;
+        onCloseRef.current();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [Boolean(character)]);
+
+  // Pop our synthetic history entry when closed manually (not via Back or Link navigation)
+  const handleManualClose = () => {
+    if (pushedHistoryRef.current && !closedByPopstateRef.current) {
+      pushedHistoryRef.current = false;
+      window.history.back();
+    }
+    onClose();
+  };
 
   const chaptersById = useMemo(
     () => new Map(chapters.map((c) => [c.id, c])),
@@ -73,71 +112,86 @@ export function CharacterQuickSheet({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={M3_SPRINGS.effects.fast}
-            onClick={onClose}
+            transition={M3_SPRINGS.effects.default}
+            onClick={handleManualClose}
             className="fixed inset-0 bg-black/45 backdrop-blur-[2px]"
           />
 
-          {/* Adaptive M3 Sheet: Bottom Sheet on mobile, Side Sheet on desktop */}
+          {/* Adaptive M3 Sheet: swipe-down Bottom Sheet on mobile, Side Sheet on desktop */}
           <motion.aside
             role="dialog"
             aria-modal="true"
             aria-label={character.name}
-            initial={{ y: 40, opacity: 0 }}
+            drag="y"
+            dragControls={dragControls}
+            dragListener={false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0, bottom: 0.45 }}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 90 || info.velocity.y > 400) {
+                handleManualClose();
+              }
+            }}
+            initial={{ y: 48, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 32, opacity: 0 }}
+            exit={{ y: 40, opacity: 0 }}
             transition={{
-              y: M3_SPRINGS.spatial.fast,
-              opacity: M3_SPRINGS.effects.fast,
+              y: M3_SPRINGS.spatial.default,
+              opacity: M3_SPRINGS.effects.default,
             }}
             className="relative z-10 flex max-h-[84vh] w-full flex-col overflow-hidden rounded-t-[32px] border-t border-outline-variant/60 bg-surface-container-low shadow-2xl sm:h-full sm:max-h-none sm:w-[440px] sm:rounded-t-none sm:rounded-l-[32px] sm:border-t-0 sm:border-l"
           >
-            {/* Mobile drag handle */}
-            <div className="flex justify-center pt-3 pb-1 sm:hidden">
-              <span className="h-1 w-10 rounded-full bg-outline-variant" />
-            </div>
-
-            {/* Sheet Header */}
-            <div className="flex items-start justify-between gap-3 border-b border-outline-variant/40 px-5 py-4 sm:px-6 sm:py-5">
-              <div className="flex min-w-0 items-center gap-3.5">
-                <M3ShapeBadge
-                  variant={pickShapeForKey(character.id)}
-                  className={`h-14 w-14 shrink-0 ${pickToneForKey(character.id)}`}
-                  contentClassName="text-xl font-extrabold"
-                >
-                  {character.name.trim().charAt(0).toUpperCase() || '?'}
-                </M3ShapeBadge>
-
-                <div className="min-w-0 space-y-1">
-                  <h2 className="truncate text-xl font-extrabold tracking-tight text-on-surface">
-                    {character.name}
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {character.role_tier && (
-                      <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-on-primary">
-                        {t.codex.roles[character.role_tier as keyof typeof t.codex.roles] ??
-                          character.role_tier}
-                      </span>
-                    )}
-                    {character.first_chapter && (
-                      <span className="font-mono text-[11px] text-on-surface-variant">
-                        {t.codex.firstSeen}: {fmtChapter(character.first_chapter)}
-                      </span>
-                    )}
-                  </div>
-                </div>
+            {/* Mobile swipe handle + header trigger */}
+            <div
+              onPointerDown={(e) => dragControls.start(e)}
+              className="touch-none select-none cursor-grab active:cursor-grabbing"
+            >
+              <div className="flex justify-center pt-3 pb-1 sm:hidden">
+                <span className="h-1.5 w-11 rounded-full bg-outline-variant" />
               </div>
 
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.9 }}
-                transition={M3_SPRINGS.spatial.fast}
-                onClick={onClose}
-                aria-label={t.reader.closeSheet}
-                className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest"
-              >
-                <X className="h-4 w-4" />
-              </motion.button>
+              <div className="flex items-start justify-between gap-3 border-b border-outline-variant/40 px-5 py-4 sm:px-6 sm:py-5">
+                <div className="flex min-w-0 items-center gap-3.5">
+                  <M3ShapeBadge
+                    variant={pickShapeForKey(character.id)}
+                    className={`h-14 w-14 shrink-0 ${pickToneForKey(character.id)}`}
+                    contentClassName="text-xl font-extrabold"
+                  >
+                    {character.name.trim().charAt(0).toUpperCase() || '?'}
+                  </M3ShapeBadge>
+
+                  <div className="min-w-0 space-y-1">
+                    <h2 className="truncate text-xl font-extrabold tracking-tight text-on-surface">
+                      {character.name}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {character.role_tier && (
+                        <span className="rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-bold text-on-primary">
+                          {t.codex.roles[character.role_tier as keyof typeof t.codex.roles] ??
+                            character.role_tier}
+                        </span>
+                      )}
+                      {character.first_chapter && (
+                        <span className="font-mono text-[11px] text-on-surface-variant">
+                          {t.codex.firstSeen}: {fmtChapter(character.first_chapter)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.9 }}
+                  transition={M3_SPRINGS.spatial.fast}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={handleManualClose}
+                  aria-label={t.reader.closeSheet}
+                  className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest"
+                >
+                  <X className="h-4 w-4" />
+                </motion.button>
+              </div>
             </div>
 
             {/* Scrollable Body */}
@@ -177,7 +231,7 @@ export function CharacterQuickSheet({
               )}
 
               {character.description && (
-                <p className="text-sm leading-relaxed text-on-surface whitespace-pre-line">
+                <p className="text-sm leading-relaxed text-on-surface whitespace-pre-line break-words">
                   {character.description}
                 </p>
               )}
@@ -230,6 +284,9 @@ export function CharacterQuickSheet({
             <div className="border-t border-outline-variant/40 bg-surface-container p-4 sm:px-6">
               <Link
                 to={`/books/${encodedBook}/characters/${encodeURIComponent(character.id)}${asOfQuery}`}
+                onClick={() => {
+                  pushedHistoryRef.current = false;
+                }}
                 className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-bold text-on-primary transition-opacity hover:opacity-95"
               >
                 <span>{t.reader.openFullDossier}</span>

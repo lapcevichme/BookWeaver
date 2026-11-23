@@ -30,7 +30,7 @@ export const dictionaries: Record<Locale, Dictionary> = {
     },
     bookmark: {
       shieldActive: 'Спойлер-щит',
-      volumeShort: 'Т.',
+      volumeShort: 'Том',
       volumeFull: 'Том',
       chapterShort: 'Гл.',
       chapterFull: 'Глава',

@@ -61,6 +61,7 @@ const LONE_PUNCTUATION_RE = /^[.,;:!?…\-–—]+$/;
 
 function cleanInlineMarkdown(line: string): string {
   return line
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1')
     .replace(/\\([*_~`#\[\]()>+\-!])/g, '$1')
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/__(.+?)__/g, '$1')

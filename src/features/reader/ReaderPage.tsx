@@ -470,7 +470,7 @@ export function ReaderPage() {
               y: M3_SPRINGS.spatial.fast,
               opacity: M3_SPRINGS.effects.default,
             }}
-            className={`mx-auto ${COLUMN_WIDTH_CLASS[prefs.columnWidth]} space-y-4 text-on-surface`}
+            className={`mx-auto ${COLUMN_WIDTH_CLASS[prefs.columnWidth]} space-y-4 break-words [overflow-wrap:anywhere] text-on-surface`}
             style={{
               fontSize: `${prefs.fontSize}px`,
               lineHeight: LINE_HEIGHT_VALUE[prefs.lineHeight],

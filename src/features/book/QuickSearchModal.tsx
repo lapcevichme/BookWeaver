@@ -115,9 +115,9 @@ export function QuickSearchModal({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.97 }}
             transition={{
-              y: M3_SPRINGS.spatial.fast,
-              scale: M3_SPRINGS.spatial.fast,
-              opacity: M3_SPRINGS.effects.fast,
+              y: M3_SPRINGS.spatial.default,
+              scale: M3_SPRINGS.spatial.default,
+              opacity: M3_SPRINGS.effects.default,
             }}
             className="relative z-10 w-full max-w-lg overflow-hidden rounded-[28px] border border-outline-variant/70 bg-surface-container-high shadow-2xl"
           >
