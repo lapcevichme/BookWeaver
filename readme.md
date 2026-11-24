@@ -9,11 +9,7 @@
 
 ## Быстрый старт (Lite + Web в Docker)
 
-Предполагается, что рядом с этим репозиторием склонирован фронтенд `../BookWeaverWeb`:
-
 ```bash
-git clone https://github.com/lapcevichme/BookWeaverWeb ../BookWeaverWeb
-
 # 1. Подготовьте книгу через CLI (или положите готовые проекты в ./output)
 cd backend
 uv run python cli.py import ../input/books/my_book.epub my_book

@@ -21,7 +21,7 @@ services:
 
   frontend:
     build:
-      context: ../BookWeaverWeb
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: bookweaver_lite_frontend
     ports:
