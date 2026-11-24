@@ -3,7 +3,7 @@ name: bookweaver-lite
 services:
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile.lite
     container_name: bookweaver_lite_backend
     environment:

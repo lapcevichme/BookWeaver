@@ -3,7 +3,7 @@ name: bookweaver
 services:
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: bookweaver_backend
     ports:

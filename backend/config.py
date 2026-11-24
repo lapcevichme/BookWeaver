@@ -2,16 +2,23 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+BASE_DIR = Path(__file__).parent.resolve()
+DATA_ROOT = Path(
+    os.environ.get(
+        "BOOKWEAVER_DATA_DIR",
+        str(BASE_DIR.parent if (BASE_DIR.parent / "docker-compose.lite.yml").exists() else BASE_DIR),
+    )
+).resolve()
+
+load_dotenv(DATA_ROOT / ".env")
 load_dotenv()
 
-BASE_DIR = Path(__file__).parent.resolve()
-
 # Input / Output
-INPUT_DIR = BASE_DIR / "input"
-OUTPUT_DIR = BASE_DIR / "output"
-EXPORT_DIR = BASE_DIR / "export"
-TEMP_DIR = BASE_DIR / "temp"
-STORAGE_DIR = BASE_DIR / "storage"
+INPUT_DIR = DATA_ROOT / "input"
+OUTPUT_DIR = DATA_ROOT / "output"
+EXPORT_DIR = DATA_ROOT / "export"
+TEMP_DIR = DATA_ROOT / "temp"
+STORAGE_DIR = DATA_ROOT / "storage"
 BOOKS_DIR_NAME = "books"
 
 # RAW
@@ -19,12 +26,12 @@ RAW_AUDIO_DIR = INPUT_DIR / "raw_audio"
 RAW_TEXT_DIR = INPUT_DIR / "raw_text"
 
 # Logging
-LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR = DATA_ROOT / "logs"
 LOG_APP_FILE = LOGS_DIR / "app.log"
 LOG_DEBUG_FILE = LOGS_DIR / "debug.log"
 
 # Settings
-SETTINGS_FILE = BASE_DIR / "settings.json"
+SETTINGS_FILE = DATA_ROOT / "settings.json"
 
 # Assets
 ASSETS_DIR = BASE_DIR / "assets"

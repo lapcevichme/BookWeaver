@@ -15,8 +15,10 @@
 git clone https://github.com/lapcevichme/BookWeaverWeb ../BookWeaverWeb
 
 # 1. Подготовьте книгу через CLI (или положите готовые проекты в ./output)
-uv run python cli.py import input/books/my_book.epub my_book
+cd backend
+uv run python cli.py import ../input/books/my_book.epub my_book
 uv run python cli.py run my_book --skip-scenario --skip-speakers
+cd ..
 
 # 2. Запустите бэкенд (lite) + веб-читалку
 docker compose -f docker-compose.lite.yml up --build -d

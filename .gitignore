@@ -17,9 +17,11 @@ input/
 output/
 export/
 assets/ambient/*.mp3
+backend/assets/ambient/*.mp3
 storage/
 was_in_root/
 /utils/mock_input/
+/backend/utils/mock_input/
 # Сгенерированные файлы в корне проекта
 *.wav
 *.zip
