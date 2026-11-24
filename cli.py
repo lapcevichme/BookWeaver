@@ -252,6 +252,16 @@ def cmd_run(args) -> dict:
 def cmd_catchup(args) -> dict:
     _repo(args.book)
     from pipelines.fast_catchup import FastCatchupPipeline
+    if args.dry_run:
+        plan = FastCatchupPipeline.plan(
+            book_name=args.book,
+            until_chapter=args.until_chapter,
+            until_volume=args.until_volume,
+            batch_max_words=args.batch_words,
+            batch_max_chapters=args.batch_chapters,
+            run_boundary_audit=not args.no_audit,
+        )
+        return {"book": args.book, "result": "ok", **plan}
     pipe = FastCatchupPipeline(_app().model_manager)
     res = pipe.run(
         book_name=args.book,
@@ -833,6 +843,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--batch-words", type=int, default=18_000, help="целевой размер батча в словах (по умолчанию 18000)")
     p.add_argument("--batch-chapters", type=int, default=25, help="максимум глав в одном батче (по умолчанию 25)")
     p.add_argument("--no-audit", action="store_true", help="пропустить аудит плейсхолдеров и связей личностей на границе K")
+    p.add_argument("--dry-run", action="store_true", help="показать план батчей и оценку стоимости/времени без вызовов LLM")
     p.set_defaults(func=cmd_catchup)
 
     p = sub.add_parser("tts", parents=[common], help="озвучка глав")

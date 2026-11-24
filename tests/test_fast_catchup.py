@@ -200,12 +200,13 @@ def test_catchup_cli_parser():
     import cli
 
     parser = cli.build_parser()
-    args = parser.parse_args(["catchup", "my_book", "--until-volume", "3", "--batch-words", "20000", "--no-audit"])
+    args = parser.parse_args(["catchup", "my_book", "--until-volume", "3", "--batch-words", "20000", "--no-audit", "--dry-run"])
     assert args.command == "catchup"
     assert args.book == "my_book"
     assert args.until_volume == 3
     assert args.batch_words == 20000
     assert args.no_audit is True
+    assert args.dry_run is True
 
 
 def test_mixed_volume_summary_combines_catchup_recaps_and_chapter_summaries():

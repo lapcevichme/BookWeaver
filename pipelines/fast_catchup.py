@@ -289,9 +289,92 @@ def format_fast_catchup_prompt(
 
 
 class FastCatchupPipeline:
+    # Эмпирические ориентиры по замерам DeepSeek V4.1 Flash (reasoning: "none", DeepInfra fp8)
+    EST_COST_PER_1K_WORDS_USD = 0.00032
+    EST_COST_PER_VOLUME_SUMMARY_USD = 0.0010
+    EST_COST_BOUNDARY_AUDIT_USD = 0.013
+    EST_SECONDS_PER_BATCH = 25.0
+    EST_SECONDS_PER_VOLUME_SUMMARY = 22.0
+    EST_SECONDS_BOUNDARY_AUDIT = 90.0
+
     def __init__(self, model_manager: ModelManager):
         self.model_manager = model_manager
         self.stats: Counter = Counter()
+
+    @classmethod
+    def plan(
+        cls,
+        book_name: str,
+        until_chapter: Optional[str] = None,
+        until_volume: Optional[int] = None,
+        batch_max_words: int = DEFAULT_BATCH_MAX_WORDS,
+        batch_max_chapters: int = DEFAULT_BATCH_MAX_CHAPTERS,
+        run_boundary_audit: bool = True,
+    ) -> Dict[str, Any]:
+        """Рассчитывает план нарезки батчей, объём слов и оценку стоимости/времени без вызовов LLM."""
+        repo = BookRepository(book_name)
+        all_story = [c for c in repo.get_all_chapters() if not getattr(c, "is_service", False)]
+        target_chapters = select_catchup_chapters(all_story, until_chapter=until_chapter, until_volume=until_volume)
+        if not target_chapters:
+            raise ValueError(f"В проекте '{book_name}' нет сюжетных глав для fast-catchup.")
+
+        pending_chapters = [c for c in target_chapters if not c.characters_state]
+        already_done = len(target_chapters) - len(pending_chapters)
+
+        text_cache: Dict[str, str] = {}
+
+        def load_text(ch: Chapter) -> str:
+            if ch.id not in text_cache:
+                text_cache[ch.id] = repo.get_chapter_text(ch.id)
+            return text_cache[ch.id]
+
+        batches = build_catchup_batches(
+            pending_chapters,
+            text_loader=load_text,
+            batch_max_words=batch_max_words,
+            batch_max_chapters=batch_max_chapters,
+        )
+        pending_words = sum(b.word_count for b in batches)
+        volumes_in_pending = sorted({b.volume_num for b in batches})
+        missing_vol_summaries = sum(1 for v in volumes_in_pending if not repo.get_volume_summary(v))
+
+        est_cost = (
+            (pending_words / 1000.0) * cls.EST_COST_PER_1K_WORDS_USD
+            + missing_vol_summaries * cls.EST_COST_PER_VOLUME_SUMMARY_USD
+            + (cls.EST_COST_BOUNDARY_AUDIT_USD if (run_boundary_audit and batches) else 0.0)
+        )
+        est_seconds = (
+            len(batches) * cls.EST_SECONDS_PER_BATCH
+            + missing_vol_summaries * cls.EST_SECONDS_PER_VOLUME_SUMMARY
+            + (cls.EST_SECONDS_BOUNDARY_AUDIT if (run_boundary_audit and batches) else 0.0)
+        )
+
+        return {
+            "book_name": book_name,
+            "dry_run": True,
+            "until_chapter": target_chapters[-1].id,
+            "target_chapters": len(target_chapters),
+            "already_done_chapters": already_done,
+            "pending_chapters": len(pending_chapters),
+            "pending_words": pending_words,
+            "batches_count": len(batches),
+            "volumes_to_summarize": missing_vol_summaries,
+            "boundary_audit": run_boundary_audit,
+            "estimated_cost_usd": round(est_cost, 4),
+            "estimated_minutes": round(est_seconds / 60.0, 1),
+            "batches": [
+                {
+                    "index": i + 1,
+                    "volume": b.volume_num,
+                    "label": b.label,
+                    "chapters": len(b.chapters),
+                    "words": b.word_count,
+                    "start": b.start_chapter_id,
+                    "end": b.end_chapter_id,
+                }
+                for i, b in enumerate(batches)
+            ],
+        }
 
     def run(
         self,
