@@ -38,6 +38,10 @@ COMFY_WORKFLOW_FAST = ASSETS_DIR / "workflow_fast.json"
 COMFY_WORKFLOW_HQ = ASSETS_DIR / "workflow_hq.json"
 VOICES_DIR = STORAGE_DIR / "voices"
 
+# Режим работы: "full" (всё включая сценарии/TTS) или "lite" (только персонажи, пересказы, catchup, identity)
+BOOKWEAVER_MODE = os.environ.get("BOOKWEAVER_MODE", "full").strip().lower()
+IS_LITE_MODE = BOOKWEAVER_MODE == "lite"
+
 # Api (Deprecated)
 SERVER_PORT = int(os.environ.get("SERVER_PORT", 8000))
 

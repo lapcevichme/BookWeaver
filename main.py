@@ -12,17 +12,13 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+import config
 from services.model_manager import ModelManager
 
 from pipelines.character_analysis import CharacterAnalysisPipeline
-from pipelines.scenario_generation import ScenarioGenerationPipeline
-from pipelines.speaker_resolution import SpeakerResolutionPipeline
 from pipelines.summary_generation import SummaryGenerationPipeline
-from pipelines.tts_pipeline import TTSPipeline
-from pipelines.image_generation_pipeline import (ImageGenerationPipeline)
 
 from utils.book_converter import BookConverter
-from utils.exporter import BookExporter
 from core.errors import PipelineIncompleteError, TaskCancelledException
 
 logger = logging.getLogger(__name__)
@@ -32,17 +28,33 @@ class Application:
     """
     Единая точка входа для всей бизнес-логики BookWeaver.
     Используется и CLI, и API сервером.
+    В режиме lite=True (или BOOKWEAVER_MODE=lite) инициализирует только персонажей и пересказы.
     """
-    def __init__(self, model_manager: ModelManager):
+    def __init__(self, model_manager: ModelManager, lite: Optional[bool] = None):
         self.model_manager = model_manager
+        self.lite = config.IS_LITE_MODE if lite is None else bool(lite)
         self._initialize_pipelines()
 
     def _initialize_pipelines(self):
-        logger.info("Инициализация AI-пайплайнов...")
+        logger.info("Инициализация AI-пайплайнов..." + (" [LITE]" if self.lite else ""))
         self.character_pipeline = CharacterAnalysisPipeline(self.model_manager)
+        self.summary_pipeline = SummaryGenerationPipeline(self.model_manager)
+
+        if self.lite:
+            self.scenario_pipeline = None
+            self.speaker_pipeline = None
+            self.tts_pipeline = None
+            self.image_pipeline = None
+            logger.info("Пайплайны (lite: персонажи и пересказы) готовы к работе.")
+            return
+
+        from pipelines.scenario_generation import ScenarioGenerationPipeline
+        from pipelines.speaker_resolution import SpeakerResolutionPipeline
+        from pipelines.tts_pipeline import TTSPipeline
+        from pipelines.image_generation_pipeline import ImageGenerationPipeline
+
         self.scenario_pipeline = ScenarioGenerationPipeline(self.model_manager)
         self.speaker_pipeline = SpeakerResolutionPipeline(self.model_manager)
-        self.summary_pipeline = SummaryGenerationPipeline(self.model_manager)
         self.tts_pipeline = TTSPipeline(self.model_manager)
         self.image_pipeline = ImageGenerationPipeline()
 
@@ -77,6 +89,10 @@ class Application:
             logger.info(f"[{stage}] {message}")
 
         logger.info(f"Запуск генерации для '{book_name}' (max_chapters={max_chapters})")
+        if self.lite:
+            skip_scenario = True
+            skip_speakers = True
+            generate_images = False
         from core.book_repository import BookRepository
         from core import path_manager
         
@@ -205,5 +221,6 @@ class Application:
 
     def export_book(self, book_name: str) -> Optional[Path]:
         logger.info(f"Запуск экспорта для: {book_name}")
+        from utils.exporter import BookExporter
         exporter = BookExporter(book_name)
         return exporter.export()

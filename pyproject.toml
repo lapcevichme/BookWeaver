@@ -13,14 +13,18 @@ dependencies = [
     "openai>=1.50.0",
     "pillow>=12.3.0",
     "pydantic>=2.9.0",
-    "pydub>=0.25.1",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.32",
-    "pywhispercpp>=1.5.0",
     "requests>=2.32.0",
-    "soundfile>=0.12.0",
     "sqlmodel>=0.0.22",
     "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+audio = [
+    "pydub>=0.25.1",
+    "pywhispercpp>=1.5.0",
+    "soundfile>=0.12.0",
 ]
 
 [tool.uv]

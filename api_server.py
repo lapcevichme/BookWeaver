@@ -31,37 +31,46 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 50)
 
         # Создание необходимых папок
-        for path in [config.INPUT_DIR, config.OUTPUT_DIR, config.VOICES_DIR, config.AMBIENT_DIR]:
+        dirs = [config.INPUT_DIR, config.OUTPUT_DIR]
+        if not config.IS_LITE_MODE:
+            dirs.extend([config.VOICES_DIR, config.AMBIENT_DIR])
+        for path in dirs:
             path.mkdir(parents=True, exist_ok=True)
         (config.INPUT_DIR / "books").mkdir(parents=True, exist_ok=True)
 
         logger.info("Инициализация очереди задач...")
         init_tasks_db()
-        
-        logger.info("Инициализация системной БД и синхронизация ассетов...")
-        from tools.migrate_assets_to_sqlite import sync_global_assets
-        sync_global_assets()
-        
+
+        if not config.IS_LITE_MODE:
+            logger.info("Инициализация системной БД и синхронизация ассетов...")
+            from tools.migrate_assets_to_sqlite import sync_global_assets
+            sync_global_assets()
+
         logger.info("=" * 50)
         logger.info(f"Bearer Token: {state.SERVER_TOKEN}")
         logger.info("=" * 50)
 
         logger.info("Инициализация AI-пайплайнов...")
-        state.app_pipelines = Application(model_manager=state.model_manager)
-        
+        state.app_pipelines = Application(model_manager=state.model_manager, lite=config.IS_LITE_MODE)
+
         # Регистрация обработчиков задач в очереди
         worker.register_handler(TaskType.PROCESS_BOOK, state.app_pipelines.character_pipeline.run)
         worker.register_handler(TaskType.GENERATE_SUMMARY, state.app_pipelines.summary_pipeline.run)
-        worker.register_handler(TaskType.GENERATE_SCENARIO, state.app_pipelines.scenario_pipeline.run)
-        worker.register_handler(TaskType.GENERATE_TTS, state.app_pipelines.tts_pipeline.run)
-        worker.register_handler(TaskType.GENERATE_IMAGES, state.app_pipelines.image_pipeline.run)
         worker.register_handler(TaskType.FULL_CYCLE, state.app_pipelines.run_full_cycle)
-        
+        if not config.IS_LITE_MODE:
+            worker.register_handler(TaskType.GENERATE_SCENARIO, state.app_pipelines.scenario_pipeline.run)
+            worker.register_handler(TaskType.GENERATE_TTS, state.app_pipelines.tts_pipeline.run)
+            worker.register_handler(TaskType.GENERATE_IMAGES, state.app_pipelines.image_pipeline.run)
+
         # Запуск фонового воркера
         worker.start()
 
         state.SERVER_STATUS.status = ServerStateEnum.READY
-        state.SERVER_STATUS.message = "AI pipelines initialized successfully."
+        state.SERVER_STATUS.message = (
+            "BookWeaver Lite ready (characters & summaries mode)."
+            if config.IS_LITE_MODE
+            else "AI pipelines initialized successfully."
+        )
         logger.info(f"{state.SERVER_STATUS.message}")
         
         yield # Работа сервера

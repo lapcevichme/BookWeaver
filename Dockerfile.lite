@@ -1,0 +1,25 @@
+# Лёгкая сборка BookWeaver Backend (только персонажи, пересказы, fast-catchup, identity/RAG).
+# Без сценариев, TTS, Whisper и аудио-зависимостей.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    BOOKWEAVER_MODE=lite \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --no-dev --no-install-project
+
+COPY api ./api
+COPY core ./core
+COPY pipelines ./pipelines
+COPY services ./services
+COPY utils ./utils
+COPY config.py main.py api_server.py cli.py ./
+
+EXPOSE 8000
+
+CMD ["uv", "run", "python", "api_server.py"]

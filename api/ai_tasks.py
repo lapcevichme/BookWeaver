@@ -1,6 +1,7 @@
 import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
+import config
 from api import state
 from api.models import TaskStatusResponse, BookTaskRequest, ChapterTaskRequest
 from core.task_queue import TaskType
@@ -11,6 +12,14 @@ router = APIRouter(
     prefix="/api/v1/tasks/ai",
     tags=["AI Processing Tasks"]
 )
+
+
+def _require_full_mode(feature: str) -> None:
+    if config.IS_LITE_MODE:
+        raise HTTPException(
+            status_code=501,
+            detail=f"{feature} недоступно в режиме BOOKWEAVER_MODE=lite (только персонажи и пересказы).",
+        )
 
 @router.post("/analyze-characters", response_model=TaskStatusResponse, status_code=202)
 async def start_character_analysis(req: BookTaskRequest):
@@ -37,6 +46,7 @@ async def start_summary_generation(req: BookTaskRequest):
 @router.post("/generate-scenario", response_model=TaskStatusResponse, status_code=202)
 async def start_scenario_generation(req: ChapterTaskRequest):
     """Генерирует сценарий для одной главы (LLM + Sound Design)."""
+    _require_full_mode("Генерация сценария")
     return state.start_task(
         task_type=TaskType.GENERATE_SCENARIO,
         book_id=req.book_name,
@@ -49,6 +59,7 @@ async def start_scenario_generation(req: ChapterTaskRequest):
 @router.post("/synthesize-tts", response_model=TaskStatusResponse, status_code=202)
 async def start_tts_synthesis(req: ChapterTaskRequest):
     """Озвучивает главу (TTS)."""
+    _require_full_mode("Синтез речи (TTS)")
     return state.start_task(
         task_type=TaskType.GENERATE_TTS,
         book_id=req.book_name,
