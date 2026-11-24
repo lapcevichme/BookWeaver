@@ -123,7 +123,7 @@ class TestDuplicateCandidates(unittest.TestCase):
         self.assertEqual(cand["y"].name, "А-Дуо")
         self.assertEqual(cand["pattern"], "gap_fill")
         self.assertEqual(cand["chapter"], "vol_1_chap_28")
-        self.assertIn("общая роль: супруга", cand["evidence"])
+        self.assertIn("общее слово в имени: супруга", cand["evidence"])
 
     def test_co_occurrence_rejected(self):
         # Если оба персонажа появляются в одной главе — это антипаттерн (не дубль)
@@ -353,14 +353,28 @@ class TestIdentityPipeline(unittest.TestCase):
 
     def test_low_confidence_link_is_dismissed(self):
         il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "alias_collision", "")
-        # LLM judge says 'A', but confidence is 0.50 (< 0.85)
-        llm = _llm({"A": 0.50}, il.LlmIdentityJudgement(answer="A"))
+        # И logprobs низкие (< 0.85), и сам судья не уверен (confidence="low") -> dismissed
+        llm = _llm({"A": 0.50}, il.LlmIdentityJudgement(answer="A", confidence="low"))
         counts = self._run(llm, scan=False)
         self.assertEqual(counts["dismissed"], 1)
         self.assertEqual(counts["suggested"], 0)
         link = self._links()[0]
         self.assertEqual(link.status, "dismissed")
         self.assertEqual(link.confidence, 0.50)
+
+    def test_confident_judge_overrides_low_logprob_to_suggested(self):
+        il.add_candidate(self.repo, self.shisui, self.loulan, "vol_4_chap_14", "secret_scan", "")
+        # Нерассуждающий logprob ошибся (H=0.80, A=0.003), но судья с reasoning уверенно доказал A -> suggested, не dismissed
+        llm = _llm(
+            {"H": 0.80, "A": 0.003},
+            il.LlmIdentityJudgement(answer="A", confidence="high", evidence="Доказано по главам."),
+        )
+        counts = self._run(llm, scan=False)
+        self.assertEqual(counts["dismissed"], 0)
+        self.assertEqual(counts["suggested"], 1)
+        link = self._links()[0]
+        self.assertEqual(link.status, "suggested")
+        self.assertEqual(link.relation, "same_person")
 
     def test_scan_adds_candidates_from_secret_facts(self):
         self.shisui.facts = [{"id": "f1", "fact": "На самом деле она — Лоулан", "kind": "secret",

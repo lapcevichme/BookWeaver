@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlmodel import select
 
 from core.book_repository import BookRepository
@@ -110,9 +110,21 @@ H — это разные люди, связи личностей нет (род
 """
 
 
+JUDGE_CONFIDENCE_LEVELS = frozenset({"high", "medium", "low"})
+
+
 class LlmIdentityJudgement(BaseModel):
     answer: str = Field(..., description="Буква A-H")
+    confidence: str = Field("medium", description="Уверенность судьи: high | medium | low")
     evidence: str = Field("", description="Коротко, на что опирается ответ, с номерами глав")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_confidence(cls, data):
+        if isinstance(data, dict) and data.get("confidence") is not None:
+            val = str(data["confidence"]).strip().lower()
+            data["confidence"] = val if val in JUDGE_CONFIDENCE_LEVELS else "medium"
+        return data
 
 
 class LlmImpersonationScope(BaseModel):
@@ -132,18 +144,21 @@ class LlmSecretScan(BaseModel):
 
 
 def score_pair(llm, x: Character, y: Character) -> dict:
-    """Оценка пары: {'letter', 'scores', 'confidence', 'judged', 'evidence'}."""
+    """Оценка пары: {'letter', 'scores', 'confidence', 'judge_confidence', 'judged', 'evidence'}."""
     prompt = pair_prompt(x, y)
     scores = llm.choice_probabilities(prompt + "Ответь одной буквой.", LETTERS, prompt_type="identity_score") or {}
     top = next(iter(scores), None)
-    letter, evidence, judged = top, "", False
+    letter, evidence, judged, judge_confidence = top, "", False, None
     if top is None or top != "H" or scores[top] < CONFIDENCE_THRESHOLD:
         verdict = llm.call_for_pydantic(
             LlmIdentityJudgement,
-            prompt + 'Подумай, затем ответь JSON: {"answer": "<буква>", "evidence": "коротко, с номерами глав"}',
+            prompt + 'Подумай, затем ответь JSON: {"answer": "<буква>", "confidence": "high|medium|low", "evidence": "коротко, с номерами глав"}',
             prompt_type="identity_judge")
         if verdict and verdict.answer.strip().upper()[:1] in OPTIONS:
-            letter, evidence, judged = verdict.answer.strip().upper()[:1], verdict.evidence, True
+            letter = verdict.answer.strip().upper()[:1]
+            evidence = verdict.evidence
+            judge_confidence = verdict.confidence
+            judged = True
     confidence = scores.get(letter) if (scores and letter in scores) else None
     if letter in ("A", "B", "G") and scores:
         # same_person (A/B) и duplicate (G) означают одного и того же человека.
@@ -153,7 +168,7 @@ def score_pair(llm, x: Character, y: Character) -> dict:
         confidence = max(confidence or 0.0, same_person_pool)
 
     return {"letter": letter, "scores": scores, "confidence": confidence,
-            "judged": judged, "evidence": evidence}
+            "judge_confidence": judge_confidence, "judged": judged, "evidence": evidence}
 
 
 def scan_secret_facts(llm, chars: List[Character]) -> List[dict]:
@@ -211,19 +226,6 @@ DEDUP_STOP_WORDS = {
     'всего', 'них', 'какая', 'много', 'разве', 'три', 'эту', 'моя', 'впрочем', 'хорошо', 'свою',
     'этой', 'перед', 'иногда', 'лучше', 'чуть', 'том', 'нельзя', 'такой', 'им', 'более', 'всегда',
     'конечно', 'всю', 'между', 'глава', 'гл', 'том', 'персонаж', 'одна', 'один', 'одно', 'одного'
-}
-
-DEDUP_ROLE_WORDS = {
-    'супруга', 'супруги', 'супругой', 'супругу', 'супруг',
-    'наложница', 'наложницы', 'наложницей', 'наложницу', 'наложниц',
-    'куртизанка', 'куртизанки', 'куртизанкой', 'куртизанку',
-    'евнух', 'евнуха', 'евнухом', 'евнухе',
-    'служанка', 'служанки', 'служанкой', 'служанку',
-    'фрейлина', 'фрейлины', 'фрейлиной', 'фрейлину',
-    'хозяйка', 'хозяйки', 'хозяйкой', 'хозяйку',
-    'доктор', 'доктора', 'доктором', 'врач', 'врача',
-    'командир', 'командира', 'страж', 'стража', 'стражник',
-    'посланница', 'посланницы', 'эмиссар', 'принц', 'принцесса'
 }
 
 
@@ -416,7 +418,7 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
     """
     doc_freq = Counter()
     char_tokens: Dict[UUID, Set[str]] = {}
-    char_roles: Dict[UUID, Set[str]] = {}
+    char_name_tokens: Dict[UUID, Set[str]] = {}
 
     for c in chars:
         texts = [c.name, c.description or ''] + (c.aliases or [])
@@ -426,8 +428,7 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
         char_tokens[c.id] = tokens
         for t in tokens:
             doc_freq[t] += 1
-        name_words = _tokenize_for_dedup(c.name + ' ' + ' '.join(c.aliases or []))
-        char_roles[c.id] = {w for w in name_words if w in DEDUP_ROLE_WORDS}
+        char_name_tokens[c.id] = _tokenize_for_dedup(c.name + ' ' + ' '.join(c.aliases or []))
 
     N = len(chars)
     idf = {t: math.log((N - df + 0.5) / (df + 0.5) + 1.0) for t, df in doc_freq.items()}
@@ -471,11 +472,11 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
             common = char_tokens.get(minor.id, set()) & char_tokens.get(major.id, set())
             rare = [t for t in common if doc_freq[t] <= 3]
             rare_score = sum(idf[t] for t in rare)
-            shared_roles = char_roles.get(minor.id, set()) & char_roles.get(major.id, set())
-            role_bonus = 3.5 if shared_roles else 0.0
-            total_score = rare_score + role_bonus
+            shared_name_words = char_name_tokens.get(minor.id, set()) & char_name_tokens.get(major.id, set())
+            name_overlap_bonus = 3.5 if shared_name_words else 0.0
+            total_score = rare_score + name_overlap_bonus
 
-            if pattern == 'gap_fill' and (total_score >= 6.0 or (shared_roles and rare)):
+            if pattern == 'gap_fill' and (total_score >= 6.0 or (shared_name_words and rare)):
                 pass
             elif pattern == 'relay' and total_score >= 6.0:
                 pass
@@ -485,8 +486,8 @@ def find_duplicate_candidates(chars: List[Character], order: Dict[str, int],
                 continue
 
             evidence = f"паттерн {pattern} (гл. {_ch(minor_ch[0])})"
-            if shared_roles:
-                evidence += f", общая роль: {list(shared_roles)[0]}"
+            if shared_name_words:
+                evidence += f", общее слово в имени: {sorted(shared_name_words)[0]}"
             if rare:
                 evidence += f", редкие факты: {', '.join(sorted(rare)[:4])}"
 
@@ -699,10 +700,15 @@ class IdentitySuggestPipeline:
                         persona = "x" if len(_character_chapters(x)) <= len(_character_chapters(y)) else "y"
                     link.relation = relation
                     link.persona_id, link.true_id = (x.id, y.id) if persona == "x" else (y.id, x.id)
-                    if link.confidence is not None and link.confidence < CONFIDENCE_SUGGEST_MIN:
+                    judge_conf = r.get("judge_confidence")
+                    judge_confident = bool(r.get("judged")) and judge_conf in ("high", "medium")
+                    low_logprob = link.confidence is not None and link.confidence < CONFIDENCE_SUGGEST_MIN
+                    high_logprob = link.confidence is not None and link.confidence >= auto_confirm_threshold
+
+                    if low_logprob and not judge_confident:
                         link.status = "dismissed"
                         counts["dismissed"] += 1
-                    elif auto_confirm and link.confidence is not None and link.confidence >= auto_confirm_threshold:
+                    elif auto_confirm and high_logprob and (not r.get("judged") or judge_conf in ("high", "medium")):
                         link.status = "confirmed"
                         link.decided_at = datetime.now(timezone.utc)
                         link.source = f"{link.source}+auto_confirmed" if "+auto_confirmed" not in link.source else link.source
