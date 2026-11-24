@@ -3,9 +3,34 @@
 **BookWeaver Backend** — это CLI-инструмент для автоматической конвертации текстовых книг в аудиоспектакли. Скрипт
 анализирует текст, создает сценарий, синтезирует голоса и генерирует портреты персонажей.
 
-> [!IMPORTANT]
-> В данный момент проект работает через консольный интерфейс (CLI). REST API находится в процессе переработки. Активная
-> доработка планируется где-то в Июле.
+> [!TIP]
+> **BookWeaver Lite + Web (Читательский кодекс со спойлер-щитом)**
+> Для лёгкого запуска читалки, кодекса персонажей и пересказов (без TTS, Whisper и ComfyUI) используйте [docker-compose.lite.yml](docker-compose.lite.yml).
+
+## Быстрый старт (Lite + Web в Docker)
+
+Предполагается, что рядом с этим репозиторием склонирован фронтенд `../BookWeaverWeb`:
+
+```bash
+git clone https://github.com/lapcevichme/BookWeaverWeb ../BookWeaverWeb
+
+# 1. Подготовьте книгу через CLI (или положите готовые проекты в ./output)
+uv run python cli.py import input/books/my_book.epub my_book
+uv run python cli.py run my_book --skip-scenario --skip-speakers
+
+# 2. Запустите бэкенд (lite) + веб-читалку
+docker compose -f docker-compose.lite.yml up --build -d
+```
+
+Веб-интерфейс откроется на `http://localhost:8080`.
+
+### Публичное демо (Read-Only режим на VPS)
+
+Для безопасной публикации готовых книг из `./output` без возможности изменений и запуска LLM:
+
+```bash
+BOOKWEAVER_READ_ONLY=true WEB_PORT=80 docker compose -f docker-compose.lite.yml up --build -d
+```
 
 ## Функциональность
 

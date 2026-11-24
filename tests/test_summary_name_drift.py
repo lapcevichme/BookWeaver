@@ -95,6 +95,7 @@ class TestSummaryNameDrift(unittest.TestCase):
     def test_pipeline_passes_characters_to_summary_prompt(self, mock_prompt_format):
         mock_prompt_format.return_value = "dummy prompt"
         repo = MagicMock(spec=BookRepository)
+        repo.book_id = "b"
         char = Character(
             id=uuid4(),
             book_id="b",

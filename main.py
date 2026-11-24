@@ -40,7 +40,7 @@ class Application:
         self.character_pipeline = CharacterAnalysisPipeline(self.model_manager)
         self.summary_pipeline = SummaryGenerationPipeline(self.model_manager)
 
-        if self.lite:
+        if getattr(self, "lite", False):
             self.scenario_pipeline = None
             self.speaker_pipeline = None
             self.tts_pipeline = None
@@ -89,7 +89,7 @@ class Application:
             logger.info(f"[{stage}] {message}")
 
         logger.info(f"Запуск генерации для '{book_name}' (max_chapters={max_chapters})")
-        if self.lite:
+        if getattr(self, "lite", False):
             skip_scenario = True
             skip_speakers = True
             generate_images = False

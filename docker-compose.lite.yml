@@ -1,0 +1,31 @@
+name: bookweaver-lite
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.lite
+    container_name: bookweaver_lite_backend
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BOOKWEAVER_MODE=lite
+      - BOOKWEAVER_READ_ONLY=${BOOKWEAVER_READ_ONLY:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openrouter}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+    volumes:
+      - ./output:/app/output
+      - ./input:/app/input
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../BookWeaverWeb
+      dockerfile: Dockerfile
+    container_name: bookweaver_lite_frontend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

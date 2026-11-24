@@ -41,6 +41,7 @@ VOICES_DIR = STORAGE_DIR / "voices"
 # Режим работы: "full" (всё включая сценарии/TTS) или "lite" (только персонажи, пересказы, catchup, identity)
 BOOKWEAVER_MODE = os.environ.get("BOOKWEAVER_MODE", "full").strip().lower()
 IS_LITE_MODE = BOOKWEAVER_MODE == "lite"
+IS_READ_ONLY = os.environ.get("BOOKWEAVER_READ_ONLY", "false").strip().lower() in ("true", "1", "yes")
 
 # Api (Deprecated)
 SERVER_PORT = int(os.environ.get("SERVER_PORT", 8000))

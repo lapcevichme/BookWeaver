@@ -6,8 +6,9 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 import config
 from api import state
@@ -101,6 +102,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def read_only_guard(request: Request, call_next):
+        if config.IS_READ_ONLY and request.method not in ("GET", "HEAD", "OPTIONS"):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Server is running in read-only demo mode."},
+            )
+        return await call_next(request)
+
     # Роутеры
     app.include_router(tasks.router)
     app.include_router(projects.router)
@@ -117,6 +127,8 @@ def create_app() -> FastAPI:
         return {
             "app": "BookWeaver API",
             "version": "2.0.0",
+            "mode": config.BOOKWEAVER_MODE,
+            "read_only": config.IS_READ_ONLY,
             "status": state.SERVER_STATUS.status
         }
 
