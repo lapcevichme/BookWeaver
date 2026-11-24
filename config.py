@@ -54,7 +54,7 @@ _OPENROUTER_REASONING_EFFORT_DEFAULT = os.environ.get("OPENROUTER_REASONING_EFFO
 # sound_design с reasoning: без него хуже подбор SFX.
 _OPENROUTER_REASONING_BY_STAGE_DEFAULT = os.environ.get(
     "OPENROUTER_REASONING_BY_STAGE",
-    '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low", "fast_catchup": "none", "placeholder_audit": "low", "identity_scan": "low", "identity_judge": "low", "identity_scope": "low"}'
+    '{"emotion_analysis": "none", "character_recon": "low", "character_patch": "low", "fast_catchup": "none", "placeholder_audit": "low", "identity_scan": "low", "identity_judge": "low", "identity_scope": "low", "identity_verify": "low"}'
 )
 _SCENARIO_MIN_COVERAGE_DEFAULT = 0.90
 # TTS Settings Defaults
@@ -100,6 +100,7 @@ _LLM_TIMEOUT_BY_STAGE_DEFAULT = {
     "identity_scan": 360,
     "identity_judge": 300,
     "identity_scope": 240,
+    "identity_verify": 240,
 }
 _SCENARIO_CHUNK_SIZE_DEFAULT = 45_000  # страховка для гигантских глав; см. docs/experiments/2026-11-06_chunking.md
 

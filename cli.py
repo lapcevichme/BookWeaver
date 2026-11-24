@@ -463,7 +463,24 @@ def cmd_identity(args) -> dict:
             args.book, scan=not args.no_scan, dedup=not args.no_dedup,
             rescore=args.rescore, auto_confirm=auto_confirm
         )
-        return {"book": args.book, "action": "suggest", **counts, "links": il.list_links(repo, args.all, blind=blind)}
+        out = {"book": args.book, "action": "suggest", **counts}
+        if getattr(args, "verify", False):
+            from pipelines.identity_verifier import IdentityVerifierPipeline
+            out["verify"] = IdentityVerifierPipeline(_app().model_manager).run(
+                args.book, max_steps=getattr(args, "max_steps", 4), dry_run=getattr(args, "dry_run", False)
+            )
+        out["links"] = il.list_links(repo, args.all, blind=blind)
+        return out
+    if args.action == "verify":
+        from pipelines.identity_verifier import IdentityVerifierPipeline
+        res = IdentityVerifierPipeline(_app().model_manager).run(
+            args.book,
+            link_prefix=args.id,
+            max_volume=getattr(args, "max_volume", None),
+            max_steps=getattr(args, "max_steps", 4),
+            dry_run=getattr(args, "dry_run", False),
+        )
+        return {"action": "verify", "blind": blind, **res}
     if args.action == "list":
         return {"book": args.book, "action": "list", "links": il.list_links(repo, args.all, blind=blind)}
     if args.action == "reveal":
@@ -793,6 +810,34 @@ def _human(command: str, result: dict) -> str:
             out = [f"Проверка guardrail схожести масок (коридор [{il.IDENTITY_SIMILARITY_MIN}, {il.IDENTITY_SIMILARITY_MAX}]):",
                    _table(result["checks"], ["id", "persona", "true", "shift", "similarity", "status"])]
             return "\n".join(out)
+        if result.get("action") == "verify":
+            blind = result.get("blind", True)
+            dry = " [DRY-RUN]" if result.get("dry_run") else ""
+            head = (f"RAG-верификация{dry}: проверено {result['checked']} "
+                    f"(confirmed: {result['confirmed']}, dismissed: {result['dismissed']}, unsure: {result['unsure']})\n")
+            rows = []
+            for o in result.get("outcomes", []):
+                rows.append({
+                    "id": o["id"],
+                    "persona": o["persona"],
+                    "true": "[🔒 Скрыто]" if blind else o["true"],
+                    "relation": o["relation"],
+                    "decision": o["decision"],
+                    "steps": o["steps"],
+                })
+            out = [head + _table(rows, ["id", "persona", "true", "relation", "decision", "steps"])]
+            if not blind:
+                for o in result.get("outcomes", []):
+                    out.append(f"\n[{o['id']}] {o['persona']} → {o['true']} ({o['decision']}, {o['steps']}ш)")
+                    if o.get("summary"):
+                        out.append(f"  итог: {o['summary']}")
+                    if o.get("evidence_for"):
+                        out.append(f"  за: {o['evidence_for']}")
+                    if o.get("evidence_against"):
+                        out.append(f"  против: {o['evidence_against']}")
+            elif rows:
+                out.append("\n💡 Включен слепой режим. Для просмотра цитат и аргументов добавьте --spoilers")
+            return "\n".join(out)
         head = ""
         if result.get("action") == "suggest":
             auto_conf = result.get('auto_confirmed', 0)
@@ -889,8 +934,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--recheck", action="store_true", help="resolve: перепроверить только подписи extra/неуверенные с учетом новых персонажей")
     p.set_defaults(func=cmd_link)
 
-    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, list, reveal, confirm, reject, policy, voice, scope, add, check")
-    p.add_argument("action", choices=["suggest", "list", "reveal", "confirm", "reject", "policy", "voice", "scope", "add", "check"])
+    p = sub.add_parser("identity", parents=[common], help="связи личностей: suggest, verify, list, reveal, confirm, reject, policy, voice, scope, add, check")
+    p.add_argument("action", choices=["suggest", "verify", "list", "reveal", "confirm", "reject", "policy", "voice", "scope", "add", "check"])
     p.add_argument("book")
     p.add_argument("--id", help="начало id связи из identity list")
     p.add_argument("--all", action="store_true", help="list/suggest: показать и отсеянные/отклоненные")
@@ -899,6 +944,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-scan", action="store_true", help="suggest: без поиска по secret-фактам, только оценить кандидатов")
     p.add_argument("--no-dedup", action="store_true", help="suggest: без поиска дубликатов базы по паттернам и фактам")
     p.add_argument("--rescore", action="store_true", help="suggest: переоценить уже оцененные (кроме решений человека)")
+    p.add_argument("--verify", action="store_true", help="suggest: сразу допроверить спорные suggested-связи через RAG-судью")
+    p.add_argument("--dry-run", action="store_true", help="verify: не менять статусы в БД, только показать вердикты RAG-судьи")
+    p.add_argument("--max-steps", type=int, default=4, help="verify: максимум шагов ReAct-судьи на одну связь (по умолчанию 4)")
+    p.add_argument("--max-volume", type=int, default=None, help="verify: ограничить поиск FTS5 главами не позже указанного тома")
     p.add_argument("--voice", choices=["separate", "shared", "switch_after_reveal"], help="policy/voice")
     p.add_argument("--shift", type=float, help="voice/add: сдвиг высоты в полутонах (+0.75, -0.5) для похожих голосов")
     p.add_argument("--chapters", help="scope: главы подмены через запятую (без --chapters — определить LLM)")

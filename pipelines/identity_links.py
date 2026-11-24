@@ -615,12 +615,17 @@ def add_candidate(repo: BookRepository, x: Character, y: Character, chapter: Opt
             link = IdentityLink(book_id=repo.book_id, persona_id=x.id, true_id=y.id, revealed_in=chapter,
                                 source=source, evidence=evidence)
         else:
-            if evidence and evidence not in link.evidence:
+            got_new_evidence = bool(evidence and evidence not in link.evidence)
+            if got_new_evidence:
                 link.evidence = f"{link.evidence}\n{evidence}".strip()
             if chapter and (not link.revealed_in or order.get(chapter, 1 << 30) < order.get(link.revealed_in, 1 << 30)):
                 link.revealed_in = chapter
             if source not in link.source.split("+"):
                 link.source = f"{link.source}+{source}"
+            # Авто-отсеянная пара получает второй шанс при появлении новых улик в более поздних главах;
+            # ручные решения человека (rejected / confirmed) никогда не перезаписываются.
+            if link.status == "dismissed" and got_new_evidence:
+                link.status = "candidate"
         session.add(link)
         session.commit()
         session.refresh(link)
