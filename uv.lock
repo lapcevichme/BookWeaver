@@ -59,14 +59,18 @@ dependencies = [
     { name = "openai" },
     { name = "pillow" },
     { name = "pydantic" },
-    { name = "pydub" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
-    { name = "pywhispercpp" },
     { name = "requests" },
-    { name = "soundfile" },
     { name = "sqlmodel" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+audio = [
+    { name = "pydub" },
+    { name = "pywhispercpp" },
+    { name = "soundfile" },
 ]
 
 [package.metadata]
@@ -79,15 +83,16 @@ requires-dist = [
     { name = "openai", specifier = ">=1.50.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pydantic", specifier = ">=2.9.0" },
-    { name = "pydub", specifier = ">=0.25.1" },
+    { name = "pydub", marker = "extra == 'audio'", specifier = ">=0.25.1" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
-    { name = "pywhispercpp", specifier = ">=1.5.0" },
+    { name = "pywhispercpp", marker = "extra == 'audio'", specifier = ">=1.5.0" },
     { name = "requests", specifier = ">=2.32.0" },
-    { name = "soundfile", specifier = ">=0.12.0" },
+    { name = "soundfile", marker = "extra == 'audio'", specifier = ">=0.12.0" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
+provides-extras = ["audio"]
 
 [[package]]
 name = "certifi"
