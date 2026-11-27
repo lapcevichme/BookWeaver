@@ -92,3 +92,5 @@ cd frontend && npm test && npm run build
 ```
 
 > Предыдущая мобильная версия проекта (Android / Kotlin) сохранена в ветке [`legacy-mobile`](../../tree/legacy-mobile) и релизе `v1.0.0`.
+>
+> История разработки проекта, эксперименты и планы на будущее — в [STORY.md](STORY.md).
